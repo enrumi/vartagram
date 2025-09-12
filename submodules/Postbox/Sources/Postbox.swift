@@ -4980,10 +4980,10 @@ public class Postbox {
                     groupId: groupId,
                     filterPredicate: filterPredicate,
                     count: count,
-                    summaryComponents: summaryComponents,
-                    inactiveSecretChatPeerIds: inactiveSecretChatPeerIds,
+                    summaryComponents: summaryComponent
                     extractCachedData: extractCachedData,
-                    accountPeerId: accountPeerId
+                    accountPeerId: accountPeerId,
+            inactiveSecretChatPeerIds: inactiveSecretChatPeerIds,
                 ).start(next: subscriber.putNext, error: subscriber.putError, completed: subscriber.putCompletion))
             }
 
@@ -5013,9 +5013,9 @@ public class Postbox {
                     count: count,
                     summaryComponents: summaryComponents,
                     userInteractive: userInteractive,
-                    inactiveSecretChatPeerIds: inactiveSecretChatPeerIds,
                     extractCachedData: extractCachedData,
-                    accountPeerId: accountPeerId
+                    accountPeerId: accountPeerId,
+            inactiveSecretChatPeerIds: inactiveSecretChatPeerIds,
                 ).start(next: subscriber.putNext, error: subscriber.putError, completed: subscriber.putCompletion))
             }
 

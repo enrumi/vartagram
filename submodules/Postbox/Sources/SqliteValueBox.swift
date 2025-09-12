@@ -2395,7 +2395,7 @@ public final class SqliteValueBox: ValueBox {
         let currentDbFilesSize = {
             assert(queue.isCurrent())
             var size: Int64 = 0
-            for fileName in dabaseFileNames {
+            for fileName in databaseFileNames {
                 size += fileSize(basePath + "/\(fileName)", useTotalFileAllocatedSize: true) ?? 0
             }
             return size
