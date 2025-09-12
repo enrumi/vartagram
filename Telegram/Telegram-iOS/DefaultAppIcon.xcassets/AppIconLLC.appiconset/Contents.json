@@ -73,11 +73,6 @@
       "scale": "2x"
     },
     {
-      "size": "76x76",
-      "idiom": "ipad",
-      "scale": "1x"
-    },
-    {
       "size": "29x29",
       "filename": "29.png",
       "idiom": "ipad",
@@ -106,6 +101,6 @@
       "filename": "40.png",
       "idiom": "ipad",
       "scale": "2x"
-    },
+    }
   ]
 }
