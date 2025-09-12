@@ -271,13 +271,6 @@
     }
 }
 
-- (void)dispose
-{
-    [_currentDisposable dispose];
-    [_disposable dispose];
-    _subscriber = nil;
-}
-
 @end
 
 @interface MTSignalCombineState : NSObject
