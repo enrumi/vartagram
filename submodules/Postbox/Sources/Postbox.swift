@@ -4980,7 +4980,7 @@ public class Postbox {
                     groupId: groupId,
                     filterPredicate: filterPredicate,
                     count: count,
-                    summaryComponents: summaryComponent,
+                    summaryComponents: summaryComponents,
                     extractCachedData: extractCachedData,
                     accountPeerId: accountPeerId,
                     inactiveSecretChatPeerIds: inactiveSecretChatPeerIds
