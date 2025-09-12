@@ -3780,11 +3780,11 @@ final class PostboxImpl {
         |> switchToLatest
     }
     
-    public func tailChatListView(groupId: PeerGroupId, filterPredicate: ChatListFilterPredicate? = nil, count: Int, summaryComponents: ChatListEntrySummaryComponents, inactiveSecretChatPeerIds: Signal<Set<PeerId>, NoError>, extractCachedData: ((CachedPeerData) -> AnyHashable?)?, accountPeerId: PeerId?) -> Signal<(ChatListView, ViewUpdateType), NoError> {
-        return self.aroundChatListView(groupId: groupId, filterPredicate: filterPredicate, index: ChatListIndex.absoluteUpperBound, count: count, summaryComponents: summaryComponents, userInteractive: true, inactiveSecretChatPeerIds: inactiveSecretChatPeerIds, extractCachedData: extractCachedData, accountPeerId: accountPeerId)
+    public func tailChatListView(groupId: PeerGroupId, filterPredicate: ChatListFilterPredicate? = nil, count: Int, summaryComponents: ChatListEntrySummaryComponents, extractCachedData: ((CachedPeerData) -> AnyHashable?)?, accountPeerId: PeerId?, inactiveSecretChatPeerIds: Signal<Set<PeerId>, NoError>) -> Signal<(ChatListView, ViewUpdateType), NoError> {
+        return self.aroundChatListView(groupId: groupId, filterPredicate: filterPredicate, index: ChatListIndex.absoluteUpperBound, count: count, summaryComponents: summaryComponents, userInteractive: true, extractCachedData: extractCachedData, accountPeerId: accountPeerId, inactiveSecretChatPeerIds: inactiveSecretChatPeerIds)
     }
     
-    public func aroundChatListView(groupId: PeerGroupId, filterPredicate: ChatListFilterPredicate? = nil, index: ChatListIndex, count: Int, summaryComponents: ChatListEntrySummaryComponents, userInteractive: Bool = false, extractCachedData: ((CachedPeerData) -> AnyHashable?)?, accountPeerId: PeerId?) -> Signal<(ChatListView, ViewUpdateType), NoError> {
+    public func aroundChatListView(groupId: PeerGroupId, filterPredicate: ChatListFilterPredicate? = nil, index: ChatListIndex, count: Int, summaryComponents: ChatListEntrySummaryComponents, userInteractive: Bool = false, extractCachedData: ((CachedPeerData) -> AnyHashable?)?, accountPeerId: PeerId?, inactiveSecretChatPeerIds: Signal<Set<PeerId>, NoError>) -> Signal<(ChatListView, ViewUpdateType), NoError> {
         return inactiveSecretChatPeerIds
         |> mapToSignal { inactiveSecretChatPeerIds in
             return self.transactionSignal(userInteractive: userInteractive, { subscriber, transaction in
