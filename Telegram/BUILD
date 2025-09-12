@@ -283,7 +283,7 @@ filegroup(
     name = "AppIcons",
     srcs = glob([
         "Telegram-iOS/AppIcons.xcassets/**/*",
-    ], exclude = ["Telegram-iOS/AppIcons.xcassets/**/.*"]),
+    ], exclude = ["Telegram-iOS/AppIcons.xcassets/**/.*"], allow_empty=True),
 )
 
 filegroup(
@@ -297,7 +297,7 @@ filegroup(
     name = "DefaultIcon",
     srcs = glob([
         "Telegram-iOS/AppIcons.xcassets/BlueIcon.appiconset/*.png",
-    ]),
+    ], allow_empty=True),
 )
 
 alternate_icon_folders = [
