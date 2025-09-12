@@ -193,9 +193,9 @@ public final class DisposableSet : Disposable {
     }
     
     public func removeLast() {
-        pthread_mutex_lock(&self.lock)
+        self.lock.lock()
         self.disposables.removeLast()
-        pthread_mutex_unlock(&self.lock)
+        self.lock.unlock()
     }
     
     public func dispose() {
