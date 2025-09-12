@@ -4440,7 +4440,7 @@ final class PostboxImpl {
         var index = fromIndex
         var remainingLimit = limit
         while remainingLimit > 0 {
-            let messages = self.messageHistoryTable.fetch(peerId: peerId, namespace: namespace, tag: nil, threadId: nil, from: index, includeFrom: includeFrom, to: lowerBound, ignoreMessagesInTimestampRange: nil, limit: min(10, remainingLimit))
+            let messages = self.messageHistoryTable.fetch(peerId: peerId, namespace: namespace, tag: nil, customTag: nil, threadId: nil, from: index, includeFrom: includeFrom, to: lowerBound, ignoreMessagesInTimestampRange: nil, ignoreMessageIds: Set(), limit: min(10, remainingLimit))
             for message in messages {
                 if !f(self.renderIntermediateMessage(message)) {
                     return
