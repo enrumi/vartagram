@@ -4980,10 +4980,10 @@ public class Postbox {
                     groupId: groupId,
                     filterPredicate: filterPredicate,
                     count: count,
-                    summaryComponents: summaryComponent
+                    summaryComponents: summaryComponent,
                     extractCachedData: extractCachedData,
                     accountPeerId: accountPeerId,
-            inactiveSecretChatPeerIds: inactiveSecretChatPeerIds,
+                    inactiveSecretChatPeerIds: inactiveSecretChatPeerIds
                 ).start(next: subscriber.putNext, error: subscriber.putError, completed: subscriber.putCompletion))
             }
 
