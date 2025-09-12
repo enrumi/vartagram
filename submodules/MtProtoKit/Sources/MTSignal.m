@@ -150,9 +150,7 @@
     return self;
 }
 
-- (void)beginWithDisposable:(id<MTDisposable>)disposable
-{
-    _disposable = disposable;
+- (void)dealloc {
 }
 
 - (void)enqueueSignal:(MTSignal *)signal
