@@ -41,19 +41,19 @@ final class OverlayInstantVideoNode: OverlayMediaItemNode {
     var playbackEnded: (() -> Void)?
     
     public let sourceAccountId: AccountRecordId
-    
-    init(postbox: Postbox, audioSession: ManagedAudioSession, manager: UniversalVideoManager, content: UniversalVideoContent, close: @escaping () -> Void, sourceAccountId: AccountRecordId) {
+
+    init(context: AccountContext, postbox: Postbox, audioSession: ManagedAudioSession, manager: UniversalVideoManager, content: UniversalVideoContent, close: @escaping () -> Void, sourceAccountId: AccountRecordId) {
         self.close = close
         self.content = content
         var togglePlayPauseImpl: (() -> Void)?
         let decoration = OverlayInstantVideoDecoration(tapped: {
             togglePlayPauseImpl?()
         })
-        self.videoNode = UniversalVideoNode(postbox: postbox, audioSession: audioSession, manager: manager, decoration: decoration, content: content, priority: .secondaryOverlay, snapshotContentWhenGone: true, sourceAccountId: sourceAccountId)
+        self.videoNode = UniversalVideoNode(context: context, postbox: postbox, audioSession: audioSession, manager: manager, decoration: decoration, content: content, priority: .secondaryOverlay, snapshotContentWhenGone: true, sourceAccountId: sourceAccountId)
         self.decoration = decoration
         
         self.sourceAccountId = sourceAccountId
-        
+
         super.init()
         
         togglePlayPauseImpl = { [weak self] in

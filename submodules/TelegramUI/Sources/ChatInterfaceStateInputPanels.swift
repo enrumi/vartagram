@@ -10,10 +10,6 @@ import ChatChannelSubscriberInputPanelNode
 import ChatMessageSelectionInputPanelNode
 
 func inputPanelForChatPresentationIntefaceState(_ chatPresentationInterfaceState: ChatPresentationInterfaceState, context: AccountContext, currentPanel: ChatInputPanelNode?, currentSecondaryPanel: ChatInputPanelNode?, textInputPanelNode: ChatTextInputPanelNode?, interfaceInteraction: ChatPanelInterfaceInteraction?) -> (primary: ChatInputPanelNode?, secondary: ChatInputPanelNode?) {
-    if case .standard(.embedded) = chatPresentationInterfaceState.mode {
-        return (nil, nil)
-    }
-    
     if let renderedPeer = chatPresentationInterfaceState.renderedPeer, renderedPeer.peer?.restrictionText(platform: "ios", contentSettings: context.currentContentSettings.with { $0 }) != nil {
         return (nil, nil)
     }
@@ -23,6 +19,27 @@ func inputPanelForChatPresentationIntefaceState(_ chatPresentationInterfaceState
     
     if case .messageOptions = chatPresentationInterfaceState.subject {
         return (nil, nil)
+    }
+    
+    if context.isFrozen {
+        var isActuallyFrozen = true
+        let accountFreezeConfiguration = AccountFreezeConfiguration.with(appConfiguration: context.currentAppConfiguration.with { $0 })
+        if let freezeAppealUrl = accountFreezeConfiguration.freezeAppealUrl {
+            let components = freezeAppealUrl.components(separatedBy: "/")
+            if let username = components.last, let peer = chatPresentationInterfaceState.renderedPeer?.peer, peer.addressName == username {
+                isActuallyFrozen = false
+            }
+        }
+        if isActuallyFrozen {
+            if let currentPanel = (currentPanel as? ChatRestrictedInputPanelNode) ?? (currentSecondaryPanel as? ChatRestrictedInputPanelNode) {
+                return (currentPanel, nil)
+            } else {
+                let panel = ChatRestrictedInputPanelNode()
+                panel.context = context
+                panel.interfaceInteraction = interfaceInteraction
+                return (panel, nil)
+            }
+        }
     }
     
     if let _ = chatPresentationInterfaceState.search {
@@ -42,15 +59,24 @@ func inputPanelForChatPresentationIntefaceState(_ chatPresentationInterfaceState
             }
         }
         
-        if let currentPanel = (currentPanel as? ChatSearchInputPanelNode) ?? (currentSecondaryPanel as? ChatSearchInputPanelNode) {
+        if let currentPanel = (currentPanel as? ChatTagSearchInputPanelNode) ?? (currentSecondaryPanel as? ChatTagSearchInputPanelNode) {
             currentPanel.interfaceInteraction = interfaceInteraction
             return (currentPanel, selectionPanel)
         } else {
-            let panel = ChatSearchInputPanelNode(theme: chatPresentationInterfaceState.theme)
+            var alwaysShowTotalMessagesCount = false
+            if case let .customChatContents(contents) = chatPresentationInterfaceState.subject, case .hashTagSearch = contents.kind {
+                alwaysShowTotalMessagesCount = true
+            }
+            
+            let panel = ChatTagSearchInputPanelNode(theme: chatPresentationInterfaceState.theme, alwaysShowTotalMessagesCount: alwaysShowTotalMessagesCount)
             panel.context = context
             panel.interfaceInteraction = interfaceInteraction
             return (panel, selectionPanel)
         }
+    }
+    
+    if case .standard(.embedded) = chatPresentationInterfaceState.mode {
+        return (nil, nil)
     }
     
     if let selectionState = chatPresentationInterfaceState.interfaceState.selectionState {
@@ -94,6 +120,18 @@ func inputPanelForChatPresentationIntefaceState(_ chatPresentationInterfaceState
         }
     }
     
+    if chatPresentationInterfaceState.isPremiumRequiredForMessaging {
+        if let currentPanel = (currentPanel as? ChatPremiumRequiredInputPanelNode) ?? (currentSecondaryPanel as? ChatPremiumRequiredInputPanelNode) {
+            currentPanel.interfaceInteraction = interfaceInteraction
+            return (currentPanel, nil)
+        } else {
+            let panel = ChatPremiumRequiredInputPanelNode(theme: chatPresentationInterfaceState.theme)
+            panel.context = context
+            panel.interfaceInteraction = interfaceInteraction
+            return (panel, nil)
+        }
+    }
+    
     if chatPresentationInterfaceState.peerIsBlocked, let peer = chatPresentationInterfaceState.renderedPeer?.peer as? TelegramUser, peer.botInfo == nil {
         if let currentPanel = (currentPanel as? ChatUnblockInputPanelNode) ?? (currentSecondaryPanel as? ChatUnblockInputPanelNode) {
             currentPanel.interfaceInteraction = interfaceInteraction
@@ -110,7 +148,7 @@ func inputPanelForChatPresentationIntefaceState(_ chatPresentationInterfaceState
     var displayInputTextPanel = false
     
     if let peer = chatPresentationInterfaceState.renderedPeer?.peer {
-        if peer.id.isReplies {
+        if peer.id.isRepliesOrVerificationCodes {
             if let currentPanel = (currentPanel as? ChatChannelSubscriberInputPanelNode) ?? (currentSecondaryPanel as? ChatChannelSubscriberInputPanelNode) {
                 return (currentPanel, nil)
             } else {
@@ -132,13 +170,16 @@ func inputPanelForChatPresentationIntefaceState(_ chatPresentationInterfaceState
                     return (panel, nil)
                 }
             } else {
-                if let currentPanel = (currentPanel as? ChatChannelSubscriberInputPanelNode) ?? (currentSecondaryPanel as? ChatChannelSubscriberInputPanelNode) {
-                    return (currentPanel, nil)
+                if message.threadId == context.account.peerId.toInt64() {
                 } else {
-                    let panel = ChatChannelSubscriberInputPanelNode()
-                    panel.interfaceInteraction = interfaceInteraction
-                    panel.context = context
-                    return (panel, nil)
+                    if let currentPanel = (currentPanel as? ChatChannelSubscriberInputPanelNode) ?? (currentSecondaryPanel as? ChatChannelSubscriberInputPanelNode) {
+                        return (currentPanel, nil)
+                    } else {
+                        let panel = ChatChannelSubscriberInputPanelNode()
+                        panel.interfaceInteraction = interfaceInteraction
+                        panel.context = context
+                        return (panel, nil)
+                    }
                 }
             }
         }
@@ -188,7 +229,37 @@ func inputPanelForChatPresentationIntefaceState(_ chatPresentationInterfaceState
                 }
             }
             
-            if channel.flags.contains(.isForum) && isMember {
+            if channel.flags.contains(.isMonoforum) {
+                if let linkedMonoforumId = channel.linkedMonoforumId, let mainChannel = chatPresentationInterfaceState.renderedPeer?.peers[linkedMonoforumId] as? TelegramChannel, mainChannel.hasPermission(.manageDirect), case .peer = chatPresentationInterfaceState.chatLocation {
+                    if chatPresentationInterfaceState.interfaceState.editMessage != nil || chatPresentationInterfaceState.interfaceState.postSuggestionState != nil {
+                        displayInputTextPanel = true
+                    } else if chatPresentationInterfaceState.interfaceState.replyMessageSubject == nil {
+                        displayInputTextPanel = false
+                        
+                        if !isMember {
+                            if let currentPanel = (currentPanel as? ChatChannelSubscriberInputPanelNode) ?? (currentSecondaryPanel as? ChatChannelSubscriberInputPanelNode) {
+                                return (currentPanel, nil)
+                            } else {
+                                let panel = ChatChannelSubscriberInputPanelNode()
+                                panel.interfaceInteraction = interfaceInteraction
+                                panel.context = context
+                                return (panel, nil)
+                            }
+                        } else {
+                            if let currentPanel = (currentPanel as? ChatRestrictedInputPanelNode) ?? (currentSecondaryPanel as? ChatRestrictedInputPanelNode) {
+                                return (currentPanel, nil)
+                            } else {
+                                let panel = ChatRestrictedInputPanelNode()
+                                panel.context = context
+                                panel.interfaceInteraction = interfaceInteraction
+                                return (panel, nil)
+                            }
+                        }
+                    }
+                } else {
+                    displayInputTextPanel = true
+                }
+            } else if channel.flags.contains(.isForum) && isMember {
                 var canManage = false
                 if channel.flags.contains(.isCreator) {
                     canManage = true
@@ -235,7 +306,7 @@ func inputPanelForChatPresentationIntefaceState(_ chatPresentationInterfaceState
                 }
             }
                         
-            if case .group = channel.info, isMember && !channel.hasPermission(.sendSomething) && !channel.flags.contains(.isGigagroup) {
+            if case .group = channel.info, isMember && !channel.hasPermission(.sendSomething) && !canBypassRestrictions(chatPresentationInterfaceState: chatPresentationInterfaceState) && !channel.flags.contains(.isGigagroup) {
                 if let currentPanel = (currentPanel as? ChatRestrictedInputPanelNode) ?? (currentSecondaryPanel as? ChatRestrictedInputPanelNode) {
                     return (currentPanel, nil)
                 } else {
@@ -269,7 +340,7 @@ func inputPanelForChatPresentationIntefaceState(_ chatPresentationInterfaceState
             case .group:
                 switch channel.participationStatus {
                 case .kicked, .left:
-                    if !isMember {
+                    if !channel.flags.contains(.isMonoforum) && !isMember {
                         if let currentPanel = (currentPanel as? ChatChannelSubscriberInputPanelNode) ?? (currentSecondaryPanel as? ChatChannelSubscriberInputPanelNode) {
                             return (currentPanel, nil)
                         } else {
@@ -293,22 +364,6 @@ func inputPanelForChatPresentationIntefaceState(_ chatPresentationInterfaceState
                         break
                     }
                 }
-            }
-            
-            if channel.flags.contains(.isForum) {
-                /*if let _ = chatPresentationInterfaceState.threadData {
-                } else {
-                    if chatPresentationInterfaceState.interfaceState.replyMessageSubject == nil {
-                        if let currentPanel = (currentPanel as? ChatRestrictedInputPanelNode) ?? (currentSecondaryPanel as? ChatRestrictedInputPanelNode) {
-                            return (currentPanel, nil)
-                        } else {
-                            let panel = ChatRestrictedInputPanelNode()
-                            panel.context = context
-                            panel.interfaceInteraction = interfaceInteraction
-                            return (panel, nil)
-                        }
-                    }
-                }*/
             }
         } else if let group = peer as? TelegramGroup {
             switch group.membership {
@@ -349,7 +404,7 @@ func inputPanelForChatPresentationIntefaceState(_ chatPresentationInterfaceState
                 if let user = chatPresentationInterfaceState.renderedPeer?.peer as? TelegramUser, user.botInfo != nil {
                     displayBotStartPanel = true
                 }
-            } else if let chatHistoryState = chatPresentationInterfaceState.chatHistoryState, case .loaded(true) = chatHistoryState {
+            } else if let chatHistoryState = chatPresentationInterfaceState.chatHistoryState, case .loaded(true, _) = chatHistoryState {
                 if let user = chatPresentationInterfaceState.renderedPeer?.peer as? TelegramUser, user.botInfo != nil {
                     displayBotStartPanel = true
                 }
@@ -367,7 +422,7 @@ func inputPanelForChatPresentationIntefaceState(_ chatPresentationInterfaceState
                 return (panel, nil)
             }
         } else {
-            if let _ = chatPresentationInterfaceState.recordedMediaPreview {
+            if let _ = chatPresentationInterfaceState.interfaceState.mediaDraftState {
                 if let currentPanel = (currentPanel as? ChatRecordingPreviewInputPanelNode) ?? (currentSecondaryPanel as? ChatRecordingPreviewInputPanelNode) {
                     return (currentPanel, nil)
                 } else {
@@ -379,6 +434,26 @@ func inputPanelForChatPresentationIntefaceState(_ chatPresentationInterfaceState
             }
             
             displayInputTextPanel = true
+        }
+    }
+    
+    if case let .customChatContents(customChatContents) = chatPresentationInterfaceState.subject {
+        switch customChatContents.kind {
+        case .hashTagSearch:
+            displayInputTextPanel = false
+        case .quickReplyMessageInput, .businessLinkSetup:
+            displayInputTextPanel = true
+        }
+        
+        if let chatHistoryState = chatPresentationInterfaceState.chatHistoryState, case .loaded(_, true) = chatHistoryState {
+            if let currentPanel = (currentPanel as? ChatRestrictedInputPanelNode) ?? (currentSecondaryPanel as? ChatRestrictedInputPanelNode) {
+                return (currentPanel, nil)
+            } else {
+                let panel = ChatRestrictedInputPanelNode()
+                panel.context = context
+                panel.interfaceInteraction = interfaceInteraction
+                return (panel, nil)
+            }
         }
     }
     

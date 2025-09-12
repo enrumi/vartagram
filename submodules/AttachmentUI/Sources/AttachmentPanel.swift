@@ -21,6 +21,8 @@ import ShimmerEffect
 import TextFormat
 import LegacyMessageInputPanel
 import LegacyMessageInputPanelInputView
+import ReactionSelectionNode
+import TopMessageReactions
 
 private let buttonSize = CGSize(width: 88.0, height: 49.0)
 private let smallButtonWidth: CGFloat = 69.0
@@ -77,7 +79,7 @@ private final class IconComponent: Component {
             self.disposable?.dispose()
         }
         
-        func update(component: IconComponent, availableSize: CGSize, transition: Transition) -> CGSize {
+        func update(component: IconComponent, availableSize: CGSize, transition: ComponentTransition) -> CGSize {
             if self.component?.name != component.name || self.component?.fileReference?.media.fileId != component.fileReference?.media.fileId || self.component?.tintColor != component.tintColor {
                 if let fileReference = component.fileReference {
                     let previousName = self.component?.name ?? ""
@@ -115,7 +117,7 @@ private final class IconComponent: Component {
         return View(frame: CGRect())
     }
     
-    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, transition: transition)
     }
 }
@@ -193,6 +195,9 @@ private final class AttachButtonComponent: CombinedComponent {
             case .location:
                 name = strings.Attachment_Location
                 imageName = "Chat/Attach Menu/Location"
+            case .todo:
+                name = strings.Attachment_Todo
+                imageName = "Chat/Attach Menu/Todo"
             case .contact:
                 name = strings.Attachment_Contact
                 imageName = "Chat/Attach Menu/Contact"
@@ -217,6 +222,9 @@ private final class AttachButtonComponent: CombinedComponent {
                 name = ""
                 imageName = ""
                 imageFile = nil
+            case .quickReply:
+                name = strings.Attachment_Reply
+                imageName = "Chat/Attach Menu/Reply"
             }
 
             let tintColor = component.isSelected ? component.theme.rootController.tabBar.selectedIconColor : component.theme.rootController.tabBar.iconColor
@@ -377,12 +385,103 @@ private final class LoadingProgressNode: ASDisplayNode {
     }
 }
 
+private final class BadgeNode: ASDisplayNode {
+    private var fillColor: UIColor
+    private var strokeColor: UIColor
+    private var textColor: UIColor
+    
+    private let textNode: ImmediateTextNode
+    private let backgroundNode: ASImageNode
+    
+    private let font: UIFont = Font.with(size: 15.0, design: .round, weight: .bold)
+    
+    var text: String = "" {
+        didSet {
+            self.textNode.attributedText = NSAttributedString(string: self.text, font: self.font, textColor: self.textColor)
+            self.invalidateCalculatedLayout()
+        }
+    }
+    
+    init(fillColor: UIColor, strokeColor: UIColor, textColor: UIColor) {
+        self.fillColor = fillColor
+        self.strokeColor = strokeColor
+        self.textColor = textColor
+        
+        self.textNode = ImmediateTextNode()
+        self.textNode.isUserInteractionEnabled = false
+        self.textNode.displaysAsynchronously = false
+        
+        self.backgroundNode = ASImageNode()
+        self.backgroundNode.isLayerBacked = true
+        self.backgroundNode.displayWithoutProcessing = true
+        self.backgroundNode.displaysAsynchronously = false
+        self.backgroundNode.image = generateStretchableFilledCircleImage(diameter: 18.0, color: fillColor, strokeColor: nil, strokeWidth: 1.0)
+        
+        super.init()
+        
+        self.addSubnode(self.backgroundNode)
+        self.addSubnode(self.textNode)
+        
+        self.isUserInteractionEnabled = false
+    }
+    
+    func updateTheme(fillColor: UIColor, strokeColor: UIColor, textColor: UIColor) {
+        self.fillColor = fillColor
+        self.strokeColor = strokeColor
+        self.textColor = textColor
+        self.backgroundNode.image = generateStretchableFilledCircleImage(diameter: 18.0, color: fillColor, strokeColor: strokeColor, strokeWidth: 1.0)
+        self.textNode.attributedText = NSAttributedString(string: self.text, font: self.font, textColor: self.textColor)
+    }
+    
+    func animateBump(incremented: Bool) {
+        if incremented {
+            let firstTransition = ContainedViewLayoutTransition.animated(duration: 0.1, curve: .easeInOut)
+            firstTransition.updateTransformScale(layer: self.backgroundNode.layer, scale: 1.2)
+            firstTransition.updateTransformScale(layer: self.textNode.layer, scale: 1.2, completion: { finished in
+                if finished {
+                    let secondTransition = ContainedViewLayoutTransition.animated(duration: 0.1, curve: .easeInOut)
+                    secondTransition.updateTransformScale(layer: self.backgroundNode.layer, scale: 1.0)
+                    secondTransition.updateTransformScale(layer: self.textNode.layer, scale: 1.0)
+                }
+            })
+        } else {
+            let firstTransition = ContainedViewLayoutTransition.animated(duration: 0.1, curve: .easeInOut)
+            firstTransition.updateTransformScale(layer: self.backgroundNode.layer, scale: 0.8)
+            firstTransition.updateTransformScale(layer: self.textNode.layer, scale: 0.8, completion: { finished in
+                if finished {
+                    let secondTransition = ContainedViewLayoutTransition.animated(duration: 0.1, curve: .easeInOut)
+                    secondTransition.updateTransformScale(layer: self.backgroundNode.layer, scale: 1.0)
+                    secondTransition.updateTransformScale(layer: self.textNode.layer, scale: 1.0)
+                }
+            })
+        }
+    }
+    
+    func animateOut() {
+        let timingFunction = CAMediaTimingFunctionName.easeInEaseOut.rawValue
+        self.backgroundNode.layer.animateScale(from: 1.0, to: 0.1, duration: 0.3, delay: 0.0, timingFunction: timingFunction, removeOnCompletion: true, completion: nil)
+        self.textNode.layer.animateScale(from: 1.0, to: 0.1, duration: 0.3, delay: 0.0, timingFunction: timingFunction, removeOnCompletion: true, completion: nil)
+    }
+    
+    func update(_ constrainedSize: CGSize) -> CGSize {
+        let badgeSize = self.textNode.updateLayout(constrainedSize)
+        let backgroundSize = CGSize(width: max(18.0, badgeSize.width + 8.0), height: 18.0)
+        let backgroundFrame = CGRect(origin: CGPoint(), size: backgroundSize)
+        self.backgroundNode.frame = backgroundFrame
+        self.textNode.frame = CGRect(origin: CGPoint(x: floorToScreenPixels(backgroundFrame.midX - badgeSize.width / 2.0), y: floorToScreenPixels((backgroundFrame.size.height - badgeSize.height) / 2.0) - UIScreenPixel), size: badgeSize)
+        
+        return backgroundSize
+    }
+}
+
 private final class MainButtonNode: HighlightTrackingButtonNode {
     private var state: AttachmentMainButtonState
     private var size: CGSize?
     
     private let backgroundAnimationNode: ASImageNode
+    private var iconNode: ASImageNode?
     fileprivate let textNode: ImmediateTextNode
+    private var badgeNode: BadgeNode?
     private let statusNode: SemanticStatusNode
     private var progressNode: ASImageNode?
         
@@ -458,7 +557,7 @@ private final class MainButtonNode: HighlightTrackingButtonNode {
         let diameter: CGFloat = size.height - 22.0
         let progressFrame = CGRect(origin: CGPoint(x: floorToScreenPixels(buttonOffset + (buttonWidth - diameter) / 2.0), y: floorToScreenPixels((size.height - diameter) / 2.0)), size: CGSize(width: diameter, height: diameter))
         progressNode.frame = progressFrame
-        progressNode.image = generateIndefiniteActivityIndicatorImage(color: .white, diameter: diameter, lineWidth: 3.0)
+        progressNode.image = generateIndefiniteActivityIndicatorImage(color: self.state.textColor, diameter: diameter, lineWidth: 3.0)
             
         self.addSubnode(progressNode)
  
@@ -494,7 +593,7 @@ private final class MainButtonNode: HighlightTrackingButtonNode {
     }
     
     private func setupShimmering() {
-        if case .premium = self.state.background {
+        if self.state.hasShimmer {
             if self.shimmerView == nil {
                 let shimmerView = ShimmerEffectForegroundView()
                 shimmerView.isUserInteractionEnabled = false
@@ -596,7 +695,7 @@ private final class MainButtonNode: HighlightTrackingButtonNode {
         }
     }
     
-    func updateLayout(size: CGSize, state: AttachmentMainButtonState, transition: ContainedViewLayoutTransition) {
+    func updateLayout(size: CGSize, state: AttachmentMainButtonState, animateBackground: Bool = false, transition: ContainedViewLayoutTransition) {
         let previousState = self.state
         self.state = state
         self.size = size
@@ -605,6 +704,13 @@ private final class MainButtonNode: HighlightTrackingButtonNode {
         
         self.setupShimmering()
         
+        let colorUpdated = previousState.textColor != state.textColor
+        if let progressNode = self.progressNode, colorUpdated {
+            let diameter: CGFloat = size.height - 22.0
+            progressNode.image = generateIndefiniteActivityIndicatorImage(color: state.textColor, diameter: diameter, lineWidth: 3.0)
+        }
+        
+        var textFrame: CGRect = .zero
         if let text = state.text {
             let font: UIFont
             switch state.font {
@@ -616,13 +722,17 @@ private final class MainButtonNode: HighlightTrackingButtonNode {
             self.textNode.attributedText = NSAttributedString(string: text, font: font, textColor: state.textColor)
             
             let textSize = self.textNode.updateLayout(size)
-            self.textNode.frame = CGRect(origin: CGPoint(x: floorToScreenPixels((size.width - textSize.width) / 2.0), y: floorToScreenPixels((size.height - textSize.height) / 2.0)), size: textSize)
+            textFrame = CGRect(origin: CGPoint(x: floorToScreenPixels((size.width - textSize.width) / 2.0), y: floorToScreenPixels((size.height - textSize.height) / 2.0)), size: textSize)
             
             switch state.background {
             case let .color(backgroundColor):
                 self.backgroundAnimationNode.image = nil
                 self.backgroundAnimationNode.layer.removeAllAnimations()
-                self.backgroundColor = backgroundColor
+                if animateBackground {
+                    ContainedViewLayoutTransition.animated(duration: 0.2, curve: .linear).updateBackgroundColor(node: self, color: backgroundColor)
+                } else {
+                    self.backgroundColor = backgroundColor
+                }
             case .premium:
                 if self.backgroundAnimationNode.image == nil {
                     let backgroundColors = [
@@ -648,6 +758,60 @@ private final class MainButtonNode: HighlightTrackingButtonNode {
             }
         }
         
+        if let badge = state.badge {
+            let badgeNode: BadgeNode
+            var badgeTransition = transition
+            if let current = self.badgeNode {
+                badgeNode = current
+            } else {
+                badgeTransition = .immediate
+                var textColor: UIColor
+                switch state.background {
+                case let .color(backgroundColor):
+                    textColor = backgroundColor
+                case .premium:
+                    textColor = UIColor(rgb: 0x0077ff)
+                }
+                badgeNode = BadgeNode(fillColor: state.textColor, strokeColor: .clear, textColor: textColor)
+                self.badgeNode = badgeNode
+                self.addSubnode(badgeNode)
+            }
+            badgeNode.text = badge
+            let badgeSize = badgeNode.update(CGSize(width: 100.0, height: 100.0))
+            textFrame.origin.x -= badgeSize.width / 2.0
+            badgeTransition.updateFrame(node: badgeNode, frame: CGRect(origin: CGPoint(x: textFrame.maxX + 6.0, y: textFrame.minY + floorToScreenPixels((textFrame.height - badgeSize.height) * 0.5)), size: badgeSize))
+        } else if let badgeNode = self.badgeNode {
+            self.badgeNode = nil
+            badgeNode.removeFromSupernode()
+        }
+        
+        if let iconName = state.iconName {
+            let iconNode: ASImageNode
+            if let current = self.iconNode {
+                iconNode = current
+            } else {
+                iconNode = ASImageNode()
+                iconNode.displaysAsynchronously = false
+                iconNode.image = generateTintedImage(image: UIImage(bundleImageName: iconName), color: state.textColor)
+                self.iconNode = iconNode
+                self.addSubnode(iconNode)
+            }
+            if let iconSize = iconNode.image?.size {
+                textFrame.origin.x += (iconSize.width + 6.0) / 2.0
+                iconNode.frame = CGRect(origin: CGPoint(x: textFrame.minX - iconSize.width - 6.0, y: textFrame.minY + floorToScreenPixels((textFrame.height - iconSize.height) * 0.5)), size: iconSize)
+            }
+        } else if let iconNode = self.iconNode {
+            self.iconNode = nil
+            iconNode.removeFromSupernode()
+        }
+        
+        if self.textNode.frame.width.isZero {
+            self.textNode.frame = textFrame
+        } else {
+            self.textNode.bounds = CGRect(origin: .zero, size: textFrame.size)
+            transition.updatePosition(node: self.textNode, position: textFrame.center)
+        }
+        
         if previousState.progress != state.progress {
             if state.progress == .center {
                 self.transitionToProgress()
@@ -655,7 +819,7 @@ private final class MainButtonNode: HighlightTrackingButtonNode {
                 self.transitionFromProgress()
             }
         }
-        
+                
         if let shimmerView = self.shimmerView, let borderView = self.borderView, let borderMaskView = self.borderMaskView, let borderShimmerView = self.borderShimmerView {
             let buttonFrame = CGRect(origin: .zero, size: size)
             let buttonWidth = size.width
@@ -673,15 +837,18 @@ private final class MainButtonNode: HighlightTrackingButtonNode {
         transition.updateFrame(node: self.statusNode, frame: CGRect(origin: CGPoint(x: size.width - statusSize.width - 15.0, y: floorToScreenPixels((size.height - statusSize.height) / 2.0)), size: statusSize))
         
         self.statusNode.foregroundNodeColor = state.textColor
-        self.statusNode.transitionToState(state.progress == .side ? .progress(value: nil, cancelEnabled: false, appearance: SemanticStatusNodeState.ProgressAppearance(inset: 0.0, lineWidth: 2.0)) : .none)
+        self.statusNode.transitionToState(state.progress == .side ? .progress(value: nil, cancelEnabled: false, appearance: SemanticStatusNodeState.ProgressAppearance(inset: 0.0, lineWidth: 2.0), animateRotation: true) : .none)
     }
 }
 
-final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
+final class AttachmentPanel: ASDisplayNode, ASScrollViewDelegate {
+    private weak var controller: AttachmentController?
     private let context: AccountContext
     private let isScheduledMessages: Bool
     private var presentationData: PresentationData
+    private var updatedPresentationData: (initial: PresentationData, signal: Signal<PresentationData, NoError>)?
     private var presentationDataDisposable: Disposable?
+    private var peerDisposable: Disposable?
     
     private var iconDisposables: [MediaId: Disposable] = [:]
     
@@ -694,22 +861,27 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
     private let backgroundNode: NavigationBackgroundNode
     private let scrollNode: ASScrollNode
     private let separatorNode: ASDisplayNode
-    private var buttonViews: [Int: ComponentHostView<Empty>] = [:]
+    private var buttonViews: [AnyHashable: ComponentHostView<Empty>] = [:]
     
     private var textInputPanelNode: AttachmentTextInputPanelNode?
     private var progressNode: LoadingProgressNode?
     private var mainButtonNode: MainButtonNode
+    private var secondaryButtonNode: MainButtonNode
     
     private var loadingProgress: CGFloat?
     private var mainButtonState: AttachmentMainButtonState = .initial
+    private var secondaryButtonState: AttachmentMainButtonState = .initial
+    private var customBottomPanelBackgroundColor: UIColor?
     
     private var elevateProgress: Bool = false
     private var buttons: [AttachmentButtonType] = []
     private var selectedIndex: Int = 0
     private(set) var isSelecting: Bool = false
+    private var selectionCount: Int = 0
+    
     private var _isButtonVisible: Bool = false
     var isButtonVisible: Bool {
-        return self.mainButtonState.isVisible
+        return self.mainButtonState.isVisible || self.secondaryButtonState.isVisible
     }
     
     private var validLayout: ContainerViewLayout?
@@ -723,21 +895,26 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
 
     var beganTextEditing: () -> Void = {}
     var textUpdated: (NSAttributedString) -> Void = { _ in }
-    var sendMessagePressed: (AttachmentTextInputPanelSendMode) -> Void = { _ in }
+    var sendMessagePressed: (AttachmentTextInputPanelSendMode, ChatSendMessageActionSheetController.SendParameters?) -> Void = { _, _ in }
     var requestLayout: () -> Void = {}
     var present: (ViewController) -> Void = { _ in }
     var presentInGlobalOverlay: (ViewController) -> Void = { _ in }
     
-    var mainButtonPressed: () -> Void = { }
+    var getCurrentSendMessageContextMediaPreview: (() -> ChatSendMessageContextScreenMediaPreview?)?
     
-    init(context: AccountContext, chatLocation: ChatLocation?, isScheduledMessages: Bool, updatedPresentationData: (initial: PresentationData, signal: Signal<PresentationData, NoError>)?, makeEntityInputView: @escaping () -> AttachmentTextInputPanelInputView?) {
+    var onMainButtonPressed: () -> Void = { }
+    var onSecondaryButtonPressed: () -> Void = { }
+    
+    init(controller: AttachmentController, context: AccountContext, chatLocation: ChatLocation?, isScheduledMessages: Bool, updatedPresentationData: (initial: PresentationData, signal: Signal<PresentationData, NoError>)?, makeEntityInputView: @escaping () -> AttachmentTextInputPanelInputView?) {
+        self.controller = controller
         self.context = context
+        self.updatedPresentationData = updatedPresentationData
         self.presentationData = updatedPresentationData?.initial ?? context.sharedContext.currentPresentationData.with { $0 }
         self.isScheduledMessages = isScheduledMessages
         
         self.makeEntityInputView = makeEntityInputView
                 
-        self.presentationInterfaceState = ChatPresentationInterfaceState(chatWallpaper: .builtin(WallpaperSettings()), theme: self.presentationData.theme, strings: self.presentationData.strings, dateTimeFormat: self.presentationData.dateTimeFormat, nameDisplayOrder: self.presentationData.nameDisplayOrder, limitsConfiguration: self.context.currentLimitsConfiguration.with { $0 }, fontSize: self.presentationData.chatFontSize, bubbleCorners: self.presentationData.chatBubbleCorners, accountPeerId: self.context.account.peerId, mode: .standard(.default), chatLocation: chatLocation ?? .peer(id: context.account.peerId), subject: nil, peerNearbyData: nil, greetingData: nil, pendingUnpinnedAllMessages: false, activeGroupCallInfo: nil, hasActiveGroupCall: false, importState: nil, threadData: nil, isGeneralThreadClosed: nil, replyMessage: nil, accountPeerColor: nil)
+        self.presentationInterfaceState = ChatPresentationInterfaceState(chatWallpaper: .builtin(WallpaperSettings()), theme: self.presentationData.theme, strings: self.presentationData.strings, dateTimeFormat: self.presentationData.dateTimeFormat, nameDisplayOrder: self.presentationData.nameDisplayOrder, limitsConfiguration: self.context.currentLimitsConfiguration.with { $0 }, fontSize: self.presentationData.chatFontSize, bubbleCorners: self.presentationData.chatBubbleCorners, accountPeerId: self.context.account.peerId, mode: .standard(.default), chatLocation: chatLocation ?? .peer(id: context.account.peerId), subject: nil, peerNearbyData: nil, greetingData: nil, pendingUnpinnedAllMessages: false, activeGroupCallInfo: nil, hasActiveGroupCall: false, importState: nil, threadData: nil, isGeneralThreadClosed: nil, replyMessage: nil, accountPeerColor: nil, businessIntro: nil)
         
         self.containerNode = ASDisplayNode()
         self.containerNode.clipsToBounds = true
@@ -749,6 +926,7 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
         self.separatorNode.backgroundColor = self.presentationData.theme.rootController.tabBar.separatorColor
         
         self.mainButtonNode = MainButtonNode()
+        self.secondaryButtonNode = MainButtonNode()
         
         super.init()
                         
@@ -757,13 +935,16 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
         self.containerNode.addSubnode(self.separatorNode)
         self.containerNode.addSubnode(self.scrollNode)
         
+        self.addSubnode(self.secondaryButtonNode)
         self.addSubnode(self.mainButtonNode)
         
-        self.mainButtonNode.addTarget(self, action: #selector(self.buttonPressed), forControlEvents: .touchUpInside)
+        self.mainButtonNode.addTarget(self, action: #selector(self.mainButtonPressed), forControlEvents: .touchUpInside)
+        self.secondaryButtonNode.addTarget(self, action: #selector(self.secondaryButtonPressed), forControlEvents: .touchUpInside)
         
-        self.interfaceInteraction = ChatPanelInterfaceInteraction(setupReplyMessage: { _, _  in
+        self.interfaceInteraction = ChatPanelInterfaceInteraction(setupReplyMessage: { _, _, _  in
         }, setupEditMessage: { _, _ in
         }, beginMessageSelection: { _, _ in
+        }, cancelMessageSelection: { _ in
         }, deleteSelectedMessages: {
         }, reportSelectedMessages: {
         }, reportMessages: { _, _ in
@@ -782,6 +963,7 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
         }, presentForwardOptions: { _ in
         }, presentReplyOptions: { _ in
         }, presentLinkOptions: { _ in
+        }, presentSuggestPostOptions: {
         }, shareSelectedMessages: {
         }, updateTextInputStateAndMode: { [weak self] f in
             if let strongSelf = self {
@@ -822,12 +1004,15 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
         }, sendContextResult: { _, _, _, _ in
             return false
         }, sendBotCommand: { _, _ in
+        }, sendShortcut: { _ in
+        }, openEditShortcuts: {
         }, sendBotStart: { _ in
         }, botSwitchChatWithPayload: { _, _ in
         }, beginMediaRecording: { _ in
         }, finishMediaRecording: { _ in
         }, stopMediaRecording: {
         }, lockMediaRecording: {
+        }, resumeMediaRecording: {  
         }, deleteRecordedMedia: {
         }, sendRecordedMedia: { _, _ in
         }, displayRestrictedInfo: { _, _ in
@@ -906,7 +1091,6 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
                 })
                 strongSelf.present(controller)
             }
-        }, reportPeerIrrelevantGeoLocation: {
         }, displaySlowmodeTooltip: { _, _ in
         }, displaySendMessageOptions: { [weak self] node, gesture in
             guard let strongSelf = self, let textInputPanelNode = strongSelf.textInputPanelNode else {
@@ -921,9 +1105,31 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
             if case .media = strongSelf.presentationInterfaceState.inputMode {
                 hasEntityKeyboard = true
             }
-            let _ = (strongSelf.context.account.viewTracker.peerView(peerId)
-            |> take(1)
-            |> deliverOnMainQueue).startStandalone(next: { [weak self] peerView in
+            
+            let effectItems: Signal<[ReactionItem]?, NoError>
+            if strongSelf.presentationInterfaceState.chatLocation.peerId != strongSelf.context.account.peerId && strongSelf.presentationInterfaceState.chatLocation.peerId?.namespace == Namespaces.Peer.CloudUser {
+                effectItems = effectMessageReactions(context: strongSelf.context)
+                |> map(Optional.init)
+            } else {
+                effectItems = .single(nil)
+            }
+            
+            let availableMessageEffects = strongSelf.context.availableMessageEffects |> take(1)
+            let hasPremium = strongSelf.context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: strongSelf.context.account.peerId))
+            |> map { peer -> Bool in
+                guard case let .user(user) = peer else {
+                    return false
+                }
+                return user.isPremium
+            }
+            
+            let _ = (combineLatest(
+                strongSelf.context.account.viewTracker.peerView(peerId) |> take(1),
+                effectItems,
+                availableMessageEffects,
+                hasPremium
+            )
+            |> deliverOnMainQueue).startStandalone(next: { [weak self] peerView, effectItems, availableMessageEffects, hasPremium in
                 guard let strongSelf = self, let peer = peerViewMainPeer(peerView) else {
                     return
                 }
@@ -934,25 +1140,104 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
                         sendWhenOnlineAvailable = true
                     }
                 }
-                if peer.id.namespace == Namespaces.Peer.CloudUser && peer.id.id._internalGetInt64Value() == 777000 {
+                if peer.id.isTelegramNotifications {
                     sendWhenOnlineAvailable = false
                 }
                 
-                let controller = ChatSendMessageActionSheetController(context: strongSelf.context, peerId: strongSelf.presentationInterfaceState.chatLocation.peerId, forwardMessageIds: strongSelf.presentationInterfaceState.interfaceState.forwardMessageIds, hasEntityKeyboard: hasEntityKeyboard, gesture: gesture, sourceSendButton: node, textInputView: textInputNode.textView, attachment: true, canSendWhenOnline: sendWhenOnlineAvailable, completion: {
-                }, sendMessage: { [weak textInputPanelNode] mode in
-                    switch mode {
-                    case .generic:
-                        textInputPanelNode?.sendMessage(.generic)
-                    case .silently:
-                        textInputPanelNode?.sendMessage(.silent)
-                    case .whenOnline:
-                        textInputPanelNode?.sendMessage(.whenOnline)
+                let mediaPreview = strongSelf.getCurrentSendMessageContextMediaPreview?()
+                let isReady: Signal<Bool, NoError>
+                if let mediaPreview {
+                    isReady = mediaPreview.isReady
+                    |> filter { $0 }
+                    |> take(1)
+                    |> timeout(0.5, queue: .mainQueue(), alternate: .single(true))
+                } else {
+                    isReady = .single(true)
+                }
+                
+                var captionIsAboveMedia: Signal<Bool, NoError> = .single(false)
+                var canMakePaidContent = false
+                var currentPrice: Int64?
+                var hasTimers = false
+                if let controller = strongSelf.controller, let mediaPickerContext = controller.mediaPickerContext {
+                    captionIsAboveMedia = mediaPickerContext.captionIsAboveMedia
+                    canMakePaidContent = mediaPickerContext.canMakePaidContent
+                    currentPrice = mediaPickerContext.price
+                    hasTimers = mediaPickerContext.hasTimers
+                }
+                
+                let _ = (combineLatest(
+                    isReady,
+                    captionIsAboveMedia |> take(1),
+                    ChatSendMessageContextScreen.initialData(context: strongSelf.context, currentMessageEffectId: nil)
+                )
+                |> deliverOnMainQueue).start(next: { [weak strongSelf] _, captionIsAboveMedia, initialData in
+                    guard let strongSelf else {
+                        return
                     }
-                }, schedule: { [weak textInputPanelNode] in
-                    textInputPanelNode?.sendMessage(.schedule)
+                    
+                    let controller = makeChatSendMessageActionSheetController(
+                        initialData: initialData,
+                        context: strongSelf.context,
+                        updatedPresentationData: strongSelf.updatedPresentationData,
+                        peerId: strongSelf.presentationInterfaceState.chatLocation.peerId,
+                        params: .sendMessage(SendMessageActionSheetControllerParams.SendMessage(
+                            isScheduledMessages: false,
+                            mediaPreview: mediaPreview,
+                            mediaCaptionIsAbove: (captionIsAboveMedia, { [weak strongSelf] value in
+                                guard let strongSelf, let controller = strongSelf.controller, let mediaPickerContext = controller.mediaPickerContext else {
+                                    return
+                                }
+                                mediaPickerContext.setCaptionIsAboveMedia(value)
+                            }),
+                            messageEffect: nil,
+                            attachment: true,
+                            canSendWhenOnline: sendWhenOnlineAvailable,
+                            forwardMessageIds: strongSelf.presentationInterfaceState.interfaceState.forwardMessageIds ?? [],
+                            canMakePaidContent: canMakePaidContent,
+                            currentPrice: currentPrice,
+                            hasTimers: hasTimers,
+                            sendPaidMessageStars: strongSelf.presentationInterfaceState.sendPaidMessageStars,
+                            isMonoforum: strongSelf.presentationInterfaceState.renderedPeer?.peer?.isMonoForum ?? false
+                        )),
+                        hasEntityKeyboard: hasEntityKeyboard,
+                        gesture: gesture,
+                        sourceSendButton: node,
+                        textInputView: textInputNode.textView,
+                        emojiViewProvider: textInputPanelNode.emojiViewProvider,
+                        completion: {
+                        },
+                        sendMessage: { [weak textInputPanelNode] mode, messageEffect in
+                            switch mode {
+                            case .generic:
+                                textInputPanelNode?.sendMessage(.generic, messageEffect)
+                            case .silently:
+                                textInputPanelNode?.sendMessage(.silent, messageEffect)
+                            case .whenOnline:
+                                textInputPanelNode?.sendMessage(.whenOnline, messageEffect)
+                            }
+                        },
+                        schedule: { [weak textInputPanelNode] messageEffect in
+                            textInputPanelNode?.sendMessage(.schedule, messageEffect)
+                        },
+                        editPrice: { [weak strongSelf] price in
+                            guard let strongSelf, let controller = strongSelf.controller, let mediaPickerContext = controller.mediaPickerContext else {
+                                return
+                            }
+                            mediaPickerContext.setPrice(price)
+                        },
+                        openPremiumPaywall: { [weak self] c in
+                            guard let self else {
+                                return
+                            }
+                            self.controller?.push(c)
+                        },
+                        reactionItems: effectItems,
+                        availableMessageEffects: availableMessageEffects,
+                        isPremium: hasPremium
+                    )
+                    strongSelf.presentInGlobalOverlay(controller)
                 })
-                controller.emojiViewProvider = textInputPanelNode.emojiViewProvider
-                strongSelf.presentInGlobalOverlay(controller)
             })
         }, openScheduledMessages: {
         }, openPeersNearby: {
@@ -964,6 +1249,7 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
         }, joinGroupCall: { _ in
         }, presentInviteMembers: {
         }, presentGigagroupHelp: {
+        }, openMonoforum: {
         }, editMessageMedia: { _, _ in
         }, updateShowCommands: { _ in
         }, updateShowSendAsPeers: { _ in
@@ -981,6 +1267,18 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
         }, addDoNotTranslateLanguage: { _ in
         }, hideTranslationPanel: {
         }, openPremiumGift: {
+        }, openSuggestPost: { _, _ in
+        }, openPremiumRequiredForMessaging: {
+        }, openStarsPurchase: { _ in
+        }, openMessagePayment: {
+        }, openBoostToUnrestrict: {
+        }, updateRecordingTrimRange: { _, _, _, _ in
+        }, dismissAllTooltips: {  
+        }, editTodoMessage: { _, _, _ in
+        }, updateHistoryFilter: { _ in
+        }, updateChatLocationThread: { _, _ in
+        }, toggleChatSidebarMode: {
+        }, updateDisplayHistoryFilterAsList: { _ in
         }, requestLayout: { _ in
         }, chatController: {
             return nil
@@ -991,20 +1289,47 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
             if let strongSelf = self {
                 strongSelf.presentationData = presentationData
                 
-                strongSelf.backgroundNode.updateColor(color: presentationData.theme.rootController.tabBar.backgroundColor, transition: .immediate)
+                strongSelf.backgroundNode.updateColor(color: strongSelf.customBottomPanelBackgroundColor ?? presentationData.theme.rootController.tabBar.backgroundColor, transition: .immediate)
                 strongSelf.separatorNode.backgroundColor = presentationData.theme.rootController.tabBar.separatorColor
                 
                 strongSelf.updateChatPresentationInterfaceState({ $0.updatedTheme(presentationData.theme) })
             
                 if let layout = strongSelf.validLayout {
-                    let _ = strongSelf.update(layout: layout, buttons: strongSelf.buttons, isSelecting: strongSelf.isSelecting, elevateProgress: strongSelf.elevateProgress, transition: .immediate)
+                    let _ = strongSelf.update(layout: layout, buttons: strongSelf.buttons, isSelecting: strongSelf.isSelecting, selectionCount: strongSelf.selectionCount, elevateProgress: strongSelf.elevateProgress, transition: .immediate)
                 }
             }
         }).strict()
+        
+        if let peerId = chatLocation?.peerId {
+            self.peerDisposable = ((self.context.account.viewTracker.peerView(peerId)
+            |> map { view -> StarsAmount? in
+                if let data = view.cachedData as? CachedUserData {
+                    return data.sendPaidMessageStars
+                } else if let channel = peerViewMainPeer(view) as? TelegramChannel {
+                    if channel.isMonoForum, let linkedMonoforumId = channel.linkedMonoforumId, let mainChannel = view.peers[linkedMonoforumId] as? TelegramChannel, mainChannel.hasPermission(.manageDirect) {
+                        return nil
+                    } else if let cachedData = view.cachedData as? CachedChannelData, let sendPaidMessageStarsValue = cachedData.sendPaidMessageStars, sendPaidMessageStarsValue == .zero {
+                        return nil
+                    } else {
+                        return channel.sendPaidMessageStars
+                    }
+                } else {
+                    return nil
+                }
+            }
+            |> distinctUntilChanged
+            |> deliverOnMainQueue).start(next: { [weak self] amount in
+                guard let self else {
+                    return
+                }
+                self.updateChatPresentationInterfaceState({ $0.updatedSendPaidMessageStars(amount) })
+            }))
+        }
     }
     
     deinit {
         self.presentationDataDisposable?.dispose()
+        self.peerDisposable?.dispose()
         for (_, disposable) in self.iconDisposables {
             disposable.dispose()
         }
@@ -1016,15 +1341,19 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
             self.containerNode.layer.cornerCurve = .continuous
         }
     
-        self.scrollNode.view.delegate = self
+        self.scrollNode.view.delegate = self.wrappedScrollViewDelegate
         self.scrollNode.view.showsHorizontalScrollIndicator = false
         self.scrollNode.view.showsVerticalScrollIndicator = false
         
         self.view.accessibilityTraits = .tabBar
     }
     
-    @objc private func buttonPressed() {
-        self.mainButtonPressed()
+    @objc private func mainButtonPressed() {
+        self.onMainButtonPressed()
+    }
+    
+    @objc private func secondaryButtonPressed() {
+        self.onSecondaryButtonPressed()
     }
     
     func updateBackgroundAlpha(_ alpha: CGFloat, transition: ContainedViewLayoutTransition) {
@@ -1043,16 +1372,19 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
         self.updateChatPresentationInterfaceState(transition: animated ? .animated(duration: 0.4, curve: .spring) : .immediate, f, completion: completion)
     }
     
-    private func updateChatPresentationInterfaceState(transition: ContainedViewLayoutTransition, _ f: (ChatPresentationInterfaceState) -> ChatPresentationInterfaceState, completion externalCompletion: @escaping (ContainedViewLayoutTransition) -> Void = { _ in }) {
+    private func updateChatPresentationInterfaceState(update: Bool = true, transition: ContainedViewLayoutTransition, _ f: (ChatPresentationInterfaceState) -> ChatPresentationInterfaceState, completion externalCompletion: @escaping (ContainedViewLayoutTransition) -> Void = { _ in }) {
         let presentationInterfaceState = f(self.presentationInterfaceState)
+        
         let updateInputTextState = self.presentationInterfaceState.interfaceState.effectiveInputState != presentationInterfaceState.interfaceState.effectiveInputState
         
         self.presentationInterfaceState = presentationInterfaceState
         
-        if let textInputPanelNode = self.textInputPanelNode, updateInputTextState {
-            textInputPanelNode.updateInputTextState(presentationInterfaceState.interfaceState.effectiveInputState, animated: transition.isAnimated)
-
-            self.textUpdated(presentationInterfaceState.interfaceState.effectiveInputState.inputText)
+        if update {
+            if let textInputPanelNode = self.textInputPanelNode, updateInputTextState {
+                textInputPanelNode.updateInputTextState(presentationInterfaceState.interfaceState.effectiveInputState, animated: transition.isAnimated)
+                
+                self.textUpdated(presentationInterfaceState.interfaceState.effectiveInputState.inputText)
+            }
         }
     }
     
@@ -1061,13 +1393,12 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
         self.updateViews(transition: .init(animation: .curve(duration: 0.2, curve: .spring)))
     }
     
-    func updateViews(transition: Transition) {
+    func updateViews(transition: ComponentTransition) {
         guard let layout = self.validLayout else {
             return
         }
         
         let visibleRect = self.scrollNode.bounds.insetBy(dx: -180.0, dy: 0.0)
-        var validButtons = Set<Int>()
         
         var distanceBetweenNodes = layout.size.width / CGFloat(self.buttons.count)
         let internalWidth = distanceBetweenNodes * CGFloat(self.buttons.count - 1)
@@ -1080,26 +1411,29 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
             leftNodeOriginX = layout.safeInsets.left + sideInset + buttonWidth / 2.0
         }
         
+        var validIds = Set<AnyHashable>()
+        
         for i in 0 ..< self.buttons.count {
             let originX = floor(leftNodeOriginX + CGFloat(i) * distanceBetweenNodes - buttonWidth / 2.0)
             let buttonFrame = CGRect(origin: CGPoint(x: originX, y: 0.0), size: CGSize(width: buttonWidth, height: buttonSize.height))
             if !visibleRect.intersects(buttonFrame) {
                 continue
             }
-            validButtons.insert(i)
+            
+            let type = self.buttons[i]
+            let _ = validIds.insert(type.key)
             
             var buttonTransition = transition
             let buttonView: ComponentHostView<Empty>
-            if let current = self.buttonViews[i] {
+            if let current = self.buttonViews[type.key] {
                 buttonView = current
             } else {
                 buttonTransition = .immediate
                 buttonView = ComponentHostView<Empty>()
-                self.buttonViews[i] = buttonView
+                self.buttonViews[type.key] = buttonView
                 self.scrollNode.view.addSubview(buttonView)
             }
             
-            let type = self.buttons[i]
             if case let .app(bot) = type {
                 for (name, file) in bot.icons {
                     if [.default, .iOSAnimated, .iOSSettingsStatic, .placeholder].contains(name) {
@@ -1166,6 +1500,8 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
                 accessibilityTitle = self.presentationData.strings.Attachment_File
             case .location:
                 accessibilityTitle = self.presentationData.strings.Attachment_Location
+            case .todo:
+                accessibilityTitle = self.presentationData.strings.Attachment_Todo
             case .contact:
                 accessibilityTitle = self.presentationData.strings.Attachment_Contact
             case .poll:
@@ -1176,10 +1512,22 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
                 accessibilityTitle = bot.shortName
             case .standalone:
                 accessibilityTitle = ""
+            case .quickReply:
+                accessibilityTitle = self.presentationData.strings.Attachment_Reply
             }
             buttonView.isAccessibilityElement = true
             buttonView.accessibilityLabel = accessibilityTitle
             buttonView.accessibilityTraits = [.button]
+        }
+        var removeIds: [AnyHashable] = []
+        for (id, itemView) in self.buttonViews {
+            if !validIds.contains(id) {
+                removeIds.append(id)
+                itemView.removeFromSuperview()
+            }
+        }
+        for id in removeIds {
+            self.buttonViews.removeValue(forKey: id)
         }
     }
     
@@ -1214,9 +1562,9 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
                 }
             }, makeEntityInputView: self.makeEntityInputView)
             textInputPanelNode.interfaceInteraction = self.interfaceInteraction
-            textInputPanelNode.sendMessage = { [weak self] mode in
+            textInputPanelNode.sendMessage = { [weak self] mode, messageEffect in
                 if let strongSelf = self {
-                    strongSelf.sendMessagePressed(mode)
+                    strongSelf.sendMessagePressed(mode, messageEffect)
                 }
             }
             textInputPanelNode.focusUpdated = { [weak self] focus in
@@ -1244,9 +1592,22 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
     func updateMainButtonState(_ mainButtonState: AttachmentMainButtonState?) {
         var currentButtonState = self.mainButtonState
         if mainButtonState == nil {
-            currentButtonState = AttachmentMainButtonState(text: currentButtonState.text, font: currentButtonState.font, background: currentButtonState.background, textColor: currentButtonState.textColor, isVisible: false, progress: .none, isEnabled: currentButtonState.isEnabled)
+            currentButtonState = AttachmentMainButtonState(text: currentButtonState.text, font: currentButtonState.font, background: currentButtonState.background, textColor: currentButtonState.textColor, isVisible: false, progress: .none, isEnabled: currentButtonState.isEnabled, hasShimmer: currentButtonState.hasShimmer)
         }
         self.mainButtonState = mainButtonState ?? currentButtonState
+    }
+    
+    func updateSecondaryButtonState(_ secondaryButtonState: AttachmentMainButtonState?) {
+        var currentButtonState = self.secondaryButtonState
+        if secondaryButtonState == nil {
+            currentButtonState = AttachmentMainButtonState(text: currentButtonState.text, font: currentButtonState.font, background: currentButtonState.background, textColor: currentButtonState.textColor, isVisible: false, progress: .none, isEnabled: currentButtonState.isEnabled, hasShimmer: currentButtonState.hasShimmer)
+        }
+        self.secondaryButtonState = secondaryButtonState ?? currentButtonState
+    }
+    
+    func updateCustomBottomPanelBackgroundColor(_ color: UIColor?) {
+        self.customBottomPanelBackgroundColor = color
+        self.backgroundNode.updateColor(color: self.customBottomPanelBackgroundColor ?? presentationData.theme.rootController.tabBar.backgroundColor, transition: .animated(duration: 0.2, curve: .linear))
     }
     
     let animatingTransitionPromise = ValuePromise<Bool>(false)
@@ -1380,10 +1741,23 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
         }
     }
     
-    func update(layout: ContainerViewLayout, buttons: [AttachmentButtonType], isSelecting: Bool, elevateProgress: Bool, transition: ContainedViewLayoutTransition) -> CGFloat {
+    func update(layout: ContainerViewLayout, buttons: [AttachmentButtonType], isSelecting: Bool, selectionCount: Int, elevateProgress: Bool, transition: ContainedViewLayoutTransition) -> CGFloat {
         self.validLayout = layout
         self.buttons = buttons
         self.elevateProgress = elevateProgress
+        
+        if selectionCount != self.selectionCount {
+            self.selectionCount = selectionCount
+            self.updateChatPresentationInterfaceState(update: false, transition: .immediate, { state in
+                var selectedMessages: [EngineMessage.Id] = []
+                for i in 0 ..< selectionCount {
+                    selectedMessages.append(EngineMessage.Id(peerId: PeerId(0), namespace: Namespaces.Message.Local, id: Int32(i)))
+                }
+                return state.updatedInterfaceState { state in
+                    return state.withUpdatedForwardMessageIds(selectedMessages)
+                }
+            })
+        }
                 
         let isButtonVisibleUpdated = self._isButtonVisible != self.mainButtonState.isVisible
         self._isButtonVisible = self.mainButtonState.isVisible
@@ -1393,11 +1767,14 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
         
         self.scrollNode.isUserInteractionEnabled = !isSelecting
         
-        let isButtonVisible = self.mainButtonState.isVisible
-        let isNarrowButton = isButtonVisible && self.mainButtonState.font == .regular
+        let isAnyButtonVisible = self.mainButtonState.isVisible || self.secondaryButtonState.isVisible
+        let isNarrowButton = isAnyButtonVisible && self.mainButtonState.font == .regular
+        
+        let isTwoVerticalButtons = self.mainButtonState.isVisible && self.secondaryButtonState.isVisible && [.top, .bottom].contains(self.secondaryButtonState.position)
+        let isTwoHorizontalButtons = self.mainButtonState.isVisible && self.secondaryButtonState.isVisible && [.left, .right].contains(self.secondaryButtonState.position)
         
         var insets = layout.insets(options: [])
-        if let inputHeight = layout.inputHeight, inputHeight > 0.0 && (isSelecting || isButtonVisible) {
+        if let inputHeight = layout.inputHeight, inputHeight > 0.0 && (isSelecting || isAnyButtonVisible) {
             insets.bottom = inputHeight
         } else if layout.intrinsicInsets.bottom > 0.0 {
             insets.bottom = layout.intrinsicInsets.bottom
@@ -1432,7 +1809,11 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
         let bounds = CGRect(origin: CGPoint(), size: CGSize(width: layout.size.width, height: buttonSize.height + insets.bottom))
         var containerTransition: ContainedViewLayoutTransition
         let containerFrame: CGRect
-        if isButtonVisible {
+        
+        let sideInset: CGFloat = 16.0
+        let buttonHeight: CGFloat = 50.0
+        
+        if isAnyButtonVisible {
             var height: CGFloat
             if layout.intrinsicInsets.bottom > 0.0 && (layout.inputHeight ?? 0.0).isZero {
                 height = bounds.height
@@ -1446,8 +1827,13 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
             } else {
                 height = bounds.height + 8.0
             }
-            if !isNarrowButton {
+            if isTwoVerticalButtons && self.secondaryButtonState.smallSpacing {
+                
+            } else if !isNarrowButton {
                 height += 9.0
+            }
+            if isTwoVerticalButtons {
+                height += buttonHeight + sideInset
             }
             containerFrame = CGRect(origin: CGPoint(), size: CGSize(width: bounds.width, height: height))
         } else if isSelecting {
@@ -1461,8 +1847,8 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
         } else {
             containerTransition = transition
         }
-        containerTransition.updateAlpha(node: self.scrollNode, alpha: isSelecting || isButtonVisible ? 0.0 : 1.0)
-        containerTransition.updateTransformScale(node: self.scrollNode, scale: isSelecting || isButtonVisible ? 0.85 : 1.0)
+        containerTransition.updateAlpha(node: self.scrollNode, alpha: isSelecting || isAnyButtonVisible ? 0.0 : 1.0)
+        containerTransition.updateTransformScale(node: self.scrollNode, scale: isSelecting || isAnyButtonVisible ? 0.85 : 1.0)
         
         if isSelectingUpdated {
             if isSelecting {
@@ -1514,16 +1900,69 @@ final class AttachmentPanel: ASDisplayNode, UIScrollViewDelegate {
                 progressNode?.removeFromSupernode()
             })
         }
-
-        let sideInset: CGFloat = 16.0
-        let buttonSize = CGSize(width: layout.size.width - (sideInset + layout.safeInsets.left) * 2.0, height: 50.0)
-        let buttonTopInset: CGFloat = isNarrowButton ? 2.0 : 8.0
         
-        if !self.dismissed {
-            self.mainButtonNode.updateLayout(size: buttonSize, state: self.mainButtonState, transition: transition)
+        var buttonSize = CGSize(width: layout.size.width - (sideInset + layout.safeInsets.left) * 2.0, height: buttonHeight)
+        if isTwoHorizontalButtons {
+            buttonSize = CGSize(width: (buttonSize.width - sideInset) / 2.0, height: buttonSize.height)
         }
+        let buttonTopInset: CGFloat = isNarrowButton ? 2.0 : 8.0
+                
         if !self.animatingTransition {
-            transition.updateFrame(node: self.mainButtonNode, frame: CGRect(origin: CGPoint(x: layout.safeInsets.left + sideInset, y: isButtonVisible || self.fromMenu ? buttonTopInset : containerFrame.height), size: buttonSize))
+            let buttonOriginX = layout.safeInsets.left + sideInset
+            let buttonOriginY = isAnyButtonVisible || self.fromMenu ? buttonTopInset : containerFrame.height
+            var mainButtonFrame: CGRect?
+            var secondaryButtonFrame: CGRect?
+            if self.secondaryButtonState.isVisible && self.mainButtonState.isVisible, let position = self.secondaryButtonState.position {
+                switch position {
+                case .top:
+                    secondaryButtonFrame = CGRect(origin: CGPoint(x: buttonOriginX, y: buttonOriginY), size: buttonSize)
+                    mainButtonFrame = CGRect(origin: CGPoint(x: buttonOriginX, y: buttonOriginY + sideInset + buttonSize.height), size: buttonSize)
+                case .bottom:
+                    mainButtonFrame = CGRect(origin: CGPoint(x: buttonOriginX, y: buttonOriginY), size: buttonSize)
+                    let buttonSpacing = self.secondaryButtonState.smallSpacing ? 8.0 : sideInset
+                    secondaryButtonFrame = CGRect(origin: CGPoint(x: buttonOriginX, y: buttonOriginY + buttonSpacing + buttonSize.height), size: buttonSize)
+                case .left:
+                    secondaryButtonFrame = CGRect(origin: CGPoint(x: buttonOriginX, y: buttonOriginY), size: buttonSize)
+                    mainButtonFrame = CGRect(origin: CGPoint(x: buttonOriginX + buttonSize.width + sideInset, y: buttonOriginY), size: buttonSize)
+                case .right:
+                    mainButtonFrame = CGRect(origin: CGPoint(x: buttonOriginX, y: buttonOriginY), size: buttonSize)
+                    secondaryButtonFrame = CGRect(origin: CGPoint(x: buttonOriginX + buttonSize.width + sideInset, y: buttonOriginY), size: buttonSize)
+                }
+            } else {
+                if self.mainButtonState.isVisible {
+                    mainButtonFrame = CGRect(origin: CGPoint(x: buttonOriginX, y: buttonOriginY), size: buttonSize)
+                }
+                if self.secondaryButtonState.isVisible {
+                    secondaryButtonFrame = CGRect(origin: CGPoint(x: buttonOriginX, y: buttonOriginY), size: buttonSize)
+                }
+            }
+            
+            if let mainButtonFrame {
+                if !self.dismissed {
+                    self.mainButtonNode.updateLayout(size: buttonSize, state: self.mainButtonState, animateBackground: self.mainButtonState.background.colorValue == self.backgroundNode.color && transition.isAnimated, transition: transition)
+                }
+                if self.mainButtonNode.frame.width.isZero {
+                    self.mainButtonNode.frame = mainButtonFrame
+                } else {
+                    transition.updateFrame(node: self.mainButtonNode, frame: mainButtonFrame)
+                }
+                transition.updateAlpha(node: self.mainButtonNode, alpha: 1.0)
+            } else {
+                transition.updateAlpha(node: self.mainButtonNode, alpha: 0.0)
+            }
+            if let secondaryButtonFrame {
+                if !self.dismissed {
+                    self.secondaryButtonNode.updateLayout(size: buttonSize, state: self.secondaryButtonState, animateBackground: self.secondaryButtonState.background.colorValue == self.backgroundNode.color && transition.isAnimated, transition: transition)
+                }
+                if self.secondaryButtonNode.frame.width.isZero {
+                    self.secondaryButtonNode.frame = secondaryButtonFrame
+                } else {
+                    transition.updateFrame(node: self.secondaryButtonNode, frame: secondaryButtonFrame)
+                }
+                transition.updateAlpha(node: self.secondaryButtonNode, alpha: 1.0)
+            } else {
+                transition.updateAlpha(node: self.secondaryButtonNode, alpha: 0.0)
+            }
         }
         
         return containerFrame.height

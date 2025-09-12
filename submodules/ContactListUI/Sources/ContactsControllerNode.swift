@@ -17,6 +17,8 @@ import ContextUI
 import ChatListHeaderComponent
 import ChatListTitleView
 import ComponentFlow
+import SwiftUI
+import ContactsUI
 
 private final class ContextControllerContentSourceImpl: ContextControllerContentSource {
     let controller: ViewController
@@ -46,7 +48,7 @@ private final class ContextControllerContentSourceImpl: ContextControllerContent
     }
 }
 
-final class ContactsControllerNode: ASDisplayNode, UIGestureRecognizerDelegate {
+final class ContactsControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
     let contactListNode: ContactListNode
     
     private let context: AccountContext
@@ -61,6 +63,7 @@ final class ContactsControllerNode: ASDisplayNode, UIGestureRecognizerDelegate {
     
     var requestDeactivateSearch: (() -> Void)?
     var requestOpenPeerFromSearch: ((ContactListPeer) -> Void)?
+    var requestOpenDisabledPeerFromSearch: ((EnginePeer, ChatListDisabledPeerReason) -> Void)?
     var requestAddContact: ((String) -> Void)?
     var openPeopleNearby: (() -> Void)?
     var openInvite: (() -> Void)?
@@ -93,31 +96,27 @@ final class ContactsControllerNode: ASDisplayNode, UIGestureRecognizerDelegate {
         
         self.presentationData = context.sharedContext.currentPresentationData.with { $0 }
         self.stringsPromise.set(.single(self.presentationData.strings))
-        
-        var addNearbyImpl: (() -> Void)?
+
         var inviteImpl: (() -> Void)?
         var unavailableImpl: (() -> Void)?
-        
+
         let presentation = combineLatest(sortOrder, self.stringsPromise.get())
         |> map { sortOrder, strings -> ContactListPresentation in
             // these options are shown anyway, so it can not be peeped that account is hidable
-            let options = [ContactListAdditionalOption(title: strings.Contacts_AddPeopleNearby, icon: .generic(UIImage(bundleImageName: "Contact List/PeopleNearbyIcon")!), action: context.immediateIsHidable ? { unavailableImpl?() } : {
-                addNearbyImpl?()
-            }), ContactListAdditionalOption(title: strings.Contacts_InviteFriends, icon: .generic(UIImage(bundleImageName: "Contact List/AddMemberIcon")!), action: context.immediateIsHidable ? { unavailableImpl?() } : {
+            let options = [ContactListAdditionalOption(title: strings.Contacts_InviteFriends, icon: .generic(UIImage(bundleImageName: "Contact List/AddMemberIcon")!), action: context.immediateIsHidable ? { unavailableImpl?() } : {
                 inviteImpl?()
             })]
-            
             switch sortOrder {
                 case .presence:
                     return .orderedByPresence(options: options)
                 case .natural:
-                    return .natural(options: options, includeChatList: false, topPeers: false)
+                    return .natural(options: options, includeChatList: false, topPeers: .none)
             }
         }
         
         var contextAction: ((EnginePeer, ASDisplayNode, ContextGesture?, CGPoint?, Bool) -> Void)?
         
-        self.contactListNode = ContactListNode(context: context, presentation: presentation, displaySortOptions: true, contextAction: { peer, node, gesture, location, isStories in
+        self.contactListNode = ContactListNode(context: context, presentation: presentation, onlyWriteable: false, isGroupInvitation: false, displaySortOptions: true, contextAction: { peer, node, gesture, location, isStories in
             contextAction?(peer, node, gesture, location, isStories)
         })
         
@@ -148,13 +147,7 @@ final class ContactsControllerNode: ASDisplayNode, UIGestureRecognizerDelegate {
                 }
             }
         }).strict()
-        
-        addNearbyImpl = { [weak self] in
-            if let strongSelf = self {
-                strongSelf.openPeopleNearby?()
-            }
-        }
-        
+
         inviteImpl = { [weak self] in
             if let strongSelf = self {
                 strongSelf.openInvite?()
@@ -168,7 +161,7 @@ final class ContactsControllerNode: ASDisplayNode, UIGestureRecognizerDelegate {
                 strongSelf.controller?.present(controller, in: .current)
             }
         }
-        
+
         contextAction = { [weak self] peer, node, gesture, location, isStories in
             self?.contextAction(peer: peer, node: node, gesture: gesture, location: location, isStories: isStories)
         }
@@ -263,6 +256,10 @@ final class ContactsControllerNode: ASDisplayNode, UIGestureRecognizerDelegate {
             }
             self.openStories?(peer, sourceNode)
         }
+
+        self.contactListNode.openContactAccessPicker = {
+            presentContactAccessPicker(context: context)
+        }
     }
     
     deinit {
@@ -308,16 +305,31 @@ final class ContactsControllerNode: ASDisplayNode, UIGestureRecognizerDelegate {
         return false
     }
     
-    private func updateNavigationBar(layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) -> (navigationHeight: CGFloat, storiesInset: CGFloat) {
+    func updateNavigationBar(layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) -> (navigationHeight: CGFloat, storiesInset: CGFloat) {
         let tabsNode: ASDisplayNode? = nil
         let tabsNodeIsSearch = false
         
-        let primaryContent = ChatListHeaderComponent.Content(
-            title: self.presentationData.strings.Contacts_Title,
-            navigationBackTitle: nil,
-            titleComponent: nil,
-            chatListTitle: NetworkStatusTitle(text: self.presentationData.strings.Contacts_Title, activity: false, hasProxy: false, connectsViaProxy: false, isPasscodeSet: false, isManuallyLocked: false, peerStatus: nil),
-            leftButton: AnyComponentWithIdentity(id: "sort", component: AnyComponent(NavigationButtonComponent(
+        let title: String
+        let leftButton: AnyComponentWithIdentity<NavigationButtonComponentEnvironment>?
+        let rightButtons: [AnyComponentWithIdentity<NavigationButtonComponentEnvironment>]
+
+        if let selectionState = self.contactListNode.selectionState {
+            title = self.presentationData.strings.Contacts_SelectedContacts(Int32(selectionState.selectedPeerIndices.count))
+            leftButton = AnyComponentWithIdentity(id: "done", component: AnyComponent(NavigationButtonComponent(
+                content: .text(title: self.presentationData.strings.Common_Done, isBold: true),
+                pressed: { [weak self] sourceView in
+                    guard let self else {
+                        return
+                    }
+                    self.contactListNode.updateSelectionState { _ in
+                        return nil
+                    }
+                }
+            )))
+            rightButtons = []
+        } else {
+            title = self.presentationData.strings.Contacts_Title
+            leftButton = AnyComponentWithIdentity(id: "sort", component: AnyComponent(NavigationButtonComponent(
                 content: .text(title: self.presentationData.strings.Contacts_Sort, isBold: false),
                 pressed: { [weak self] sourceView in
                     guard let self else {
@@ -326,8 +338,8 @@ final class ContactsControllerNode: ASDisplayNode, UIGestureRecognizerDelegate {
                     
                     self.controller?.presentSortMenu(sourceView: sourceView, gesture: nil)
                 }
-            ))),
-            rightButtons: [AnyComponentWithIdentity(id: "add", component: AnyComponent(NavigationButtonComponent(
+            )))
+            rightButtons = [AnyComponentWithIdentity(id: "add", component: AnyComponent(NavigationButtonComponent(
                 content: .icon(imageName: "Chat List/AddIcon"),
                 pressed: { [weak self] _ in
                     guard let self else {
@@ -335,13 +347,22 @@ final class ContactsControllerNode: ASDisplayNode, UIGestureRecognizerDelegate {
                     }
                     self.controller?.addPressed()
                 }
-            )))],
+            )))]
+        }
+
+        let primaryContent = ChatListHeaderComponent.Content(
+            title: self.presentationData.strings.Contacts_Title,
+            navigationBackTitle: nil,
+            titleComponent: nil,
+            chatListTitle: NetworkStatusTitle(text: title, activity: false, hasProxy: false, connectsViaProxy: false, isPasscodeSet: false, isManuallyLocked: false, peerStatus: nil),
+            leftButton: leftButton,
+            rightButtons: rightButtons,
             backTitle: nil,
             backPressed: nil
         )
         
         let navigationBarSize = self.navigationBarView.update(
-            transition: Transition(transition),
+            transition: ComponentTransition(transition),
             component: AnyComponent(ChatListNavigationBar(
                 context: self.context,
                 theme: self.presentationData.theme,
@@ -349,6 +370,7 @@ final class ContactsControllerNode: ASDisplayNode, UIGestureRecognizerDelegate {
                 statusBarHeight: layout.statusBarHeight ?? 0.0,
                 sideInset: layout.safeInsets.left,
                 isSearchActive: self.isSearchDisplayControllerActive,
+                isSearchEnabled: true,
                 primaryContent: primaryContent,
                 secondaryContent: nil,
                 secondaryTransition: 0.0,
@@ -406,7 +428,7 @@ final class ContactsControllerNode: ASDisplayNode, UIGestureRecognizerDelegate {
         }
         
         if let navigationBarComponentView = self.navigationBarView.view as? ChatListNavigationBar.View {
-            navigationBarComponentView.applyScroll(offset: offset, allowAvatarsExpansion: false, transition: Transition(transition))
+            navigationBarComponentView.applyScroll(offset: offset, allowAvatarsExpansion: false, transition: ComponentTransition(transition))
         }
     }
     
@@ -436,7 +458,7 @@ final class ContactsControllerNode: ASDisplayNode, UIGestureRecognizerDelegate {
         
         if let navigationBarComponentView = self.navigationBarView.view as? ChatListNavigationBar.View {
             navigationBarComponentView.deferScrollApplication = false
-            navigationBarComponentView.applyCurrentScroll(transition: Transition(transition))
+            navigationBarComponentView.applyCurrentScroll(transition: ComponentTransition(transition))
         }
     }
     
@@ -451,7 +473,7 @@ final class ContactsControllerNode: ASDisplayNode, UIGestureRecognizerDelegate {
             let controller = ContextController(presentationData: self.presentationData, source: .extracted(ContactContextExtractedContentSource(sourceNode: node, shouldBeDismissed: .single(false))), items: items, recognizer: nil, gesture: gesture)
             contactsController.presentInGlobalOverlay(controller)
         } else {
-            let chatController = self.context.sharedContext.makeChatController(context: self.context, chatLocation: .peer(id: peer.id), subject: nil, botStart: nil, mode: .standard(.previewing))
+            let chatController = self.context.sharedContext.makeChatController(context: self.context, chatLocation: .peer(id: peer.id), subject: nil, botStart: nil, mode: .standard(.previewing), params: nil)
             chatController.canReadHistory.set(false)
             let contextController = ContextController(presentationData: self.presentationData, source: .controller(ContextControllerContentSourceImpl(controller: chatController, sourceNode: node)), items: items, gesture: gesture)
             contactsController.presentInGlobalOverlay(contextController)
@@ -470,9 +492,13 @@ final class ContactsControllerNode: ASDisplayNode, UIGestureRecognizerDelegate {
             if let requestAddContact = self?.requestAddContact {
                 requestAddContact(phoneNumber)
             }
-        }, openPeer: { [weak self] peer in
+        }, openPeer: { [weak self] peer, _ in
             if let requestOpenPeerFromSearch = self?.requestOpenPeerFromSearch {
                 requestOpenPeerFromSearch(peer)
+            }
+        }, openDisabledPeer: { [weak self] peer, reason in
+            if let requestOpenDisabledPeerFromSearch = self?.requestOpenDisabledPeerFromSearch {
+                requestOpenDisabledPeerFromSearch(peer, reason)
             }
         }, contextAction: { [weak self] peer, node, gesture, location in
             self?.contextAction(peer: peer, node: node, gesture: gesture, location: location, isStories: false)
@@ -530,5 +556,46 @@ private final class ContactContextExtractedContentSource: ContextExtractedConten
     
     func putBack() -> ContextControllerPutBackViewInfo? {
         return ContextControllerPutBackViewInfo(contentAreaInScreenSpace: UIScreen.main.bounds)
+    }
+}
+
+private func presentContactAccessPicker(context: AccountContext) {
+    if #available(iOS 18.0, *), let rootViewController = context.sharedContext.mainWindow?.viewController?.view.window?.rootViewController {
+        var dismissImpl: (() -> Void)?
+        let pickerView = ContactAccessPickerHostingView(completionHandler: { [weak rootViewController] ids in
+            DispatchQueue.main.async(execute: {
+                guard let presentedController = rootViewController?.presentedViewController, presentedController.isBeingDismissed == false else { return }
+                dismissImpl?()
+            })
+        })
+        let hostingController = UIHostingController(rootView: pickerView)
+        hostingController.view.isHidden = true
+        hostingController.modalPresentationStyle = .overCurrentContext
+        rootViewController.present(hostingController, animated: true)
+        dismissImpl = { [weak hostingController] in
+            Queue.mainQueue().after(0.4, {
+                hostingController?.dismiss(animated: false)
+            })
+        }
+    }
+}
+
+@available(iOS 18.0, *)
+struct ContactAccessPickerHostingView: View {
+    @State var presented = true
+    var handler: ([String]) -> ()
+
+    init(completionHandler: @escaping ([String]) -> ()) {
+        self.handler = completionHandler
+    }
+
+    var body: some View {
+        Spacer()
+            .contactAccessPicker(isPresented: $presented, completionHandler: handler)
+            .onChange(of: presented) { newValue in
+                if newValue == false {
+                    handler([])
+                }
+            }
     }
 }

@@ -80,19 +80,15 @@ public extension UIColor {
     }
     
     convenience init?(hexString: String) {
-        let scanner = Scanner(string: hexString)
-        if hexString.hasPrefix("#") {
-            scanner.scanLocation = 1
-        }
-        var value: UInt32 = 0
-        if scanner.scanHexInt32(&value) {
-            if hexString.count > 7 {
-                self.init(argb: value)
-            } else {
-                self.init(rgb: value)
-            }
-        } else {
+        let cleanedString = hexString.hasPrefix("#") ? hexString.dropFirst() : hexString[...]
+        guard let value = UInt32(cleanedString, radix: 16) else {
             return nil
+        }
+        
+        if hexString.count > 7 {
+            self.init(argb: value)
+        } else {
+            self.init(rgb: value)
         }
     }
     
@@ -484,6 +480,17 @@ public extension UIImage {
         }
         return result
     }
+    
+    func fixedOrientation() -> UIImage {
+        if self.imageOrientation == .up { return self }
+        
+        UIGraphicsBeginImageContextWithOptions(self.size, false, self.scale)
+        self.draw(in: CGRect(origin: .zero, size: size))
+        let normalizedImage = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+        
+        return normalizedImage ?? self
+    }
 }
 
 private func makeSubtreeSnapshot(layer: CALayer, keepPortals: Bool = false, keepTransform: Bool = false) -> UIView? {
@@ -502,9 +509,29 @@ private func makeSubtreeSnapshot(layer: CALayer, keepPortals: Bool = false, keep
             return nil
         }
     }
+    var unhide = false
+    var markToHide = false
+    if keepPortals {
+        if let view = (layer.delegate as? UIView) {
+            if view.tag == 0x1bad, view.alpha > 0.0 {
+                return nil
+            } else if view.tag == 0x2bad {
+                markToHide = true
+            } else if view.tag == 0x3bad {
+                unhide = true
+            }
+        }
+    }
     let view = UIView()
+    if markToHide {
+        view.tag = 0x2bad
+    }
     view.layer.isHidden = layer.isHidden
-    view.layer.opacity = layer.opacity
+    if unhide {
+        view.layer.opacity = 1.0
+    } else {
+        view.layer.opacity = layer.opacity
+    }
     view.layer.contents = layer.contents
     view.layer.contentsRect = layer.contentsRect
     view.layer.contentsScale = layer.contentsScale
@@ -534,10 +561,14 @@ private func makeSubtreeSnapshot(layer: CALayer, keepPortals: Bool = false, keep
     }
     view.layer.cornerRadius = layer.cornerRadius
     view.layer.backgroundColor = layer.backgroundColor
+    
     if let sublayers = layer.sublayers {
         for sublayer in sublayers {
             let subtree = makeSubtreeSnapshot(layer: sublayer, keepPortals: keepPortals, keepTransform: keepTransform)
             if let subtree = subtree {
+                if subtree.tag == 0x2bad {
+                    return nil
+                }
                 if keepTransform {
                     subtree.layer.transform = sublayer.transform
                 }
@@ -561,6 +592,7 @@ private func makeSubtreeSnapshot(layer: CALayer, keepPortals: Bool = false, keep
             }
         }
     }
+    
     return view
 }
 
@@ -582,77 +614,6 @@ private func makeLayerSubtreeSnapshot(layer: CALayer) -> CALayer? {
         view.cornerRadius = layer.cornerRadius
         view.backgroundColor = layer.backgroundColor
         view.layerTintColor = layer.layerTintColor
-        
-        /*
-         open var path: CGPath?
-
-         
-         /* The color to fill the path, or nil for no fill. Defaults to opaque
-          * black. Animatable. */
-         
-         open var fillColor: CGColor?
-
-         
-         /* The fill rule used when filling the path. Options are `non-zero' and
-          * `even-odd'. Defaults to `non-zero'. */
-         
-         open var fillRule: CAShapeLayerFillRule
-
-         
-         /* The color to fill the path's stroked outline, or nil for no stroking.
-          * Defaults to nil. Animatable. */
-         
-         open var strokeColor: CGColor?
-
-         
-         /* These values define the subregion of the path used to draw the
-          * stroked outline. The values must be in the range [0,1] with zero
-          * representing the start of the path and one the end. Values in
-          * between zero and one are interpolated linearly along the path
-          * length. strokeStart defaults to zero and strokeEnd to one. Both are
-          * animatable. */
-         
-         open var strokeStart: CGFloat
-
-         open var strokeEnd: CGFloat
-
-         
-         /* The line width used when stroking the path. Defaults to one.
-          * Animatable. */
-         
-         open var lineWidth: CGFloat
-
-         
-         /* The miter limit used when stroking the path. Defaults to ten.
-          * Animatable. */
-         
-         open var miterLimit: CGFloat
-
-         
-         /* The cap style used when stroking the path. Options are `butt', `round'
-          * and `square'. Defaults to `butt'. */
-         
-         open var lineCap: CAShapeLayerLineCap
-
-         
-         /* The join style used when stroking the path. Options are `miter', `round'
-          * and `bevel'. Defaults to `miter'. */
-         
-         open var lineJoin: CAShapeLayerLineJoin
-
-         
-         /* The phase of the dashing pattern applied when creating the stroke.
-          * Defaults to zero. Animatable. */
-         
-         open var lineDashPhase: CGFloat
-
-         
-         /* The dash pattern (an array of NSNumbers) applied when creating the
-          * stroked version of the path. Defaults to nil. */
-         
-         open var lineDashPattern: [NSNumber]?
-         */
-        
         view.path = layer.path
         view.fillColor = layer.fillColor
         view.fillRule = layer.fillRule
@@ -665,6 +626,40 @@ private func makeLayerSubtreeSnapshot(layer: CALayer) -> CALayer? {
         view.lineJoin = layer.lineJoin
         view.lineDashPhase = layer.lineDashPhase
         view.lineDashPattern = layer.lineDashPattern
+        
+        if let sublayers = layer.sublayers {
+            for sublayer in sublayers {
+                let subtree = makeLayerSubtreeSnapshot(layer: sublayer)
+                if let subtree = subtree {
+                    subtree.transform = sublayer.transform
+                    subtree.position = sublayer.position
+                    subtree.bounds = sublayer.bounds
+                    subtree.anchorPoint = sublayer.anchorPoint
+                    view.addSublayer(subtree)
+                } else {
+                    return nil
+                }
+            }
+        }
+        return view
+    } else if let layer = layer as? CAGradientLayer {
+        let view = CAGradientLayer()
+        view.isHidden = layer.isHidden
+        view.opacity = layer.opacity
+        view.contents = layer.contents
+        view.contentsRect = layer.contentsRect
+        view.contentsScale = layer.contentsScale
+        view.contentsCenter = layer.contentsCenter
+        view.contentsGravity = layer.contentsGravity
+        view.masksToBounds = layer.masksToBounds
+        view.cornerRadius = layer.cornerRadius
+        view.backgroundColor = layer.backgroundColor
+        view.layerTintColor = layer.layerTintColor
+        view.colors = layer.colors
+        view.locations = layer.locations
+        view.startPoint = layer.startPoint
+        view.endPoint = layer.endPoint
+        view.type = layer.type
         
         if let sublayers = layer.sublayers {
             for sublayer in sublayers {
@@ -796,6 +791,14 @@ public extension CALayer {
     static func luminanceToAlpha() -> NSObject? {
         return makeLuminanceToAlphaFilter()
     }
+    
+    static func colorInvert() -> NSObject? {
+        return makeColorInvertFilter()
+    }
+    
+    static func monochrome() -> NSObject? {
+        return makeMonochromeFilter()
+    }
 }
 
 public extension CALayer {
@@ -810,6 +813,16 @@ public extension CALayer {
         } set(value) {
             self.setValue(value, forKey: "contentsMultiplyColor")
         }
+    }
+}
+
+public extension CAEmitterCell {
+    static func createEmitterBehavior(type: String) -> NSObject {
+        let selector = ["behaviorWith", "Type:"].joined(separator: "")
+        let behaviorClass = NSClassFromString(["CA", "Emitter", "Behavior"].joined(separator: "")) as! NSObject.Type
+        let behaviorWithType = behaviorClass.method(for: NSSelectorFromString(selector))!
+        let castedBehaviorWithType = unsafeBitCast(behaviorWithType, to:(@convention(c)(Any?, Selector, Any?) -> NSObject).self)
+        return castedBehaviorWithType(behaviorClass, NSSelectorFromString(selector), type)
     }
 }
 

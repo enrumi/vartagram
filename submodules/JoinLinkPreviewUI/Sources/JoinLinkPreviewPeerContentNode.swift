@@ -32,33 +32,33 @@ private final class MoreNode: ASDisplayNode {
 
 final class JoinLinkPreviewPeerContentNode: ASDisplayNode, ShareContentContainerNode {
     enum Content {
-        case invite(isGroup: Bool, image: TelegramMediaImageRepresentation?, title: String, memberCount: Int32, members: [EnginePeer])
+        case invite(isGroup: Bool, image: TelegramMediaImageRepresentation?, title: String, about: String?, memberCount: Int32, members: [EnginePeer])
         case request(isGroup: Bool, image: TelegramMediaImageRepresentation?, title: String, about: String?, memberCount: Int32, isVerified: Bool, isFake: Bool, isScam: Bool)
         
         var isGroup: Bool {
             switch self {
-                case let .invite(isGroup, _, _, _, _), let .request(isGroup, _, _, _, _, _, _, _):
+                case let .invite(isGroup, _, _, _, _, _), let .request(isGroup, _, _, _, _, _, _, _):
                     return isGroup
             }
         }
         
         var image: TelegramMediaImageRepresentation? {
             switch self {
-                case let .invite(_, image, _, _, _), let .request(_, image, _, _, _, _, _, _):
+                case let .invite(_, image, _, _, _, _), let .request(_, image, _, _, _, _, _, _):
                     return image
             }
         }
         
         var title: String {
             switch self {
-                case let .invite(_, _, title, _, _), let .request(_, _, title, _, _, _, _, _):
+                case let .invite(_, _, title, _, _, _), let .request(_, _, title, _, _, _, _, _):
                     return title
             }
         }
         
         var memberCount: Int32 {
             switch self {
-                case let .invite(_, _, _, memberCount, _), let .request(_, _, _, _, memberCount, _, _, _):
+                case let .invite(_, _, _, _, memberCount, _), let .request(_, _, _, _, memberCount, _, _, _):
                     return memberCount
             }
         }
@@ -91,6 +91,7 @@ final class JoinLinkPreviewPeerContentNode: ASDisplayNode, ShareContentContainer
         }
     }
     
+    private var contentDidBeginDragging: (() -> Void)?
     private var contentOffsetUpdated: ((CGFloat, ContainedViewLayoutTransition) -> Void)?
     
     private let avatarNode: AvatarNode
@@ -137,13 +138,13 @@ final class JoinLinkPreviewPeerContentNode: ASDisplayNode, ShareContentContainer
         
         let itemTheme = SelectablePeerNodeTheme(textColor: theme.actionSheet.primaryTextColor, secretTextColor: .green, selectedTextColor: theme.actionSheet.controlAccentColor, checkBackgroundColor: theme.actionSheet.opaqueItemBackgroundColor, checkFillColor: theme.actionSheet.controlAccentColor, checkColor: theme.actionSheet.opaqueItemBackgroundColor, avatarPlaceholderColor: theme.list.mediaPlaceholderColor)
         
-        if case let .invite(isGroup, _, _, memberCount, members) = content {
+        if case let .invite(isGroup, _, _, _, memberCount, members) = content {
             self.peerNodes = members.compactMap { peer in
                 guard peer.id != context.account.peerId else {
                     return nil
                 }
                 let node = SelectablePeerNode()
-                node.setup(context: context, theme: theme, strings: strings, peer: EngineRenderedPeer(peer: peer), synchronousLoad: false)
+                node.setup(context: context, theme: theme, strings: strings, peer: EngineRenderedPeer(peer: peer), requiresPremiumForMessaging: false, synchronousLoad: false)
                 node.theme = itemTheme
                 return node
             }
@@ -175,7 +176,7 @@ final class JoinLinkPreviewPeerContentNode: ASDisplayNode, ShareContentContainer
         self.addSubnode(self.countNode)
         let membersString: String
         if content.isGroup {
-            if case let .invite(_, _, _, memberCount, members) = content, !members.isEmpty {
+            if case let .invite(_, _, _, _, memberCount, members) = content, !members.isEmpty {
                 membersString = strings.Invitation_Members(memberCount)
             } else {
                 membersString = strings.Conversation_StatusMembers(content.memberCount)
@@ -194,7 +195,13 @@ final class JoinLinkPreviewPeerContentNode: ASDisplayNode, ShareContentContainer
         }
         self.moreNode.flatMap(self.peersScrollNode.addSubnode)
         
-        if case let .request(isGroup, _, _, about, _, _, _, _) = content {
+        switch content {
+        case let .invite(_, _, _, about, _, _):
+            if let about = about, !about.isEmpty {
+                self.aboutNode.attributedText = NSAttributedString(string: about, font: Font.regular(17.0), textColor: theme.actionSheet.primaryTextColor, paragraphAlignment: .center)
+                self.addSubnode(self.aboutNode)
+            }
+        case let .request(isGroup, _, _, about, _, _, _, _):
             if let about = about, !about.isEmpty {
                 self.aboutNode.attributedText = NSAttributedString(string: about, font: Font.regular(17.0), textColor: theme.actionSheet.primaryTextColor, paragraphAlignment: .center)
                 self.addSubnode(self.aboutNode)
@@ -218,6 +225,10 @@ final class JoinLinkPreviewPeerContentNode: ASDisplayNode, ShareContentContainer
     }
     
     func setEnsurePeerVisibleOnLayout(_ peerId: EnginePeer.Id?) {
+    }
+    
+    func setDidBeginDragging(_ f: (() -> Void)?) {
+        self.contentDidBeginDragging = f
     }
     
     func setContentOffsetUpdated(_ f: ((CGFloat, ContainedViewLayoutTransition) -> Void)?) {
@@ -292,7 +303,7 @@ final class JoinLinkPreviewPeerContentNode: ASDisplayNode, ShareContentContainer
             let animationRenderer = self.context.animationRenderer
             
             let avatarIcon: ComponentView<Empty>
-            var avatarIconTransition = Transition(transition)
+            var avatarIconTransition = ComponentTransition(transition)
             if let current = self.avatarIcon {
                 avatarIcon = current
             } else {
@@ -334,12 +345,7 @@ final class JoinLinkPreviewPeerContentNode: ASDisplayNode, ShareContentContainer
         transition.updateFrame(node: self.countNode, frame: CGRect(origin: CGPoint(x: floor((size.width - countSize.width) / 2.0), y: verticalOrigin + 27.0 + avatarSize + 15.0 + titleSize.height + 3.0), size: countSize))
         
         var verticalOffset = verticalOrigin + 27.0 + avatarSize + 15.0 + titleSize.height + 3.0 + countSize.height + 18.0
-        
-        if let aboutSize = aboutSize {
-            transition.updateFrame(node: self.aboutNode, frame: CGRect(origin: CGPoint(x: floor((size.width - aboutSize.width) / 2.0), y: verticalOffset), size: aboutSize))
-            verticalOffset += aboutSize.height + 20.0
-        }
-        
+                
         let peerSize = CGSize(width: 85.0, height: 95.0)
         let peerInset: CGFloat = 10.0
         
@@ -360,6 +366,11 @@ final class JoinLinkPreviewPeerContentNode: ASDisplayNode, ShareContentContainer
         
         if showPeers {
             verticalOffset += 100.0
+        }
+        
+        if let aboutSize = aboutSize {
+            transition.updateFrame(node: self.aboutNode, frame: CGRect(origin: CGPoint(x: floor((size.width - aboutSize.width) / 2.0), y: verticalOffset), size: aboutSize))
+            verticalOffset += aboutSize.height + 20.0
         }
         
         let buttonInset: CGFloat = 16.0
@@ -385,6 +396,7 @@ public enum ShareLoadingState {
 }
 
 public final class JoinLinkPreviewLoadingContainerNode: ASDisplayNode, ShareContentContainerNode {
+    private var contentDidBeginDragging: (() -> Void)?
     private var contentOffsetUpdated: ((CGFloat, ContainedViewLayoutTransition) -> Void)?
     
     private var theme: PresentationTheme
@@ -406,6 +418,10 @@ public final class JoinLinkPreviewLoadingContainerNode: ASDisplayNode, ShareCont
     }
     
     public func setEnsurePeerVisibleOnLayout(_ peerId: EnginePeer.Id?) {
+    }
+    
+    public func setDidBeginDragging(_ f: (() -> Void)?) {
+        self.contentDidBeginDragging = f
     }
     
     public func setContentOffsetUpdated(_ f: ((CGFloat, ContainedViewLayoutTransition) -> Void)?) {

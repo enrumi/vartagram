@@ -13,6 +13,7 @@ private final class ItemNode: ASDisplayNode {
     private let iconNode: ASImageNode
     private let titleNode: ImmediateTextNode
     private let titleActiveNode: ImmediateTextNode
+    private var titleBadgeView: UIImageView?
     private let buttonNode: HighlightTrackingButtonNode
     
     private var selectionFraction: CGFloat = 0.0
@@ -70,56 +71,107 @@ private final class ItemNode: ASDisplayNode {
         self.pressed()
     }
     
-    func update(type: ChatListSearchFilter, presentationData: PresentationData, selectionFraction: CGFloat, transition: ContainedViewLayoutTransition) {
+    func update(type: ChatListSearchFilter, displayNewBadge: Bool, presentationData: PresentationData, selectionFraction: CGFloat, transition: ContainedViewLayoutTransition) {
         self.selectionFraction = selectionFraction
         
         let title: String
+        var titleBadge: String?
         let icon: UIImage?
         
         let color = presentationData.theme.list.itemSecondaryTextColor
         switch type {
-            case .chats:
-                title = presentationData.strings.ChatList_Search_FilterChats
-                icon = nil
-            case .topics:
-                title = presentationData.strings.ChatList_Search_FilterChats
-                icon = nil
-            case .media:
-                title = presentationData.strings.ChatList_Search_FilterMedia
-                icon = nil
-            case .downloads:
-                title = presentationData.strings.ChatList_Search_FilterDownloads
-                icon = nil
-            case .links:
-                title = presentationData.strings.ChatList_Search_FilterLinks
-                icon = nil
-            case .files:
-                title = presentationData.strings.ChatList_Search_FilterFiles
-                icon = nil
-            case .music:
-                title = presentationData.strings.ChatList_Search_FilterMusic
-                icon = nil
-            case .voice:
-                title = presentationData.strings.ChatList_Search_FilterVoice
-                icon = nil
-            case let .peer(peerId, isGroup, displayTitle, _):
-                title = displayTitle
-                let image: UIImage?
-                if isGroup {
-                    image = UIImage(bundleImageName: "Chat List/Search/Group")
-                } else if peerId.namespace == Namespaces.Peer.CloudChannel {
-                    image = UIImage(bundleImageName: "Chat List/Search/Channel")
-                } else {
-                    image = UIImage(bundleImageName: "Chat List/Search/User")
-                }
-                icon = generateTintedImage(image: image, color: color)
-            case let .date(_, _, displayTitle):
-                title = displayTitle
-                icon = generateTintedImage(image: UIImage(bundleImageName: "Chat List/Search/Calendar"), color: color)
+        case .chats:
+            title = presentationData.strings.ChatList_Search_FilterChats
+            icon = nil
+        case .topics:
+            title = presentationData.strings.ChatList_Search_FilterChats
+            icon = nil
+        case .channels:
+            title = presentationData.strings.ChatList_Search_FilterChannels
+            icon = nil
+        case .apps:
+            title = presentationData.strings.ChatList_Search_FilterApps
+            icon = nil
+        case .globalPosts:
+            title = presentationData.strings.ChatList_Search_FilterGlobalPosts
+            if displayNewBadge {
+                titleBadge = presentationData.strings.ChatList_ContextMenuBadgeNew
+            }
+            icon = nil
+        case .media:
+            title = presentationData.strings.ChatList_Search_FilterMedia
+            icon = nil
+        case .downloads:
+            title = presentationData.strings.ChatList_Search_FilterDownloads
+            icon = nil
+        case .links:
+            title = presentationData.strings.ChatList_Search_FilterLinks
+            icon = nil
+        case .files:
+            title = presentationData.strings.ChatList_Search_FilterFiles
+            icon = nil
+        case .music:
+            title = presentationData.strings.ChatList_Search_FilterMusic
+            icon = nil
+        case .voice:
+            title = presentationData.strings.ChatList_Search_FilterVoice
+            icon = nil
+        case .instantVideo:
+            title = presentationData.strings.ChatList_Search_FilterVoice
+            icon = nil
+        case .publicPosts:
+            title = presentationData.strings.ChatList_Search_FilterPublicPosts
+            icon = nil
+        case let .peer(peerId, isGroup, displayTitle, _):
+            title = displayTitle
+            let image: UIImage?
+            if isGroup {
+                image = UIImage(bundleImageName: "Chat List/Search/Group")
+            } else if peerId.namespace == Namespaces.Peer.CloudChannel {
+                image = UIImage(bundleImageName: "Chat List/Search/Channel")
+            } else {
+                image = UIImage(bundleImageName: "Chat List/Search/User")
+            }
+            icon = generateTintedImage(image: image, color: color)
+        case let .date(_, _, displayTitle):
+            title = displayTitle
+            icon = generateTintedImage(image: UIImage(bundleImageName: "Chat List/Search/Calendar"), color: color)
         }
         
         self.titleNode.attributedText = NSAttributedString(string: title, font: Font.medium(14.0), textColor: color)
         self.titleActiveNode.attributedText = NSAttributedString(string: title, font: Font.medium(14.0), textColor: presentationData.theme.list.itemAccentColor)
+        
+        if let titleBadge {
+            let titleBadgeView: UIImageView
+            if let current = self.titleBadgeView {
+                titleBadgeView = current
+            } else {
+                titleBadgeView = UIImageView()
+                self.titleBadgeView = titleBadgeView
+                self.view.addSubview(titleBadgeView)
+                
+                let labelText = NSAttributedString(string: titleBadge, font: Font.medium(11.0), textColor: presentationData.theme.list.itemCheckColors.foregroundColor)
+                let labelBounds = labelText.boundingRect(with: CGSize(width: 100.0, height: 100.0), options: [.usesLineFragmentOrigin], context: nil)
+                let labelSize = CGSize(width: ceil(labelBounds.width), height: ceil(labelBounds.height))
+                let badgeSize = CGSize(width: labelSize.width + 8.0, height: labelSize.height + 2.0 + 1.0)
+                titleBadgeView.image = generateImage(badgeSize, rotatedContext: { size, context in
+                    context.clear(CGRect(origin: CGPoint(), size: size))
+                    
+                    let rect = CGRect(origin: CGPoint(x: 0.0, y: 0.0), size: CGSize(width: size.width, height: size.height - UIScreenPixel * 2.0))
+                    
+                    context.addPath(UIBezierPath(roundedRect: rect, cornerRadius: 5.0).cgPath)
+                    context.setFillColor(presentationData.theme.list.itemCheckColors.fillColor.cgColor)
+                    context.fillPath()
+                    
+                    UIGraphicsPushContext(context)
+                    labelText.draw(at: CGPoint(x: 4.0, y: 1.0 + UIScreenPixel))
+                    UIGraphicsPopContext()
+                })
+            }
+        } else if let titleBadgeView = self.titleBadgeView {
+            self.titleBadgeView = nil
+            titleBadgeView.removeFromSuperview()
+        }
         
         let selectionAlpha: CGFloat = selectionFraction * selectionFraction
         let deselectionAlpha: CGFloat = 1.0// - selectionFraction
@@ -151,8 +203,15 @@ private final class ItemNode: ASDisplayNode {
         let titleFrame = CGRect(origin: CGPoint(x: -self.titleNode.insets.left + iconInset, y: floor((height - titleSize.height) / 2.0)), size: titleSize)
         self.titleNode.frame = titleFrame
         self.titleActiveNode.frame = titleFrame
-                
-        return titleSize.width - self.titleNode.insets.left - self.titleNode.insets.right + iconInset
+        
+        var width = titleSize.width - self.titleNode.insets.left - self.titleNode.insets.right + iconInset
+        
+        if let titleBadgeView = self.titleBadgeView, let image = titleBadgeView.image {
+            width += 4.0 + image.size.width
+            titleBadgeView.frame = CGRect(origin: CGPoint(x: titleFrame.maxX + 4.0, y: titleFrame.minY + floorToScreenPixels((titleFrame.height - image.size.height) * 0.5) + 1.0), size: image.size)
+        }
+        
+        return width
     }
     
     func updateArea(size: CGSize, sideInset: CGFloat, transition: ContainedViewLayoutTransition) {
@@ -214,7 +273,7 @@ final class ChatListSearchFiltersContainerNode: ASDisplayNode {
         self.scrollNode.layer.removeAllAnimations()
     }
     
-    func update(size: CGSize, sideInset: CGFloat, filters: [ChatListSearchFilterEntry], selectedFilter: ChatListSearchFilterEntryId?, transitionFraction: CGFloat, presentationData: PresentationData, transition proposedTransition: ContainedViewLayoutTransition) {
+    func update(size: CGSize, sideInset: CGFloat, filters: [ChatListSearchFilterEntry], displayGlobalPostsNewBadge: Bool, selectedFilter: ChatListSearchFilterEntryId?, transitionFraction: CGFloat, presentationData: PresentationData, transition proposedTransition: ContainedViewLayoutTransition) {
         let isFirstTime = self.currentParams == nil
         let transition: ContainedViewLayoutTransition = isFirstTime ? .immediate : proposedTransition
         
@@ -264,7 +323,12 @@ final class ChatListSearchFiltersContainerNode: ASDisplayNode {
                     selectionFraction = 0.0
                 }
                 
-                itemNode.update(type: type, presentationData: presentationData, selectionFraction: selectionFraction, transition: itemNodeTransition)
+                var displayNewBadge = false
+                if case .globalPosts = type {
+                    displayNewBadge = displayGlobalPostsNewBadge
+                }
+                
+                itemNode.update(type: type, displayNewBadge: displayNewBadge, presentationData: presentationData, selectionFraction: selectionFraction, transition: itemNodeTransition)
             }
         }
         

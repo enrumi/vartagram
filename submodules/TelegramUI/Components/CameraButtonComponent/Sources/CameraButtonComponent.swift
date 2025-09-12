@@ -7,6 +7,7 @@ public final class CameraButton: Component {
     let minSize: CGSize?
     let tag: AnyObject?
     let isEnabled: Bool
+    let isExclusive: Bool
     let action: () -> Void
     let longTapAction: (() -> Void)?
 
@@ -15,6 +16,7 @@ public final class CameraButton: Component {
         minSize: CGSize? = nil,
         tag: AnyObject? = nil,
         isEnabled: Bool = true,
+        isExclusive: Bool = true,
         action: @escaping () -> Void,
         longTapAction: (() -> Void)? = nil
     ) {
@@ -22,6 +24,7 @@ public final class CameraButton: Component {
         self.minSize = minSize
         self.tag = tag
         self.isEnabled = isEnabled
+        self.isExclusive = isExclusive
         self.action = action
         self.longTapAction = longTapAction
     }
@@ -32,6 +35,7 @@ public final class CameraButton: Component {
             minSize: self.minSize,
             tag: tag,
             isEnabled: self.isEnabled,
+            isExclusive: self.isExclusive,
             action: self.action,
             longTapAction: self.longTapAction
         )
@@ -50,6 +54,9 @@ public final class CameraButton: Component {
         if lhs.isEnabled != rhs.isEnabled {
             return false
         }
+        if lhs.isExclusive != rhs.isExclusive {
+            return false
+        }
         return true
     }
     
@@ -66,7 +73,7 @@ public final class CameraButton: Component {
             }
         }
         
-        private func updateScale(transition: Transition) {
+        private func updateScale(transition: ComponentTransition) {
             guard let component = self.component else {
                 return
             }
@@ -89,8 +96,6 @@ public final class CameraButton: Component {
             self.contentView.layer.allowsGroupOpacity = true
             
             super.init(frame: frame)
-            
-            self.isExclusiveTouch = true
             
             self.addSubview(self.containerView)
             self.containerView.addSubview(self.contentView)
@@ -142,7 +147,7 @@ public final class CameraButton: Component {
             super.cancelTracking(with: event)
         }
         
-        func update(component: CameraButton, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+        func update(component: CameraButton, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
             if let currentId = self.component?.content.id, currentId != component.content.id {
                 let previousContentView = self.contentView
                 
@@ -175,6 +180,8 @@ public final class CameraButton: Component {
             
             self.component = component
             
+            self.isExclusiveTouch = component.isExclusive
+            
             self.updateScale(transition: transition)
             self.isEnabled = component.isEnabled
             self.longTapGestureRecognizer?.isEnabled = component.longTapAction != nil
@@ -193,7 +200,7 @@ public final class CameraButton: Component {
         return View(frame: CGRect())
     }
     
-    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
         view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
 }

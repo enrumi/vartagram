@@ -16,8 +16,12 @@ public enum ChatMessageItemContent: Sequence {
     case group(messages: [(Message, Bool, ChatHistoryMessageSelection, ChatMessageEntryAttributes, MessageHistoryEntryLocation?)])
     
     public func effectivelyIncoming(_ accountPeerId: PeerId, associatedData: ChatMessageItemAssociatedData? = nil) -> Bool {
-        if let subject = associatedData?.subject, case let .messageOptions(_, _, info) = subject, case .forward = info {
-            return false
+        if let subject = associatedData?.subject, case let .messageOptions(_, _, info) = subject {
+            if case .forward = info {
+                return false
+            } else if case let .link(link) = info {
+                return link.isCentered
+            }
         }
         switch self {
             case let .message(message, _, _, _, _):
@@ -83,6 +87,7 @@ public enum ChatMessageItemAdditionalContent {
     case eventLogPreviousMessage(Message)
     case eventLogPreviousDescription(Message)
     case eventLogPreviousLink(Message)
+    case eventLogGroupedMessages([Message], Bool)
 }
 
 public enum ChatMessageMerge: Int32 {
@@ -99,8 +104,23 @@ public enum ChatMessageMerge: Int32 {
     }
 }
 
+public struct ChatMessageHeaderSpec: Equatable {
+    public var hasDate: Bool
+    public var hasTopic: Bool
+    
+    public init(hasDate: Bool, hasTopic: Bool) {
+        self.hasDate = hasDate
+        self.hasTopic = hasTopic
+    }
+}
+
+public protocol ChatMessageDateHeaderNode: ListViewItemHeaderNode {
+    func updateItem(hasDate: Bool, hasPeer: Bool)
+}
+
 public protocol ChatMessageAvatarHeaderNode: ListViewItemHeaderNode {
     func updateSelectionState(animated: Bool)
+    func updateAvatarIsHidden(isHidden: Bool, transition: ContainedViewLayoutTransition)
 }
 
 public protocol ChatMessageItem: ListViewItem {
@@ -122,7 +142,7 @@ public protocol ChatMessageItem: ListViewItem {
     var sending: Bool { get }
     var failed: Bool { get }
     
-    func mergedWithItems(top: ListViewItem?, bottom: ListViewItem?, isRotated: Bool) -> (top: ChatMessageMerge, bottom: ChatMessageMerge, dateAtBottom: Bool)
+    func mergedWithItems(top: ListViewItem?, bottom: ListViewItem?, isRotated: Bool) -> (top: ChatMessageMerge, bottom: ChatMessageMerge, dateAtBottom: ChatMessageHeaderSpec)
 }
 
 public func hasCommentButton(item: ChatMessageItem) -> Bool {

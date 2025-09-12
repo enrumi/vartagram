@@ -64,7 +64,9 @@ public enum ViewControllerNavigationPresentation {
     case modal
     case flatModal
     case standaloneModal
+    case standaloneFlatModal
     case modalInLargeLayout
+    case modalInCompactLayout
 }
 
 public enum TabBarItemContextActionType {
@@ -161,6 +163,7 @@ public protocol CustomViewControllerNavigationDataSummary: AnyObject {
     
     open var navigationPresentation: ViewControllerNavigationPresentation = .default
     open var _presentedInModal: Bool = false
+    open var flatReceivesModalTransition: Bool = false
     
     public var presentedOverCoveringView: Bool = false
     
@@ -229,7 +232,7 @@ public protocol CustomViewControllerNavigationDataSummary: AnyObject {
     }
     
     private var navigationBarOrigin: CGFloat = 0.0
-    
+        
     open var interactiveNavivationGestureEdgeWidth: InteractiveTransitionGestureRecognizerEdgeWidth? {
         return nil
     }
@@ -349,6 +352,23 @@ public protocol CustomViewControllerNavigationDataSummary: AnyObject {
         }
     }
     
+    public var titleSignal: Signal<String?, NoError> {
+        return Signal { [weak self] subscriber in
+            guard let self else {
+                return EmptyDisposable
+            }
+            subscriber.putNext(self.navigationItem.title)
+            let listenerIndex = self.navigationItem.addSetTitleListener { title, _ in
+                subscriber.putNext(title)
+            }
+            return ActionDisposable { [weak self] in
+                if let self {
+                    self.navigationItem.removeSetTitleListener(listenerIndex)
+                }
+            }
+        }
+    }
+    
     public init(navigationBarPresentationData: NavigationBarPresentationData?) {
         self.statusBar = StatusBar()
         if let navigationBarPresentationData = navigationBarPresentationData {
@@ -404,10 +424,10 @@ public protocol CustomViewControllerNavigationDataSummary: AnyObject {
     }
 
     open func updateNavigationBarLayout(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
-        self.applyNavigationBarLayout(layout, navigationLayout: self.navigationLayout(layout: layout), additionalBackgroundHeight: 0.0, transition: transition)
+        self.applyNavigationBarLayout(layout, navigationLayout: self.navigationLayout(layout: layout), additionalBackgroundHeight: 0.0, additionalCutout: nil, transition: transition)
     }
     
-    public func applyNavigationBarLayout(_ layout: ContainerViewLayout, navigationLayout: NavigationLayout, additionalBackgroundHeight: CGFloat, transition: ContainedViewLayoutTransition) {
+    public func applyNavigationBarLayout(_ layout: ContainerViewLayout, navigationLayout: NavigationLayout, additionalBackgroundHeight: CGFloat, additionalCutout: CGSize?, transition: ContainedViewLayoutTransition) {
         let statusBarHeight: CGFloat = layout.statusBarHeight ?? 0.0
 
         var navigationBarFrame = CGRect(origin: CGPoint(x: 0.0, y: 0.0), size: CGSize(width: layout.size.width, height: navigationLayout.navigationFrame.maxY))
@@ -431,7 +451,7 @@ public protocol CustomViewControllerNavigationDataSummary: AnyObject {
                 navigationBarFrame.size.height += navigationBar.secondaryContentHeight
             }
             
-            navigationBar.updateLayout(size: navigationBarFrame.size, defaultHeight: navigationLayout.defaultContentHeight, additionalTopHeight: statusBarHeight, additionalContentHeight: self.additionalNavigationBarHeight, additionalBackgroundHeight: additionalBackgroundHeight, leftInset: layout.safeInsets.left, rightInset: layout.safeInsets.right, appearsHidden: !self.displayNavigationBar, isLandscape: isLandscape, transition: transition)
+            navigationBar.updateLayout(size: navigationBarFrame.size, defaultHeight: navigationLayout.defaultContentHeight, additionalTopHeight: statusBarHeight, additionalContentHeight: self.additionalNavigationBarHeight, additionalBackgroundHeight: additionalBackgroundHeight, additionalCutout: additionalCutout, leftInset: layout.safeInsets.left, rightInset: layout.safeInsets.right, appearsHidden: !self.displayNavigationBar, isLandscape: isLandscape, transition: transition)
             if !transition.isAnimated {
                 navigationBar.layer.removeAnimation(forKey: "bounds")
                 navigationBar.layer.removeAnimation(forKey: "position")

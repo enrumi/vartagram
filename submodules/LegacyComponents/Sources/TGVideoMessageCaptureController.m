@@ -1,4 +1,4 @@
-#import "TGVideoMessageCaptureController.h"
+#import <LegacyComponents/TGVideoMessageCaptureController.h>
 
 #import "LegacyComponentsInternal.h"
 
@@ -25,11 +25,14 @@
 #import <LegacyComponents/TGModernConversationInputMicButton.h>
 
 #import "TGColor.h"
-#import "TGImageUtils.h"
+#import <LegacyComponents/TGImageUtils.h>
 
-#import "TGMediaPickerSendActionSheetController.h"
-#import "TGOverlayControllerWindow.h"
+#import <LegacyComponents/TGMediaPickerSendActionSheetController.h>
+#import <LegacyComponents/TGOverlayControllerWindow.h>
 #import <LegacyComponents/TGPhotoEditorSparseView.h>
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 
 const NSTimeInterval TGVideoMessageMaximumDuration = 60.0;
 
@@ -441,7 +444,7 @@ typedef enum
     [self.view addGestureRecognizer:_pinchGestureRecognizer];
     
     void (^voidBlock)(void) = ^{};
-    _buttonHandler = [[PGCameraVolumeButtonHandler alloc] initWithUpButtonPressedBlock:voidBlock upButtonReleasedBlock:voidBlock downButtonPressedBlock:voidBlock downButtonReleasedBlock:voidBlock];
+    _buttonHandler = [[PGCameraVolumeButtonHandler alloc] initWithIsCameraSpecific:true eventView:self.view upButtonPressedBlock:voidBlock upButtonReleasedBlock:voidBlock downButtonPressedBlock:voidBlock downButtonReleasedBlock:voidBlock];
     
     [self configureCamera];
 }
@@ -1641,3 +1644,5 @@ static UIImage *startImage = nil;
 }
 
 @end
+
+#pragma clang diagnostic pop

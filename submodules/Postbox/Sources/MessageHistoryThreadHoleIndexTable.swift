@@ -113,7 +113,7 @@ final class MessageHistoryThreadHoleIndexTable: Table {
             postboxLog("MessageHistoryThreadHoleIndexTable: Initializing \(peerId) \(threadId)")
             self.metadataTable.setIsThreadHoleIndexInitialized(peerId: peerId, threadId: threadId)
             
-            if let messageNamespaces = self.seedConfiguration.messageThreadHoles[peerId.namespace] {
+            if let messageNamespaces = self.seedConfiguration.messageThreadHoles(peerId.namespace, threadId) {
                 for namespace in messageNamespaces {
                     var operations: [MessageHistoryIndexHoleOperationKey: [MessageHistoryIndexHoleOperation]] = [:]
                     self.add(peerId: peerId, threadId: threadId, namespace: namespace, space: .everywhere, range: 1 ... (Int32.max - 1), operations: &operations)
@@ -349,7 +349,7 @@ final class MessageHistoryThreadHoleIndexTable: Table {
             self.valueBox.set(self.table, key: self.key(threadId: threadId, id: MessageId(peerId: peerId, namespace: namespace, id: closedRange.upperBound), space: space), value: MemoryBuffer(memory: &lowerBound, capacity: 4, length: 4, freeWhenDone: false))
         }
         
-        addMessageHistoryHoleOperation(.insert(clippedRange), peerId: peerId, threadId: threadId, namespace: namespace, space: space, to: &operations)
+        addMessageHistoryHoleOperation(.insert(clippedRange), peerId: peerId, threadId: threadId, namespace: namespace, space: MessageHistoryHoleOperationSpace(space), to: &operations)
     }
     
     func remove(peerId: PeerId, threadId: Int64, namespace: MessageId.Namespace, space: MessageHistoryHoleSpace, range: ClosedRange<MessageId.Id>, operations: inout [MessageHistoryIndexHoleOperationKey: [MessageHistoryIndexHoleOperation]]) {
@@ -414,7 +414,7 @@ final class MessageHistoryThreadHoleIndexTable: Table {
         }
         
         if !removeKeys.isEmpty {
-            addMessageHistoryHoleOperation(.remove(range), peerId: peerId, threadId: threadId, namespace: namespace, space: space, to: &operations)
+            addMessageHistoryHoleOperation(.remove(range), peerId: peerId, threadId: threadId, namespace: namespace, space: MessageHistoryHoleOperationSpace(space), to: &operations)
         }
     }
     

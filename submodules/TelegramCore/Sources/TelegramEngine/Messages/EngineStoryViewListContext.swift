@@ -505,6 +505,8 @@ public final class EngineStoryViewListContext {
                                                         return nil
                                                     case let .custom(fileId):
                                                         return transaction.getMedia(MediaId(namespace: Namespaces.Media.CloudFile, id: fileId)) as? TelegramMediaFile
+                                                    case .stars:
+                                                        return nil
                                                     }
                                                 }
                                             )))
@@ -528,7 +530,7 @@ public final class EngineStoryViewListContext {
                                                         timestamp: item.timestamp,
                                                         expirationTimestamp: item.expirationTimestamp,
                                                         media: EngineMedia(media),
-                                                        alternativeMedia: item.alternativeMedia.flatMap(EngineMedia.init),
+                                                        alternativeMediaList: item.alternativeMediaList.map(EngineMedia.init),
                                                         mediaAreas: item.mediaAreas,
                                                         text: item.text,
                                                         entities: item.entities,
@@ -556,7 +558,9 @@ public final class EngineStoryViewListContext {
                                                         isEdited: item.isEdited,
                                                         isMy: item.isMy,
                                                         myReaction: item.myReaction,
-                                                        forwardInfo: item.forwardInfo.flatMap { EngineStoryItem.ForwardInfo($0, transaction: transaction) }
+                                                        forwardInfo: item.forwardInfo.flatMap { EngineStoryItem.ForwardInfo($0, transaction: transaction) },
+                                                        author: item.authorId.flatMap { transaction.getPeer($0).flatMap(EnginePeer.init) },
+                                                        folderIds: item.folderIds
                                                     ),
                                                     storyStats: transaction.getPeerStoryStats(peerId: peer.id)
                                                 )))
@@ -572,7 +576,7 @@ public final class EngineStoryViewListContext {
                                             timestamp: item.timestamp,
                                             expirationTimestamp: item.expirationTimestamp,
                                             media: item.media,
-                                            alternativeMedia: item.alternativeMedia,
+                                            alternativeMediaList: item.alternativeMediaList,
                                             mediaAreas: item.mediaAreas,
                                             text: item.text,
                                             entities: item.entities,
@@ -595,7 +599,9 @@ public final class EngineStoryViewListContext {
                                             isEdited: item.isEdited,
                                             isMy: item.isMy,
                                             myReaction: item.myReaction,
-                                            forwardInfo: item.forwardInfo
+                                            forwardInfo: item.forwardInfo,
+                                            authorId: item.authorId,
+                                            folderIds: item.folderIds
                                         ))
                                         if let entry = CodableEntry(updatedItem) {
                                             transaction.setStory(id: StoryId(peerId: account.peerId, id: storyId), value: entry)
@@ -611,7 +617,7 @@ public final class EngineStoryViewListContext {
                                                     timestamp: item.timestamp,
                                                     expirationTimestamp: item.expirationTimestamp,
                                                     media: item.media,
-                                                    alternativeMedia: item.alternativeMedia,
+                                                    alternativeMediaList: item.alternativeMediaList,
                                                     mediaAreas: item.mediaAreas,
                                                     text: item.text,
                                                     entities: item.entities,
@@ -634,7 +640,9 @@ public final class EngineStoryViewListContext {
                                                     isEdited: item.isEdited,
                                                     isMy: item.isMy,
                                                     myReaction: item.myReaction,
-                                                    forwardInfo: item.forwardInfo
+                                                    forwardInfo: item.forwardInfo,
+                                                    authorId: item.authorId,
+                                                    folderIds: item.folderIds
                                                 ))
                                                 if let entry = CodableEntry(updatedItem) {
                                                     currentItems[i] = StoryItemsTableEntry(value: entry, id: updatedItem.id, expirationTimestamp: updatedItem.expirationTimestamp, isCloseFriends: updatedItem.isCloseFriends)
@@ -693,6 +701,8 @@ public final class EngineStoryViewListContext {
                                                     reactionFile = nil
                                                 case let .custom(fileId):
                                                     reactionFile = transaction.getMedia(MediaId(namespace: Namespaces.Media.CloudFile, id: fileId)) as? TelegramMediaFile
+                                                case .stars:
+                                                    reactionFile = nil
                                                 }
                                                 items.append(.view(Item.View(
                                                     peer: EnginePeer(peer),
@@ -720,7 +730,7 @@ public final class EngineStoryViewListContext {
                                                         timestamp: item.timestamp,
                                                         expirationTimestamp: item.expirationTimestamp,
                                                         media: EngineMedia(media),
-                                                        alternativeMedia: item.alternativeMedia.flatMap(EngineMedia.init),
+                                                        alternativeMediaList: item.alternativeMediaList.map(EngineMedia.init),
                                                         mediaAreas: item.mediaAreas,
                                                         text: item.text,
                                                         entities: item.entities,
@@ -748,7 +758,9 @@ public final class EngineStoryViewListContext {
                                                         isEdited: item.isEdited,
                                                         isMy: item.isMy,
                                                         myReaction: item.myReaction,
-                                                        forwardInfo: item.forwardInfo.flatMap { EngineStoryItem.ForwardInfo($0, transaction: transaction) }
+                                                        forwardInfo: item.forwardInfo.flatMap { EngineStoryItem.ForwardInfo($0, transaction: transaction) },
+                                                        author: item.authorId.flatMap { transaction.getPeer($0).flatMap(EnginePeer.init) },
+                                                        folderIds: item.folderIds
                                                     ),
                                                     storyStats: transaction.getPeerStoryStats(peerId: peer.id)
                                                 )))

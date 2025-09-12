@@ -55,8 +55,8 @@ class ShareRootController: UIViewController {
             if let data = try? Data(contentsOf: URL(fileURLWithPath: appLockStatePath(rootPath: rootPath))), let state = try? JSONDecoder().decode(LockState.self, from: data), isAppLocked(state: state) {
                 isLocked = true
             }
-            
-            self.impl = ShareRootControllerImpl(initializationData: ShareRootControllerInitializationData(appBundleId: baseAppBundleId, appBuildType: buildConfig.isAppStoreBuild ? .public : .internal, appGroupPath: appGroupUrl.path, apiId: buildConfig.apiId, apiHash: buildConfig.apiHash, languagesCategory: languagesCategory, encryptionParameters: encryptionParameters, appVersion: appVersion, bundleData: buildConfig.bundleData(withAppToken: nil, signatureDict: nil), useBetaFeatures: !buildConfig.isAppStoreBuild, makeTempContext: { accountManager, appLockContext, applicationBindings, InitialPresentationDataAndSettings, networkArguments in
+
+            self.impl = ShareRootControllerImpl(initializationData: ShareRootControllerInitializationData(appBundleId: baseAppBundleId, appBuildType: buildConfig.isAppStoreBuild ? .public : .internal, appGroupPath: appGroupUrl.path, apiId: buildConfig.apiId, apiHash: buildConfig.apiHash, languagesCategory: languagesCategory, encryptionParameters: encryptionParameters, appVersion: appVersion, bundleData: buildConfig.bundleData(withAppToken: nil, tokenType: nil, tokenEnvironment: nil, signatureDict: nil), useBetaFeatures: !buildConfig.isAppStoreBuild, makeTempContext: { accountManager, appLockContext, applicationBindings, InitialPresentationDataAndSettings, networkArguments in
                 return makeTempContext(
                     sharedContainerPath: appGroupUrl.path,
                     rootPath: rootPath,
@@ -76,6 +76,13 @@ class ShareRootController: UIViewController {
             }), getExtensionContext: { [weak self] in
                 return self?.extensionContext
             }, isAppLocked: isLocked)
+
+            self.impl?.openUrl = { [weak self] url in
+                guard let self, let url = URL(string: url) else {
+                    return
+                }
+                let _ = self.openURL(url)
+            }
         }
         
         self.impl?.loadView()
@@ -99,5 +106,21 @@ class ShareRootController: UIViewController {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         self.impl?.viewDidLayoutSubviews(view: self.view, traitCollection: self.traitCollection)
+    }
+
+    @objc func openURL(_ url: URL) -> Bool {
+        var responder: UIResponder? = self
+        while responder != nil {
+            if let application = responder as? UIApplication {
+                if #available(iOS 18.0, *) {
+                    application.open(url, options: [:], completionHandler: nil)
+                    return true
+                } else {
+                    return application.perform(#selector(openURL(_:)), with: url) != nil
+                }
+            }
+            responder = responder?.next
+        }
+        return false
     }
 }

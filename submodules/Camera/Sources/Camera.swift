@@ -4,6 +4,7 @@ import SwiftSignalKit
 import AVFoundation
 import CoreImage
 import TelegramCore
+import DeviceModel
 
 final class CameraSession {
     private let singleSession: AVCaptureSession?
@@ -11,8 +12,8 @@ final class CameraSession {
     
     let hasMultiCam: Bool
         
-    init() {
-        if #available(iOS 13.0, *), AVCaptureMultiCamSession.isMultiCamSupported {
+    init(forRoundVideo: Bool) {
+        if #available(iOS 13.0, *), Camera.isDualCameraSupported(forRoundVideo: forRoundVideo) {
             self.multiSession = AVCaptureMultiCamSession()
             self.singleSession = nil
             self.hasMultiCam = true
@@ -45,60 +46,63 @@ final class CameraDeviceContext {
     
     private let exclusive: Bool
     private let additional: Bool
+    private let isRoundVideo: Bool
     
     let device = CameraDevice()
     let input = CameraInput()
     let output: CameraOutput
-    
-    init(session: CameraSession, exclusive: Bool, additional: Bool, ciContext: CIContext) {
+        
+    init(session: CameraSession, exclusive: Bool, additional: Bool, ciContext: CIContext, colorSpace: CGColorSpace, isRoundVideo: Bool = false) {
         self.session = session
         self.exclusive = exclusive
         self.additional = additional
-        self.output = CameraOutput(exclusive: exclusive, ciContext: ciContext)
+        self.isRoundVideo = isRoundVideo
+        self.output = CameraOutput(exclusive: exclusive, ciContext: ciContext, colorSpace: colorSpace, use32BGRA: isRoundVideo)
     }
     
-    func configure(position: Camera.Position, previewView: CameraSimplePreviewView?, audio: Bool, photo: Bool, metadata: Bool, preferWide: Bool = false, preferLowerFramerate: Bool = false) {
+    func configure(position: Camera.Position, previewView: CameraSimplePreviewView?, audio: Bool, photo: Bool, metadata: Bool, preferWide: Bool = false, preferLowerFramerate: Bool = false, switchAudio: Bool = true) {
         guard let session = self.session else {
             return
         }
         
         self.previewView = previewView
-        
-        self.device.configure(for: session, position: position, dual: !exclusive || additional)
+                
+        self.device.configure(for: session, position: position, dual: !self.exclusive || self.additional, switchAudio: switchAudio)
         self.device.configureDeviceFormat(maxDimensions: self.maxDimensions(additional: self.additional, preferWide: preferWide), maxFramerate: self.preferredMaxFrameRate(useLower: preferLowerFramerate))
-        self.input.configure(for: session, device: self.device, audio: audio)
-        self.output.configure(for: session, device: self.device, input: self.input, previewView: previewView, audio: audio, photo: photo, metadata: metadata)
+        self.input.configure(for: session, device: self.device, audio: audio && switchAudio)
+        self.output.configure(for: session, device: self.device, input: self.input, previewView: previewView, audio: audio && switchAudio, photo: photo, metadata: metadata)
         
         self.output.configureVideoStabilization()
         
         self.device.resetZoom(neutral: self.exclusive || !self.additional)
     }
     
-    func invalidate() {
+    func invalidate(switchAudio: Bool = true) {
         guard let session = self.session else {
             return
         }
-        self.output.invalidate(for: session)
-        self.input.invalidate(for: session)
+        self.output.invalidate(for: session, switchAudio: switchAudio)
+        self.input.invalidate(for: session, switchAudio: switchAudio)
     }
     
     private func maxDimensions(additional: Bool, preferWide: Bool) -> CMVideoDimensions {
-        if additional || preferWide {
-            return CMVideoDimensions(width: 1920, height: 1440)
+        if self.isRoundVideo && self.exclusive {
+            return CMVideoDimensions(width: 640, height: 480)
         } else {
-            return CMVideoDimensions(width: 1920, height: 1080)
+            if additional || preferWide {
+                return CMVideoDimensions(width: 1920, height: 1440)
+            } else {
+                return CMVideoDimensions(width: 1920, height: 1080)
+            }
         }
     }
     
     private func preferredMaxFrameRate(useLower: Bool) -> Double {
-        if !self.exclusive {
-            return 30.0
-        }
-        if useLower {
+        if !self.exclusive || self.isRoundVideo || useLower {
             return 30.0
         }
         switch DeviceModel.current {
-        case .iPhone15ProMax, .iPhone14ProMax, .iPhone13ProMax:
+        case .iPhone15ProMax, .iPhone14ProMax, .iPhone13ProMax, .iPhone16ProMax:
             return 60.0
         default:
             return 30.0
@@ -108,14 +112,13 @@ final class CameraDeviceContext {
 
 private final class CameraContext {
     private let queue: Queue
-    
     private let session: CameraSession
+    private let ciContext: CIContext
+    private let colorSpace: CGColorSpace
     
     private var mainDeviceContext: CameraDeviceContext?
     private var additionalDeviceContext: CameraDeviceContext?
 
-    private let ciContext = CIContext()
-    
     private let initialConfiguration: Camera.Configuration
     private var invalidated = false
     
@@ -123,13 +126,16 @@ private final class CameraContext {
     private let audioLevelPipe = ValuePipe<Float>()
     fileprivate let modeChangePromise = ValuePromise<Camera.ModeChange>(.none)
     
-    var previewView: CameraPreviewView?
+    var videoOutput: CameraVideoOutput?
     
     var simplePreviewView: CameraSimplePreviewView?
     var secondaryPreviewView: CameraSimplePreviewView?
     
     private var lastSnapshotTimestamp: Double = CACurrentMediaTime()
+    private var savedSnapshot = false
     private var lastAdditionalSnapshotTimestamp: Double = CACurrentMediaTime()
+    private var savedAdditionalSnapshot = false
+    
     private func savePreviewSnapshot(pixelBuffer: CVPixelBuffer, front: Bool) {
         Queue.concurrentDefaultQueue().async {
             var ciImage = CIImage(cvImageBuffer: pixelBuffer)
@@ -139,7 +145,7 @@ private final class CameraContext {
                 transform = CGAffineTransformTranslate(transform, 0.0, -size.height)
                 ciImage = ciImage.transformed(by: transform)
             }
-            ciImage = ciImage.clampedToExtent().applyingGaussianBlur(sigma: 40.0).cropped(to: CGRect(origin: .zero, size: size))
+            ciImage = ciImage.clampedToExtent().applyingGaussianBlur(sigma: Camera.isDualCameraSupported(forRoundVideo: true) ? 100.0 : 40.0).cropped(to: CGRect(origin: .zero, size: size))
             if let cgImage = self.ciContext.createCGImage(ciImage, from: ciImage.extent) {
                 let uiImage = UIImage(cgImage: cgImage, scale: 1.0, orientation: .right)
                 if front {
@@ -156,6 +162,10 @@ private final class CameraContext {
         
         self.queue = queue
         self.session = session
+        
+        self.colorSpace = CGColorSpaceCreateDeviceRGB()
+        self.ciContext = CIContext(options: [.workingColorSpace : self.colorSpace])
+        
         self.initialConfiguration = configuration
         self.simplePreviewView = previewView
         self.secondaryPreviewView = secondaryPreviewView
@@ -163,8 +173,11 @@ private final class CameraContext {
         self.positionValue = configuration.position
         self._positionPromise = ValuePromise<Camera.Position>(configuration.position)
         
+#if targetEnvironment(simulator)
+#else
         self.setDualCameraEnabled(configuration.isDualEnabled, change: false)
-                        
+#endif
+        
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(self.sessionRuntimeError),
@@ -247,8 +260,10 @@ private final class CameraContext {
             
             mainDeviceContext.output.markPositionChange(position: targetPosition)
         } else {
+            self.session.session.stopRunning()
             self.configure {
-                self.mainDeviceContext?.invalidate()
+                let isRoundVideo = self.initialConfiguration.isRoundVideo
+                self.mainDeviceContext?.invalidate(switchAudio: !isRoundVideo)
                 
                 let targetPosition: Camera.Position
                 if case .back = mainDeviceContext.device.position {
@@ -260,12 +275,20 @@ private final class CameraContext {
                 self._positionPromise.set(targetPosition)
                 self.modeChange = .position
                 
-                mainDeviceContext.configure(position: targetPosition, previewView: self.simplePreviewView, audio: self.initialConfiguration.audio, photo: self.initialConfiguration.photo, metadata: self.initialConfiguration.metadata, preferWide: self.initialConfiguration.preferWide, preferLowerFramerate: self.initialConfiguration.preferLowerFramerate)
+                
+                let preferWide = self.initialConfiguration.preferWide || isRoundVideo
+                let preferLowerFramerate = self.initialConfiguration.preferLowerFramerate || isRoundVideo
+                
+                mainDeviceContext.configure(position: targetPosition, previewView: self.simplePreviewView, audio: self.initialConfiguration.audio, photo: self.initialConfiguration.photo, metadata: self.initialConfiguration.metadata, preferWide: preferWide, preferLowerFramerate: preferLowerFramerate, switchAudio: !isRoundVideo)
+                if isRoundVideo {
+                    mainDeviceContext.output.markPositionChange(position: targetPosition)
+                }
                 
                 self.queue.after(0.5) {
                     self.modeChange = .none
                 }
             }
+            self.session.session.startRunning()
         }
     }
     
@@ -277,7 +300,10 @@ private final class CameraContext {
             self.positionValue = position
             self.modeChange = .position
             
-            self.mainDeviceContext?.configure(position: position, previewView: self.simplePreviewView, audio: self.initialConfiguration.audio, photo: self.initialConfiguration.photo, metadata: self.initialConfiguration.metadata)
+            let preferWide = self.initialConfiguration.preferWide || (self.positionValue == .front && self.initialConfiguration.isRoundVideo)
+            let preferLowerFramerate = self.initialConfiguration.preferLowerFramerate || self.initialConfiguration.isRoundVideo
+            
+            self.mainDeviceContext?.configure(position: position, previewView: self.simplePreviewView, audio: self.initialConfiguration.audio, photo: self.initialConfiguration.photo, metadata: self.initialConfiguration.metadata, preferWide: preferWide, preferLowerFramerate: preferLowerFramerate)
                         
             self.queue.after(0.5) {
                 self.modeChange = .none
@@ -287,7 +313,6 @@ private final class CameraContext {
     
     private var micLevelPeak: Int16 = 0
     private var micLevelPeakCount = 0
-
     
     private var isDualCameraEnabled: Bool?
     public func setDualCameraEnabled(_ enabled: Bool, change: Bool = true) {
@@ -300,13 +325,14 @@ private final class CameraContext {
             self.modeChange = .dualCamera
         }
         
+        self.session.session.stopRunning()
         if enabled {
             self.configure {
                 self.mainDeviceContext?.invalidate()
-                self.mainDeviceContext = CameraDeviceContext(session: self.session, exclusive: false, additional: false, ciContext: self.ciContext)
+                self.mainDeviceContext = CameraDeviceContext(session: self.session, exclusive: false, additional: false, ciContext: self.ciContext, colorSpace: self.colorSpace, isRoundVideo: self.initialConfiguration.isRoundVideo)
                 self.mainDeviceContext?.configure(position: .back, previewView: self.simplePreviewView, audio: self.initialConfiguration.audio, photo: self.initialConfiguration.photo, metadata: self.initialConfiguration.metadata)
             
-                self.additionalDeviceContext = CameraDeviceContext(session: self.session, exclusive: false, additional: true, ciContext: self.ciContext)
+                self.additionalDeviceContext = CameraDeviceContext(session: self.session, exclusive: false, additional: true, ciContext: self.ciContext, colorSpace: self.colorSpace, isRoundVideo: self.initialConfiguration.isRoundVideo)
                 self.additionalDeviceContext?.configure(position: .front, previewView: self.secondaryPreviewView, audio: false, photo: true, metadata: false)
             }
             self.mainDeviceContext?.output.processSampleBuffer = { [weak self] sampleBuffer, pixelBuffer, connection in
@@ -314,13 +340,14 @@ private final class CameraContext {
                     return
                 } 
                 let timestamp = CACurrentMediaTime()
-                if timestamp > self.lastSnapshotTimestamp + 2.5, !mainDeviceContext.output.isRecording {
+                if timestamp > self.lastSnapshotTimestamp + 2.5, !mainDeviceContext.output.isRecording || !self.savedSnapshot {
                     var front = false
                     if #available(iOS 13.0, *) {
                         front = connection.inputPorts.first?.sourceDevicePosition == .front
                     }
                     self.savePreviewSnapshot(pixelBuffer: pixelBuffer, front: front)
                     self.lastSnapshotTimestamp = timestamp
+                    self.savedSnapshot = true
                 }
             }
             self.additionalDeviceContext?.output.processSampleBuffer = { [weak self] sampleBuffer, pixelBuffer, connection in
@@ -328,13 +355,14 @@ private final class CameraContext {
                     return
                 }
                 let timestamp = CACurrentMediaTime()
-                if timestamp > self.lastAdditionalSnapshotTimestamp + 2.5, !additionalDeviceContext.output.isRecording {
+                if timestamp > self.lastAdditionalSnapshotTimestamp + 2.5, !additionalDeviceContext.output.isRecording || !self.savedAdditionalSnapshot {
                     var front = false
                     if #available(iOS 13.0, *) {
                         front = connection.inputPorts.first?.sourceDevicePosition == .front
                     }
                     self.savePreviewSnapshot(pixelBuffer: pixelBuffer, front: front)
                     self.lastAdditionalSnapshotTimestamp = timestamp
+                    self.savedAdditionalSnapshot = true
                 }
             }
         } else {
@@ -343,21 +371,33 @@ private final class CameraContext {
                 self.additionalDeviceContext?.invalidate()
                 self.additionalDeviceContext = nil
                 
-                self.mainDeviceContext = CameraDeviceContext(session: self.session, exclusive: true, additional: false, ciContext: self.ciContext)
-                self.mainDeviceContext?.configure(position: self.positionValue, previewView: self.simplePreviewView, audio: self.initialConfiguration.audio, photo: self.initialConfiguration.photo, metadata: self.initialConfiguration.metadata, preferWide: self.initialConfiguration.preferWide, preferLowerFramerate: self.initialConfiguration.preferLowerFramerate)
+                let preferWide = self.initialConfiguration.preferWide || self.initialConfiguration.isRoundVideo
+                let preferLowerFramerate = self.initialConfiguration.preferLowerFramerate || self.initialConfiguration.isRoundVideo
+                
+                self.mainDeviceContext = CameraDeviceContext(session: self.session, exclusive: true, additional: false, ciContext: self.ciContext, colorSpace: self.colorSpace, isRoundVideo: self.initialConfiguration.isRoundVideo)
+                self.mainDeviceContext?.configure(position: self.positionValue, previewView: self.simplePreviewView, audio: self.initialConfiguration.audio, photo: self.initialConfiguration.photo, metadata: self.initialConfiguration.metadata, preferWide: preferWide, preferLowerFramerate: preferLowerFramerate)
             }
             self.mainDeviceContext?.output.processSampleBuffer = { [weak self] sampleBuffer, pixelBuffer, connection in
                 guard let self, let mainDeviceContext = self.mainDeviceContext else {
                     return
                 }
-                let timestamp = CACurrentMediaTime()
-                if timestamp > self.lastSnapshotTimestamp + 2.5, !mainDeviceContext.output.isRecording {
-                    var front = false
-                    if #available(iOS 13.0, *) {
-                        front = connection.inputPorts.first?.sourceDevicePosition == .front
+                
+                var front = false
+                if #available(iOS 13.0, *) {
+                    front = connection.inputPorts.first?.sourceDevicePosition == .front
+                }
+                
+                if sampleBuffer.type == kCMMediaType_Video {
+                    Queue.mainQueue().async {
+                        self.videoOutput?.push(sampleBuffer, mirror: front)
                     }
+                }
+                
+                let timestamp = CACurrentMediaTime()
+                if timestamp > self.lastSnapshotTimestamp + 2.5, !mainDeviceContext.output.isRecording || !self.savedSnapshot {
                     self.savePreviewSnapshot(pixelBuffer: pixelBuffer, front: front)
                     self.lastSnapshotTimestamp = timestamp
+                    self.savedSnapshot = true
                 }
             }
             if self.initialConfiguration.reportAudioLevel {
@@ -406,6 +446,7 @@ private final class CameraContext {
                 self?.detectedCodesPipe.putNext(codes)
             }
         }
+        self.session.session.startRunning()
         
         if change {
             if #available(iOS 13.0, *), let previewView = self.simplePreviewView {
@@ -469,11 +510,39 @@ private final class CameraContext {
     }
     
     func setZoomLevel(_ zoomLevel: CGFloat) {
-        self.mainDeviceContext?.device.setZoomLevel(zoomLevel)
+        if self.initialConfiguration.isRoundVideo {
+            if self.positionValue == .front {
+                self.additionalDeviceContext?.device.setZoomLevel(zoomLevel)
+            } else {
+                self.mainDeviceContext?.device.setZoomLevel(zoomLevel)
+            }
+        } else {
+            self.mainDeviceContext?.device.setZoomLevel(zoomLevel)
+        }
     }
     
     func setZoomDelta(_ zoomDelta: CGFloat) {
-        self.mainDeviceContext?.device.setZoomDelta(zoomDelta)
+        if self.initialConfiguration.isRoundVideo {
+            if self.positionValue == .front {
+                self.additionalDeviceContext?.device.setZoomDelta(zoomDelta)
+            } else {
+                self.mainDeviceContext?.device.setZoomDelta(zoomDelta)
+            }
+        } else {
+            self.mainDeviceContext?.device.setZoomDelta(zoomDelta)
+        }
+    }
+    
+    func rampZoom(_ zoomLevel: CGFloat, rate: CGFloat) {
+        if self.initialConfiguration.isRoundVideo {
+            if self.positionValue == .front {
+                self.additionalDeviceContext?.device.rampZoom(zoomLevel, rate: rate)
+            } else {
+                self.mainDeviceContext?.device.rampZoom(zoomLevel, rate: rate)
+            }
+        } else {
+            self.mainDeviceContext?.device.rampZoom(zoomLevel, rate: rate)
+        }
     }
     
     func takePhoto() -> Signal<PhotoCaptureResult, NoError> {
@@ -502,22 +571,30 @@ private final class CameraContext {
         }
     }
     
-    public func startRecording() -> Signal<Double, NoError> {
+    public func startRecording() -> Signal<CameraRecordingData, CameraRecordingError> {
         guard let mainDeviceContext = self.mainDeviceContext else {
             return .complete()
         }
-        mainDeviceContext.device.setTorchMode(self._flashMode)
+        if self.initialConfiguration.isRoundVideo && self.positionValue == .front {
+            
+        } else {
+            mainDeviceContext.device.setTorchMode(self._flashMode)
+        }
         
         let orientation = self.simplePreviewView?.videoPreviewLayer.connection?.videoOrientation ?? .portrait
-        if let additionalDeviceContext = self.additionalDeviceContext {
-            return combineLatest(
-                mainDeviceContext.output.startRecording(isDualCamera: true, position: self.positionValue, orientation: orientation),
-                additionalDeviceContext.output.startRecording(isDualCamera: true, orientation: .portrait)
-            ) |> map { value, _ in
-                return value
-            }
+        if self.initialConfiguration.isRoundVideo {
+            return mainDeviceContext.output.startRecording(mode: .roundVideo, orientation: DeviceModel.current.isIpad ? orientation : .portrait, additionalOutput: self.additionalDeviceContext?.output)
         } else {
-            return mainDeviceContext.output.startRecording(isDualCamera: false, orientation: orientation)
+            if let additionalDeviceContext = self.additionalDeviceContext {
+                return combineLatest(
+                    mainDeviceContext.output.startRecording(mode: .dualCamera, position: self.positionValue, orientation: orientation),
+                    additionalDeviceContext.output.startRecording(mode: .dualCamera, orientation: .portrait)
+                ) |> map { value, _ in
+                    return value
+                }
+            } else {
+                return mainDeviceContext.output.startRecording(mode: .default, orientation: orientation)
+            }
         }
     }
     
@@ -525,41 +602,12 @@ private final class CameraContext {
         guard let mainDeviceContext = self.mainDeviceContext else {
             return .complete()
         }
-        if let additionalDeviceContext = self.additionalDeviceContext {
-            return combineLatest(
-                mainDeviceContext.output.stopRecording(),
-                additionalDeviceContext.output.stopRecording()
-            ) |> mapToSignal { main, additional in
-                if case let .finished(mainResult, _, duration, positionChangeTimestamps, _) = main, case let .finished(additionalResult, _, _, _, _) = additional {
-                    var additionalThumbnailImage = additionalResult.thumbnail
-                    if let cgImage = additionalResult.thumbnail.cgImage {
-                        additionalThumbnailImage = UIImage(cgImage: cgImage, scale: 1.0, orientation: .leftMirrored)
-                    }
-                  
-                    return .single(
-                        .finished(
-                            main: mainResult,
-                            additional: VideoCaptureResult.Result(path: additionalResult.path, thumbnail: additionalThumbnailImage, isMirrored: true, dimensions: additionalResult.dimensions),
-                            duration: duration,
-                            positionChangeTimestamps: positionChangeTimestamps,
-                            captureTimestamp: CACurrentMediaTime()
-                        )
-                    )
-                } else {
-                    return .complete()
-                }
-            }
-        } else {
-            let isMirrored = self.positionValue == .front
+        if self.initialConfiguration.isRoundVideo {
             return mainDeviceContext.output.stopRecording()
             |> map { result -> VideoCaptureResult in
                 if case let .finished(mainResult, _, duration, positionChangeTimestamps, captureTimestamp) = result {
-                    var thumbnailImage = mainResult.thumbnail
-                    if isMirrored, let cgImage = thumbnailImage.cgImage {
-                        thumbnailImage = UIImage(cgImage: cgImage, scale: 1.0, orientation: .leftMirrored)
-                    }
                     return .finished(
-                        main: VideoCaptureResult.Result(path: mainResult.path, thumbnail: thumbnailImage, isMirrored: isMirrored, dimensions: mainResult.dimensions),
+                        main: mainResult,
                         additional: nil,
                         duration: duration,
                         positionChangeTimestamps: positionChangeTimestamps,
@@ -567,6 +615,52 @@ private final class CameraContext {
                     )
                 } else {
                     return result
+                }
+            }
+        } else {
+            if let additionalDeviceContext = self.additionalDeviceContext {
+                return combineLatest(
+                    mainDeviceContext.output.stopRecording(),
+                    additionalDeviceContext.output.stopRecording()
+                ) |> mapToSignal { main, additional in
+                    if case let .finished(mainResult, _, duration, positionChangeTimestamps, _) = main, case let .finished(additionalResult, _, _, _, _) = additional {
+                        var additionalThumbnailImage = additionalResult.thumbnail
+                        if let cgImage = additionalResult.thumbnail.cgImage {
+                            additionalThumbnailImage = UIImage(cgImage: cgImage, scale: 1.0, orientation: .leftMirrored)
+                        }
+                        
+                        return .single(
+                            .finished(
+                                main: mainResult,
+                                additional: VideoCaptureResult.Result(path: additionalResult.path, thumbnail: additionalThumbnailImage, isMirrored: true, dimensions: additionalResult.dimensions),
+                                duration: duration,
+                                positionChangeTimestamps: positionChangeTimestamps,
+                                captureTimestamp: CACurrentMediaTime()
+                            )
+                        )
+                    } else {
+                        return .complete()
+                    }
+                }
+            } else {
+                let isMirrored = self.positionValue == .front
+                return mainDeviceContext.output.stopRecording()
+                |> map { result -> VideoCaptureResult in
+                    if case let .finished(mainResult, _, duration, positionChangeTimestamps, captureTimestamp) = result {
+                        var thumbnailImage = mainResult.thumbnail
+                        if isMirrored, let cgImage = thumbnailImage.cgImage {
+                            thumbnailImage = UIImage(cgImage: cgImage, scale: 1.0, orientation: .leftMirrored)
+                        }
+                        return .finished(
+                            main: VideoCaptureResult.Result(path: mainResult.path, thumbnail: thumbnailImage, isMirrored: isMirrored, dimensions: mainResult.dimensions),
+                            additional: nil,
+                            duration: duration,
+                            positionChangeTimestamps: positionChangeTimestamps,
+                            captureTimestamp: captureTimestamp
+                        )
+                    } else {
+                        return result
+                    }
                 }
             }
         }
@@ -578,6 +672,10 @@ private final class CameraContext {
     
     var audioLevel: Signal<Float, NoError> {
         return self.audioLevelPipe.signal()
+    }
+    
+    var transitionImage: Signal<UIImage?, NoError> {
+        return .single(self.mainDeviceContext?.output.transitionImage)
     }
     
     @objc private func sessionInterruptionEnded(notification: NSNotification) {
@@ -609,6 +707,26 @@ public final class Camera {
     public typealias ExposureMode = AVCaptureDevice.ExposureMode
     public typealias FlashMode = AVCaptureDevice.FlashMode
     
+    public struct CollageGrid: Hashable {
+        public struct Row: Hashable {
+            public let columns: Int
+            
+            public init(columns: Int) {
+                self.columns = columns
+            }
+        }
+
+        public let rows: [Row]
+        
+        public init(rows: [Row]) {
+            self.rows = rows
+        }
+        
+        public var count: Int {
+            return self.rows.reduce(0) { $0 + $1.columns }
+        }
+    }
+    
     public struct Configuration {
         let preset: Preset
         let position: Position
@@ -619,8 +737,9 @@ public final class Camera {
         let preferWide: Bool
         let preferLowerFramerate: Bool
         let reportAudioLevel: Bool
+        let isRoundVideo: Bool
         
-        public init(preset: Preset, position: Position, isDualEnabled: Bool = false, audio: Bool, photo: Bool, metadata: Bool, preferWide: Bool = false, preferLowerFramerate: Bool = false, reportAudioLevel: Bool = false) {
+        public init(preset: Preset, position: Position, isDualEnabled: Bool = false, audio: Bool, photo: Bool, metadata: Bool, preferWide: Bool = false, preferLowerFramerate: Bool = false, reportAudioLevel: Bool = false, isRoundVideo: Bool = false) {
             self.preset = preset
             self.position = position
             self.isDualEnabled = isDualEnabled
@@ -630,6 +749,7 @@ public final class Camera {
             self.preferWide = preferWide
             self.preferLowerFramerate = preferLowerFramerate
             self.reportAudioLevel = reportAudioLevel
+            self.isRoundVideo = isRoundVideo
         }
     }
     
@@ -640,15 +760,25 @@ public final class Camera {
     
     public let metrics: Camera.Metrics
     
-    public init(configuration: Camera.Configuration = Configuration(preset: .hd1920x1080, position: .back, audio: true, photo: false, metadata: false), previewView: CameraSimplePreviewView? = nil, secondaryPreviewView: CameraSimplePreviewView? = nil) {
+    public init(
+        configuration: Camera.Configuration = Configuration(
+            preset: .hd1920x1080,
+            position: .back,
+            audio: true,
+            photo: false,
+            metadata: false
+        ),
+        previewView: CameraSimplePreviewView? = nil,
+        secondaryPreviewView: CameraSimplePreviewView? = nil
+    ) {
         Logger.shared.log("Camera", "Init")
         
         self.metrics = Camera.Metrics(model: DeviceModel.current)
         
-        let session = CameraSession()
-        session.session.usesApplicationAudioSession = true
+        let session = CameraSession(forRoundVideo: configuration.isRoundVideo)
         session.session.automaticallyConfiguresApplicationAudioSession = false
         session.session.automaticallyConfiguresCaptureDeviceForWideColor = false
+        session.session.usesApplicationAudioSession = true
         if let previewView {
             previewView.setSession(session.session, autoConnect: !session.hasMultiCam)
         }
@@ -749,7 +879,7 @@ public final class Camera {
         }
     }
     
-    public func startRecording() -> Signal<Double, NoError> {
+    public func startRecording() -> Signal<CameraRecordingData, CameraRecordingError> {
         return Signal { subscriber in
             let disposable = MetaDisposable()
             self.queue.async {
@@ -822,6 +952,14 @@ public final class Camera {
         }
     }
     
+    public func rampZoom(_ zoomLevel: CGFloat, rate: CGFloat) {
+        self.queue.async {
+            if let context = self.contextRef?.takeUnretainedValue() {
+                context.rampZoom(zoomLevel, rate: rate)
+            }
+        }
+    }
+    
     public func setTorchActive(_ active: Bool) {
         self.queue.async {
             if let context = self.contextRef?.takeUnretainedValue() {
@@ -878,16 +1016,19 @@ public final class Camera {
         }
     }
     
-    public func attachPreviewView(_ view: CameraPreviewView) {
-        self.previewView = view
-        let viewRef: Unmanaged<CameraPreviewView> = Unmanaged.passRetained(view)
+    public func setPreviewOutput(_ output: CameraVideoOutput?) {
+        let outputRef: Unmanaged<CameraVideoOutput>? = output.flatMap { Unmanaged.passRetained($0) }
         self.queue.async {
             if let context = self.contextRef?.takeUnretainedValue() {
-                context.previewView = viewRef.takeUnretainedValue()
-                viewRef.release()
+                if let outputRef {
+                    context.videoOutput = outputRef.takeUnretainedValue()
+                    outputRef.release()
+                } else {
+                    context.videoOutput = nil
+                }
             } else {
                 Queue.mainQueue().async {
-                    viewRef.release()
+                    outputRef?.release()
                 }
             }
         }
@@ -935,6 +1076,20 @@ public final class Camera {
         }
     }
     
+    public var transitionImage: Signal<UIImage?, NoError> {
+        return Signal { subscriber in
+            let disposable = MetaDisposable()
+            self.queue.async {
+                if let context = self.contextRef?.takeUnretainedValue() {
+                    disposable.set(context.transitionImage.start(next: { codes in
+                        subscriber.putNext(codes)
+                    }))
+                }
+            }
+            return disposable
+        }
+    }
+    
     public enum ModeChange: Equatable {
         case none
         case position
@@ -954,21 +1109,58 @@ public final class Camera {
         }
     }
     
-    public static var isDualCameraSupported: Bool {
+    public static func isDualCameraSupported(forRoundVideo: Bool = false) -> Bool {
         if #available(iOS 13.0, *), AVCaptureMultiCamSession.isMultiCamSupported && !DeviceModel.current.isIpad {
+            if forRoundVideo && DeviceModel.current == .iPhoneXR {
+                return false
+            }
             return true
         } else {
             return false
         }
     }
+    
+    public static var isIpad: Bool {
+        return DeviceModel.current.isIpad
+    }
 }
 
 public final class CameraHolder {
     public let camera: Camera
-    public let previewView: CameraPreviewView
+    public let previewView: CameraSimplePreviewView
+    public let parentView: UIView
+    public let restore: () -> Void
     
-    public init(camera: Camera, previewView: CameraPreviewView) {
+    public init(
+        camera: Camera,
+        previewView: CameraSimplePreviewView,
+        parentView: UIView,
+        restore: @escaping () -> Void
+    ) {
         self.camera = camera
         self.previewView = previewView
+        self.parentView = parentView
+        self.restore = restore
+    }
+}
+
+public struct CameraRecordingData {
+    public let duration: Double
+    public let filePath: String
+}
+
+public enum CameraRecordingError {
+    case audioInitializationError
+}
+
+public class CameraVideoOutput {
+    private let sink: (CMSampleBuffer, Bool) -> Void
+    
+    public init(sink: @escaping (CMSampleBuffer, Bool) -> Void) {
+        self.sink = sink
+    }
+    
+    func push(_ buffer: CMSampleBuffer, mirror: Bool) {
+        self.sink(buffer, mirror)
     }
 }

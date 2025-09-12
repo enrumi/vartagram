@@ -16,6 +16,7 @@ import HexColor
 import PresentationDataUtils
 import MediaPickerUI
 import WallpaperGalleryScreen
+import Photos
 
 public enum WallpaperSelectionResult {
     case remove
@@ -101,13 +102,6 @@ public final class ThemeGridController: ViewController {
                 }
             }
         })
-        
-        if case .generic = mode {
-            self.searchContentNode = NavigationBarSearchContentNode(theme: self.presentationData.theme, placeholder: self.presentationData.strings.Wallpaper_Search, activate: { [weak self] in
-                self?.activateSearch()
-            })
-            self.navigationBar?.setContentNode(self.searchContentNode, animated: false)
-        }
     }
     
     required public init(coder aDecoder: NSCoder) {
@@ -238,7 +232,7 @@ public final class ThemeGridController: ViewController {
                     }
                 }
                 
-                let controller = MediaPickerScreen(context: strongSelf.context, peer: nil, threadTitle: nil, chatLocation: nil, bannedSendPhotos: nil, bannedSendVideos: nil, subject: .assets(nil, .wallpaper))
+                let controller = MediaPickerScreenImpl(context: strongSelf.context, peer: nil, threadTitle: nil, chatLocation: nil, bannedSendPhotos: nil, bannedSendVideos: nil, subject: .assets(nil, .wallpaper))
                 controller.customSelection = { [weak self] _, asset in
                     guard let strongSelf = self, let asset = asset as? PHAsset else {
                         return

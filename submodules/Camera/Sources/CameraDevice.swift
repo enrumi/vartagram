@@ -29,7 +29,7 @@ final class CameraDevice {
     
     public private(set) var audioDevice: AVCaptureDevice? = nil
         
-    func configure(for session: CameraSession, position: Camera.Position, dual: Bool) {
+    func configure(for session: CameraSession, position: Camera.Position, dual: Bool, switchAudio: Bool) {
         self.position = position
         
         var selectedDevice: AVCaptureDevice?
@@ -57,7 +57,9 @@ final class CameraDevice {
         self.videoDevice = selectedDevice
         self.videoDevicePromise.set(.single(selectedDevice))
         
-        self.audioDevice = AVCaptureDevice.default(for: .audio)
+        if switchAudio {
+            self.audioDevice = AVCaptureDevice.default(for: .audio)
+        }
     }
     
     func configureDeviceFormat(maxDimensions: CMVideoDimensions, maxFramerate: Double) {
@@ -269,7 +271,10 @@ final class CameraDevice {
             return
         }
         self.transaction(device) { device in
-            device.torchMode = active ? .on : .off
+            let torchMode: AVCaptureDevice.TorchMode = active ? .on : .off
+            if device.isTorchModeSupported(torchMode) {
+                device.torchMode = active ? .on : .off
+            }
         }
     }
     
@@ -310,6 +315,15 @@ final class CameraDevice {
         }
         self.transaction(device) { device in
             device.videoZoomFactor = max(1.0, min(10.0, device.videoZoomFactor * zoomDelta))
+        }
+    }
+    
+    func rampZoom(_ zoomLevel: CGFloat, rate: CGFloat) {
+        guard let device = self.videoDevice else {
+            return
+        }
+        self.transaction(device) { device in
+            device.ramp(toVideoZoomFactor: zoomLevel, withRate: Float(rate))
         }
     }
     

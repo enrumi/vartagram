@@ -1,417 +1,87 @@
 public extension Api {
-    enum InputWebDocument: TypeConstructorDescription {
-        case inputWebDocument(url: String, size: Int32, mimeType: String, attributes: [Api.DocumentAttribute])
+    enum InputMessage: TypeConstructorDescription {
+        case inputMessageCallbackQuery(id: Int32, queryId: Int64)
+        case inputMessageID(id: Int32)
+        case inputMessagePinned
+        case inputMessageReplyTo(id: Int32)
     
     public func serialize(_ buffer: Buffer, _ boxed: Swift.Bool) {
     switch self {
-                case .inputWebDocument(let url, let size, let mimeType, let attributes):
+                case .inputMessageCallbackQuery(let id, let queryId):
                     if boxed {
-                        buffer.appendInt32(-1678949555)
+                        buffer.appendInt32(-1392895362)
                     }
-                    serializeString(url, buffer: buffer, boxed: false)
-                    serializeInt32(size, buffer: buffer, boxed: false)
-                    serializeString(mimeType, buffer: buffer, boxed: false)
-                    buffer.appendInt32(481674261)
-                    buffer.appendInt32(Int32(attributes.count))
-                    for item in attributes {
-                        item.serialize(buffer, true)
-                    }
+                    serializeInt32(id, buffer: buffer, boxed: false)
+                    serializeInt64(queryId, buffer: buffer, boxed: false)
                     break
-    }
-    }
-    
-    public func descriptionFields() -> (String, [(String, Any)]) {
-        switch self {
-                case .inputWebDocument(let url, let size, let mimeType, let attributes):
-                return ("inputWebDocument", [("url", url as Any), ("size", size as Any), ("mimeType", mimeType as Any), ("attributes", attributes as Any)])
-    }
-    }
-    
-        public static func parse_inputWebDocument(_ reader: BufferReader) -> InputWebDocument? {
-            var _1: String?
-            _1 = parseString(reader)
-            var _2: Int32?
-            _2 = reader.readInt32()
-            var _3: String?
-            _3 = parseString(reader)
-            var _4: [Api.DocumentAttribute]?
-            if let _ = reader.readInt32() {
-                _4 = Api.parseVector(reader, elementSignature: 0, elementType: Api.DocumentAttribute.self)
-            }
-            let _c1 = _1 != nil
-            let _c2 = _2 != nil
-            let _c3 = _3 != nil
-            let _c4 = _4 != nil
-            if _c1 && _c2 && _c3 && _c4 {
-                return Api.InputWebDocument.inputWebDocument(url: _1!, size: _2!, mimeType: _3!, attributes: _4!)
-            }
-            else {
-                return nil
-            }
-        }
-    
-    }
-}
-public extension Api {
-    enum InputWebFileLocation: TypeConstructorDescription {
-        case inputWebFileAudioAlbumThumbLocation(flags: Int32, document: Api.InputDocument?, title: String?, performer: String?)
-        case inputWebFileGeoPointLocation(geoPoint: Api.InputGeoPoint, accessHash: Int64, w: Int32, h: Int32, zoom: Int32, scale: Int32)
-        case inputWebFileLocation(url: String, accessHash: Int64)
-    
-    public func serialize(_ buffer: Buffer, _ boxed: Swift.Bool) {
-    switch self {
-                case .inputWebFileAudioAlbumThumbLocation(let flags, let document, let title, let performer):
+                case .inputMessageID(let id):
                     if boxed {
-                        buffer.appendInt32(-193992412)
+                        buffer.appendInt32(-1502174430)
                     }
-                    serializeInt32(flags, buffer: buffer, boxed: false)
-                    if Int(flags) & Int(1 << 0) != 0 {document!.serialize(buffer, true)}
-                    if Int(flags) & Int(1 << 1) != 0 {serializeString(title!, buffer: buffer, boxed: false)}
-                    if Int(flags) & Int(1 << 1) != 0 {serializeString(performer!, buffer: buffer, boxed: false)}
+                    serializeInt32(id, buffer: buffer, boxed: false)
                     break
-                case .inputWebFileGeoPointLocation(let geoPoint, let accessHash, let w, let h, let zoom, let scale):
+                case .inputMessagePinned:
                     if boxed {
-                        buffer.appendInt32(-1625153079)
-                    }
-                    geoPoint.serialize(buffer, true)
-                    serializeInt64(accessHash, buffer: buffer, boxed: false)
-                    serializeInt32(w, buffer: buffer, boxed: false)
-                    serializeInt32(h, buffer: buffer, boxed: false)
-                    serializeInt32(zoom, buffer: buffer, boxed: false)
-                    serializeInt32(scale, buffer: buffer, boxed: false)
-                    break
-                case .inputWebFileLocation(let url, let accessHash):
-                    if boxed {
-                        buffer.appendInt32(-1036396922)
-                    }
-                    serializeString(url, buffer: buffer, boxed: false)
-                    serializeInt64(accessHash, buffer: buffer, boxed: false)
-                    break
-    }
-    }
-    
-    public func descriptionFields() -> (String, [(String, Any)]) {
-        switch self {
-                case .inputWebFileAudioAlbumThumbLocation(let flags, let document, let title, let performer):
-                return ("inputWebFileAudioAlbumThumbLocation", [("flags", flags as Any), ("document", document as Any), ("title", title as Any), ("performer", performer as Any)])
-                case .inputWebFileGeoPointLocation(let geoPoint, let accessHash, let w, let h, let zoom, let scale):
-                return ("inputWebFileGeoPointLocation", [("geoPoint", geoPoint as Any), ("accessHash", accessHash as Any), ("w", w as Any), ("h", h as Any), ("zoom", zoom as Any), ("scale", scale as Any)])
-                case .inputWebFileLocation(let url, let accessHash):
-                return ("inputWebFileLocation", [("url", url as Any), ("accessHash", accessHash as Any)])
-    }
-    }
-    
-        public static func parse_inputWebFileAudioAlbumThumbLocation(_ reader: BufferReader) -> InputWebFileLocation? {
-            var _1: Int32?
-            _1 = reader.readInt32()
-            var _2: Api.InputDocument?
-            if Int(_1!) & Int(1 << 0) != 0 {if let signature = reader.readInt32() {
-                _2 = Api.parse(reader, signature: signature) as? Api.InputDocument
-            } }
-            var _3: String?
-            if Int(_1!) & Int(1 << 1) != 0 {_3 = parseString(reader) }
-            var _4: String?
-            if Int(_1!) & Int(1 << 1) != 0 {_4 = parseString(reader) }
-            let _c1 = _1 != nil
-            let _c2 = (Int(_1!) & Int(1 << 0) == 0) || _2 != nil
-            let _c3 = (Int(_1!) & Int(1 << 1) == 0) || _3 != nil
-            let _c4 = (Int(_1!) & Int(1 << 1) == 0) || _4 != nil
-            if _c1 && _c2 && _c3 && _c4 {
-                return Api.InputWebFileLocation.inputWebFileAudioAlbumThumbLocation(flags: _1!, document: _2, title: _3, performer: _4)
-            }
-            else {
-                return nil
-            }
-        }
-        public static func parse_inputWebFileGeoPointLocation(_ reader: BufferReader) -> InputWebFileLocation? {
-            var _1: Api.InputGeoPoint?
-            if let signature = reader.readInt32() {
-                _1 = Api.parse(reader, signature: signature) as? Api.InputGeoPoint
-            }
-            var _2: Int64?
-            _2 = reader.readInt64()
-            var _3: Int32?
-            _3 = reader.readInt32()
-            var _4: Int32?
-            _4 = reader.readInt32()
-            var _5: Int32?
-            _5 = reader.readInt32()
-            var _6: Int32?
-            _6 = reader.readInt32()
-            let _c1 = _1 != nil
-            let _c2 = _2 != nil
-            let _c3 = _3 != nil
-            let _c4 = _4 != nil
-            let _c5 = _5 != nil
-            let _c6 = _6 != nil
-            if _c1 && _c2 && _c3 && _c4 && _c5 && _c6 {
-                return Api.InputWebFileLocation.inputWebFileGeoPointLocation(geoPoint: _1!, accessHash: _2!, w: _3!, h: _4!, zoom: _5!, scale: _6!)
-            }
-            else {
-                return nil
-            }
-        }
-        public static func parse_inputWebFileLocation(_ reader: BufferReader) -> InputWebFileLocation? {
-            var _1: String?
-            _1 = parseString(reader)
-            var _2: Int64?
-            _2 = reader.readInt64()
-            let _c1 = _1 != nil
-            let _c2 = _2 != nil
-            if _c1 && _c2 {
-                return Api.InputWebFileLocation.inputWebFileLocation(url: _1!, accessHash: _2!)
-            }
-            else {
-                return nil
-            }
-        }
-    
-    }
-}
-public extension Api {
-    enum Invoice: TypeConstructorDescription {
-        case invoice(flags: Int32, currency: String, prices: [Api.LabeledPrice], maxTipAmount: Int64?, suggestedTipAmounts: [Int64]?, termsUrl: String?)
-    
-    public func serialize(_ buffer: Buffer, _ boxed: Swift.Bool) {
-    switch self {
-                case .invoice(let flags, let currency, let prices, let maxTipAmount, let suggestedTipAmounts, let termsUrl):
-                    if boxed {
-                        buffer.appendInt32(1572428309)
-                    }
-                    serializeInt32(flags, buffer: buffer, boxed: false)
-                    serializeString(currency, buffer: buffer, boxed: false)
-                    buffer.appendInt32(481674261)
-                    buffer.appendInt32(Int32(prices.count))
-                    for item in prices {
-                        item.serialize(buffer, true)
-                    }
-                    if Int(flags) & Int(1 << 8) != 0 {serializeInt64(maxTipAmount!, buffer: buffer, boxed: false)}
-                    if Int(flags) & Int(1 << 8) != 0 {buffer.appendInt32(481674261)
-                    buffer.appendInt32(Int32(suggestedTipAmounts!.count))
-                    for item in suggestedTipAmounts! {
-                        serializeInt64(item, buffer: buffer, boxed: false)
-                    }}
-                    if Int(flags) & Int(1 << 10) != 0 {serializeString(termsUrl!, buffer: buffer, boxed: false)}
-                    break
-    }
-    }
-    
-    public func descriptionFields() -> (String, [(String, Any)]) {
-        switch self {
-                case .invoice(let flags, let currency, let prices, let maxTipAmount, let suggestedTipAmounts, let termsUrl):
-                return ("invoice", [("flags", flags as Any), ("currency", currency as Any), ("prices", prices as Any), ("maxTipAmount", maxTipAmount as Any), ("suggestedTipAmounts", suggestedTipAmounts as Any), ("termsUrl", termsUrl as Any)])
-    }
-    }
-    
-        public static func parse_invoice(_ reader: BufferReader) -> Invoice? {
-            var _1: Int32?
-            _1 = reader.readInt32()
-            var _2: String?
-            _2 = parseString(reader)
-            var _3: [Api.LabeledPrice]?
-            if let _ = reader.readInt32() {
-                _3 = Api.parseVector(reader, elementSignature: 0, elementType: Api.LabeledPrice.self)
-            }
-            var _4: Int64?
-            if Int(_1!) & Int(1 << 8) != 0 {_4 = reader.readInt64() }
-            var _5: [Int64]?
-            if Int(_1!) & Int(1 << 8) != 0 {if let _ = reader.readInt32() {
-                _5 = Api.parseVector(reader, elementSignature: 570911930, elementType: Int64.self)
-            } }
-            var _6: String?
-            if Int(_1!) & Int(1 << 10) != 0 {_6 = parseString(reader) }
-            let _c1 = _1 != nil
-            let _c2 = _2 != nil
-            let _c3 = _3 != nil
-            let _c4 = (Int(_1!) & Int(1 << 8) == 0) || _4 != nil
-            let _c5 = (Int(_1!) & Int(1 << 8) == 0) || _5 != nil
-            let _c6 = (Int(_1!) & Int(1 << 10) == 0) || _6 != nil
-            if _c1 && _c2 && _c3 && _c4 && _c5 && _c6 {
-                return Api.Invoice.invoice(flags: _1!, currency: _2!, prices: _3!, maxTipAmount: _4, suggestedTipAmounts: _5, termsUrl: _6)
-            }
-            else {
-                return nil
-            }
-        }
-    
-    }
-}
-public extension Api {
-    enum JSONObjectValue: TypeConstructorDescription {
-        case jsonObjectValue(key: String, value: Api.JSONValue)
-    
-    public func serialize(_ buffer: Buffer, _ boxed: Swift.Bool) {
-    switch self {
-                case .jsonObjectValue(let key, let value):
-                    if boxed {
-                        buffer.appendInt32(-1059185703)
-                    }
-                    serializeString(key, buffer: buffer, boxed: false)
-                    value.serialize(buffer, true)
-                    break
-    }
-    }
-    
-    public func descriptionFields() -> (String, [(String, Any)]) {
-        switch self {
-                case .jsonObjectValue(let key, let value):
-                return ("jsonObjectValue", [("key", key as Any), ("value", value as Any)])
-    }
-    }
-    
-        public static func parse_jsonObjectValue(_ reader: BufferReader) -> JSONObjectValue? {
-            var _1: String?
-            _1 = parseString(reader)
-            var _2: Api.JSONValue?
-            if let signature = reader.readInt32() {
-                _2 = Api.parse(reader, signature: signature) as? Api.JSONValue
-            }
-            let _c1 = _1 != nil
-            let _c2 = _2 != nil
-            if _c1 && _c2 {
-                return Api.JSONObjectValue.jsonObjectValue(key: _1!, value: _2!)
-            }
-            else {
-                return nil
-            }
-        }
-    
-    }
-}
-public extension Api {
-    enum JSONValue: TypeConstructorDescription {
-        case jsonArray(value: [Api.JSONValue])
-        case jsonBool(value: Api.Bool)
-        case jsonNull
-        case jsonNumber(value: Double)
-        case jsonObject(value: [Api.JSONObjectValue])
-        case jsonString(value: String)
-    
-    public func serialize(_ buffer: Buffer, _ boxed: Swift.Bool) {
-    switch self {
-                case .jsonArray(let value):
-                    if boxed {
-                        buffer.appendInt32(-146520221)
-                    }
-                    buffer.appendInt32(481674261)
-                    buffer.appendInt32(Int32(value.count))
-                    for item in value {
-                        item.serialize(buffer, true)
-                    }
-                    break
-                case .jsonBool(let value):
-                    if boxed {
-                        buffer.appendInt32(-952869270)
-                    }
-                    value.serialize(buffer, true)
-                    break
-                case .jsonNull:
-                    if boxed {
-                        buffer.appendInt32(1064139624)
+                        buffer.appendInt32(-2037963464)
                     }
                     
                     break
-                case .jsonNumber(let value):
+                case .inputMessageReplyTo(let id):
                     if boxed {
-                        buffer.appendInt32(736157604)
+                        buffer.appendInt32(-1160215659)
                     }
-                    serializeDouble(value, buffer: buffer, boxed: false)
-                    break
-                case .jsonObject(let value):
-                    if boxed {
-                        buffer.appendInt32(-1715350371)
-                    }
-                    buffer.appendInt32(481674261)
-                    buffer.appendInt32(Int32(value.count))
-                    for item in value {
-                        item.serialize(buffer, true)
-                    }
-                    break
-                case .jsonString(let value):
-                    if boxed {
-                        buffer.appendInt32(-1222740358)
-                    }
-                    serializeString(value, buffer: buffer, boxed: false)
+                    serializeInt32(id, buffer: buffer, boxed: false)
                     break
     }
     }
     
     public func descriptionFields() -> (String, [(String, Any)]) {
         switch self {
-                case .jsonArray(let value):
-                return ("jsonArray", [("value", value as Any)])
-                case .jsonBool(let value):
-                return ("jsonBool", [("value", value as Any)])
-                case .jsonNull:
-                return ("jsonNull", [])
-                case .jsonNumber(let value):
-                return ("jsonNumber", [("value", value as Any)])
-                case .jsonObject(let value):
-                return ("jsonObject", [("value", value as Any)])
-                case .jsonString(let value):
-                return ("jsonString", [("value", value as Any)])
+                case .inputMessageCallbackQuery(let id, let queryId):
+                return ("inputMessageCallbackQuery", [("id", id as Any), ("queryId", queryId as Any)])
+                case .inputMessageID(let id):
+                return ("inputMessageID", [("id", id as Any)])
+                case .inputMessagePinned:
+                return ("inputMessagePinned", [])
+                case .inputMessageReplyTo(let id):
+                return ("inputMessageReplyTo", [("id", id as Any)])
     }
     }
     
-        public static func parse_jsonArray(_ reader: BufferReader) -> JSONValue? {
-            var _1: [Api.JSONValue]?
-            if let _ = reader.readInt32() {
-                _1 = Api.parseVector(reader, elementSignature: 0, elementType: Api.JSONValue.self)
-            }
+        public static func parse_inputMessageCallbackQuery(_ reader: BufferReader) -> InputMessage? {
+            var _1: Int32?
+            _1 = reader.readInt32()
+            var _2: Int64?
+            _2 = reader.readInt64()
             let _c1 = _1 != nil
-            if _c1 {
-                return Api.JSONValue.jsonArray(value: _1!)
+            let _c2 = _2 != nil
+            if _c1 && _c2 {
+                return Api.InputMessage.inputMessageCallbackQuery(id: _1!, queryId: _2!)
             }
             else {
                 return nil
             }
         }
-        public static func parse_jsonBool(_ reader: BufferReader) -> JSONValue? {
-            var _1: Api.Bool?
-            if let signature = reader.readInt32() {
-                _1 = Api.parse(reader, signature: signature) as? Api.Bool
-            }
+        public static func parse_inputMessageID(_ reader: BufferReader) -> InputMessage? {
+            var _1: Int32?
+            _1 = reader.readInt32()
             let _c1 = _1 != nil
             if _c1 {
-                return Api.JSONValue.jsonBool(value: _1!)
+                return Api.InputMessage.inputMessageID(id: _1!)
             }
             else {
                 return nil
             }
         }
-        public static func parse_jsonNull(_ reader: BufferReader) -> JSONValue? {
-            return Api.JSONValue.jsonNull
+        public static func parse_inputMessagePinned(_ reader: BufferReader) -> InputMessage? {
+            return Api.InputMessage.inputMessagePinned
         }
-        public static func parse_jsonNumber(_ reader: BufferReader) -> JSONValue? {
-            var _1: Double?
-            _1 = reader.readDouble()
+        public static func parse_inputMessageReplyTo(_ reader: BufferReader) -> InputMessage? {
+            var _1: Int32?
+            _1 = reader.readInt32()
             let _c1 = _1 != nil
             if _c1 {
-                return Api.JSONValue.jsonNumber(value: _1!)
-            }
-            else {
-                return nil
-            }
-        }
-        public static func parse_jsonObject(_ reader: BufferReader) -> JSONValue? {
-            var _1: [Api.JSONObjectValue]?
-            if let _ = reader.readInt32() {
-                _1 = Api.parseVector(reader, elementSignature: 0, elementType: Api.JSONObjectValue.self)
-            }
-            let _c1 = _1 != nil
-            if _c1 {
-                return Api.JSONValue.jsonObject(value: _1!)
-            }
-            else {
-                return nil
-            }
-        }
-        public static func parse_jsonString(_ reader: BufferReader) -> JSONValue? {
-            var _1: String?
-            _1 = parseString(reader)
-            let _c1 = _1 != nil
-            if _c1 {
-                return Api.JSONValue.jsonString(value: _1!)
+                return Api.InputMessage.inputMessageReplyTo(id: _1!)
             }
             else {
                 return nil
@@ -421,439 +91,491 @@ public extension Api {
     }
 }
 public extension Api {
-    indirect enum KeyboardButton: TypeConstructorDescription {
-        case inputKeyboardButtonUrlAuth(flags: Int32, text: String, fwdText: String?, url: String, bot: Api.InputUser)
-        case inputKeyboardButtonUserProfile(text: String, userId: Api.InputUser)
-        case keyboardButton(text: String)
-        case keyboardButtonBuy(text: String)
-        case keyboardButtonCallback(flags: Int32, text: String, data: Buffer)
-        case keyboardButtonGame(text: String)
-        case keyboardButtonRequestGeoLocation(text: String)
-        case keyboardButtonRequestPeer(text: String, buttonId: Int32, peerType: Api.RequestPeerType, maxQuantity: Int32)
-        case keyboardButtonRequestPhone(text: String)
-        case keyboardButtonRequestPoll(flags: Int32, quiz: Api.Bool?, text: String)
-        case keyboardButtonSimpleWebView(text: String, url: String)
-        case keyboardButtonSwitchInline(flags: Int32, text: String, query: String, peerTypes: [Api.InlineQueryPeerType]?)
-        case keyboardButtonUrl(text: String, url: String)
-        case keyboardButtonUrlAuth(flags: Int32, text: String, fwdText: String?, url: String, buttonId: Int32)
-        case keyboardButtonUserProfile(text: String, userId: Int64)
-        case keyboardButtonWebView(text: String, url: String)
+    indirect enum InputNotifyPeer: TypeConstructorDescription {
+        case inputNotifyBroadcasts
+        case inputNotifyChats
+        case inputNotifyForumTopic(peer: Api.InputPeer, topMsgId: Int32)
+        case inputNotifyPeer(peer: Api.InputPeer)
+        case inputNotifyUsers
     
     public func serialize(_ buffer: Buffer, _ boxed: Swift.Bool) {
     switch self {
-                case .inputKeyboardButtonUrlAuth(let flags, let text, let fwdText, let url, let bot):
+                case .inputNotifyBroadcasts:
                     if boxed {
-                        buffer.appendInt32(-802258988)
+                        buffer.appendInt32(-1311015810)
                     }
-                    serializeInt32(flags, buffer: buffer, boxed: false)
-                    serializeString(text, buffer: buffer, boxed: false)
-                    if Int(flags) & Int(1 << 1) != 0 {serializeString(fwdText!, buffer: buffer, boxed: false)}
-                    serializeString(url, buffer: buffer, boxed: false)
-                    bot.serialize(buffer, true)
+                    
                     break
-                case .inputKeyboardButtonUserProfile(let text, let userId):
+                case .inputNotifyChats:
                     if boxed {
-                        buffer.appendInt32(-376962181)
+                        buffer.appendInt32(1251338318)
                     }
-                    serializeString(text, buffer: buffer, boxed: false)
-                    userId.serialize(buffer, true)
+                    
                     break
-                case .keyboardButton(let text):
+                case .inputNotifyForumTopic(let peer, let topMsgId):
                     if boxed {
-                        buffer.appendInt32(-1560655744)
+                        buffer.appendInt32(1548122514)
                     }
-                    serializeString(text, buffer: buffer, boxed: false)
+                    peer.serialize(buffer, true)
+                    serializeInt32(topMsgId, buffer: buffer, boxed: false)
                     break
-                case .keyboardButtonBuy(let text):
+                case .inputNotifyPeer(let peer):
                     if boxed {
-                        buffer.appendInt32(-1344716869)
+                        buffer.appendInt32(-1195615476)
                     }
-                    serializeString(text, buffer: buffer, boxed: false)
+                    peer.serialize(buffer, true)
                     break
-                case .keyboardButtonCallback(let flags, let text, let data):
+                case .inputNotifyUsers:
                     if boxed {
-                        buffer.appendInt32(901503851)
+                        buffer.appendInt32(423314455)
                     }
-                    serializeInt32(flags, buffer: buffer, boxed: false)
-                    serializeString(text, buffer: buffer, boxed: false)
-                    serializeBytes(data, buffer: buffer, boxed: false)
-                    break
-                case .keyboardButtonGame(let text):
-                    if boxed {
-                        buffer.appendInt32(1358175439)
-                    }
-                    serializeString(text, buffer: buffer, boxed: false)
-                    break
-                case .keyboardButtonRequestGeoLocation(let text):
-                    if boxed {
-                        buffer.appendInt32(-59151553)
-                    }
-                    serializeString(text, buffer: buffer, boxed: false)
-                    break
-                case .keyboardButtonRequestPeer(let text, let buttonId, let peerType, let maxQuantity):
-                    if boxed {
-                        buffer.appendInt32(1406648280)
-                    }
-                    serializeString(text, buffer: buffer, boxed: false)
-                    serializeInt32(buttonId, buffer: buffer, boxed: false)
-                    peerType.serialize(buffer, true)
-                    serializeInt32(maxQuantity, buffer: buffer, boxed: false)
-                    break
-                case .keyboardButtonRequestPhone(let text):
-                    if boxed {
-                        buffer.appendInt32(-1318425559)
-                    }
-                    serializeString(text, buffer: buffer, boxed: false)
-                    break
-                case .keyboardButtonRequestPoll(let flags, let quiz, let text):
-                    if boxed {
-                        buffer.appendInt32(-1144565411)
-                    }
-                    serializeInt32(flags, buffer: buffer, boxed: false)
-                    if Int(flags) & Int(1 << 0) != 0 {quiz!.serialize(buffer, true)}
-                    serializeString(text, buffer: buffer, boxed: false)
-                    break
-                case .keyboardButtonSimpleWebView(let text, let url):
-                    if boxed {
-                        buffer.appendInt32(-1598009252)
-                    }
-                    serializeString(text, buffer: buffer, boxed: false)
-                    serializeString(url, buffer: buffer, boxed: false)
-                    break
-                case .keyboardButtonSwitchInline(let flags, let text, let query, let peerTypes):
-                    if boxed {
-                        buffer.appendInt32(-1816527947)
-                    }
-                    serializeInt32(flags, buffer: buffer, boxed: false)
-                    serializeString(text, buffer: buffer, boxed: false)
-                    serializeString(query, buffer: buffer, boxed: false)
-                    if Int(flags) & Int(1 << 1) != 0 {buffer.appendInt32(481674261)
-                    buffer.appendInt32(Int32(peerTypes!.count))
-                    for item in peerTypes! {
-                        item.serialize(buffer, true)
-                    }}
-                    break
-                case .keyboardButtonUrl(let text, let url):
-                    if boxed {
-                        buffer.appendInt32(629866245)
-                    }
-                    serializeString(text, buffer: buffer, boxed: false)
-                    serializeString(url, buffer: buffer, boxed: false)
-                    break
-                case .keyboardButtonUrlAuth(let flags, let text, let fwdText, let url, let buttonId):
-                    if boxed {
-                        buffer.appendInt32(280464681)
-                    }
-                    serializeInt32(flags, buffer: buffer, boxed: false)
-                    serializeString(text, buffer: buffer, boxed: false)
-                    if Int(flags) & Int(1 << 0) != 0 {serializeString(fwdText!, buffer: buffer, boxed: false)}
-                    serializeString(url, buffer: buffer, boxed: false)
-                    serializeInt32(buttonId, buffer: buffer, boxed: false)
-                    break
-                case .keyboardButtonUserProfile(let text, let userId):
-                    if boxed {
-                        buffer.appendInt32(814112961)
-                    }
-                    serializeString(text, buffer: buffer, boxed: false)
-                    serializeInt64(userId, buffer: buffer, boxed: false)
-                    break
-                case .keyboardButtonWebView(let text, let url):
-                    if boxed {
-                        buffer.appendInt32(326529584)
-                    }
-                    serializeString(text, buffer: buffer, boxed: false)
-                    serializeString(url, buffer: buffer, boxed: false)
+                    
                     break
     }
     }
     
     public func descriptionFields() -> (String, [(String, Any)]) {
         switch self {
-                case .inputKeyboardButtonUrlAuth(let flags, let text, let fwdText, let url, let bot):
-                return ("inputKeyboardButtonUrlAuth", [("flags", flags as Any), ("text", text as Any), ("fwdText", fwdText as Any), ("url", url as Any), ("bot", bot as Any)])
-                case .inputKeyboardButtonUserProfile(let text, let userId):
-                return ("inputKeyboardButtonUserProfile", [("text", text as Any), ("userId", userId as Any)])
-                case .keyboardButton(let text):
-                return ("keyboardButton", [("text", text as Any)])
-                case .keyboardButtonBuy(let text):
-                return ("keyboardButtonBuy", [("text", text as Any)])
-                case .keyboardButtonCallback(let flags, let text, let data):
-                return ("keyboardButtonCallback", [("flags", flags as Any), ("text", text as Any), ("data", data as Any)])
-                case .keyboardButtonGame(let text):
-                return ("keyboardButtonGame", [("text", text as Any)])
-                case .keyboardButtonRequestGeoLocation(let text):
-                return ("keyboardButtonRequestGeoLocation", [("text", text as Any)])
-                case .keyboardButtonRequestPeer(let text, let buttonId, let peerType, let maxQuantity):
-                return ("keyboardButtonRequestPeer", [("text", text as Any), ("buttonId", buttonId as Any), ("peerType", peerType as Any), ("maxQuantity", maxQuantity as Any)])
-                case .keyboardButtonRequestPhone(let text):
-                return ("keyboardButtonRequestPhone", [("text", text as Any)])
-                case .keyboardButtonRequestPoll(let flags, let quiz, let text):
-                return ("keyboardButtonRequestPoll", [("flags", flags as Any), ("quiz", quiz as Any), ("text", text as Any)])
-                case .keyboardButtonSimpleWebView(let text, let url):
-                return ("keyboardButtonSimpleWebView", [("text", text as Any), ("url", url as Any)])
-                case .keyboardButtonSwitchInline(let flags, let text, let query, let peerTypes):
-                return ("keyboardButtonSwitchInline", [("flags", flags as Any), ("text", text as Any), ("query", query as Any), ("peerTypes", peerTypes as Any)])
-                case .keyboardButtonUrl(let text, let url):
-                return ("keyboardButtonUrl", [("text", text as Any), ("url", url as Any)])
-                case .keyboardButtonUrlAuth(let flags, let text, let fwdText, let url, let buttonId):
-                return ("keyboardButtonUrlAuth", [("flags", flags as Any), ("text", text as Any), ("fwdText", fwdText as Any), ("url", url as Any), ("buttonId", buttonId as Any)])
-                case .keyboardButtonUserProfile(let text, let userId):
-                return ("keyboardButtonUserProfile", [("text", text as Any), ("userId", userId as Any)])
-                case .keyboardButtonWebView(let text, let url):
-                return ("keyboardButtonWebView", [("text", text as Any), ("url", url as Any)])
+                case .inputNotifyBroadcasts:
+                return ("inputNotifyBroadcasts", [])
+                case .inputNotifyChats:
+                return ("inputNotifyChats", [])
+                case .inputNotifyForumTopic(let peer, let topMsgId):
+                return ("inputNotifyForumTopic", [("peer", peer as Any), ("topMsgId", topMsgId as Any)])
+                case .inputNotifyPeer(let peer):
+                return ("inputNotifyPeer", [("peer", peer as Any)])
+                case .inputNotifyUsers:
+                return ("inputNotifyUsers", [])
     }
     }
     
-        public static func parse_inputKeyboardButtonUrlAuth(_ reader: BufferReader) -> KeyboardButton? {
-            var _1: Int32?
-            _1 = reader.readInt32()
-            var _2: String?
-            _2 = parseString(reader)
-            var _3: String?
-            if Int(_1!) & Int(1 << 1) != 0 {_3 = parseString(reader) }
-            var _4: String?
-            _4 = parseString(reader)
-            var _5: Api.InputUser?
+        public static func parse_inputNotifyBroadcasts(_ reader: BufferReader) -> InputNotifyPeer? {
+            return Api.InputNotifyPeer.inputNotifyBroadcasts
+        }
+        public static func parse_inputNotifyChats(_ reader: BufferReader) -> InputNotifyPeer? {
+            return Api.InputNotifyPeer.inputNotifyChats
+        }
+        public static func parse_inputNotifyForumTopic(_ reader: BufferReader) -> InputNotifyPeer? {
+            var _1: Api.InputPeer?
             if let signature = reader.readInt32() {
-                _5 = Api.parse(reader, signature: signature) as? Api.InputUser
+                _1 = Api.parse(reader, signature: signature) as? Api.InputPeer
             }
+            var _2: Int32?
+            _2 = reader.readInt32()
             let _c1 = _1 != nil
             let _c2 = _2 != nil
-            let _c3 = (Int(_1!) & Int(1 << 1) == 0) || _3 != nil
-            let _c4 = _4 != nil
-            let _c5 = _5 != nil
-            if _c1 && _c2 && _c3 && _c4 && _c5 {
-                return Api.KeyboardButton.inputKeyboardButtonUrlAuth(flags: _1!, text: _2!, fwdText: _3, url: _4!, bot: _5!)
+            if _c1 && _c2 {
+                return Api.InputNotifyPeer.inputNotifyForumTopic(peer: _1!, topMsgId: _2!)
             }
             else {
                 return nil
             }
         }
-        public static func parse_inputKeyboardButtonUserProfile(_ reader: BufferReader) -> KeyboardButton? {
-            var _1: String?
-            _1 = parseString(reader)
-            var _2: Api.InputUser?
+        public static func parse_inputNotifyPeer(_ reader: BufferReader) -> InputNotifyPeer? {
+            var _1: Api.InputPeer?
             if let signature = reader.readInt32() {
-                _2 = Api.parse(reader, signature: signature) as? Api.InputUser
+                _1 = Api.parse(reader, signature: signature) as? Api.InputPeer
+            }
+            let _c1 = _1 != nil
+            if _c1 {
+                return Api.InputNotifyPeer.inputNotifyPeer(peer: _1!)
+            }
+            else {
+                return nil
+            }
+        }
+        public static func parse_inputNotifyUsers(_ reader: BufferReader) -> InputNotifyPeer? {
+            return Api.InputNotifyPeer.inputNotifyUsers
+        }
+    
+    }
+}
+public extension Api {
+    enum InputPaymentCredentials: TypeConstructorDescription {
+        case inputPaymentCredentials(flags: Int32, data: Api.DataJSON)
+        case inputPaymentCredentialsApplePay(paymentData: Api.DataJSON)
+        case inputPaymentCredentialsGooglePay(paymentToken: Api.DataJSON)
+        case inputPaymentCredentialsSaved(id: String, tmpPassword: Buffer)
+    
+    public func serialize(_ buffer: Buffer, _ boxed: Swift.Bool) {
+    switch self {
+                case .inputPaymentCredentials(let flags, let data):
+                    if boxed {
+                        buffer.appendInt32(873977640)
+                    }
+                    serializeInt32(flags, buffer: buffer, boxed: false)
+                    data.serialize(buffer, true)
+                    break
+                case .inputPaymentCredentialsApplePay(let paymentData):
+                    if boxed {
+                        buffer.appendInt32(178373535)
+                    }
+                    paymentData.serialize(buffer, true)
+                    break
+                case .inputPaymentCredentialsGooglePay(let paymentToken):
+                    if boxed {
+                        buffer.appendInt32(-1966921727)
+                    }
+                    paymentToken.serialize(buffer, true)
+                    break
+                case .inputPaymentCredentialsSaved(let id, let tmpPassword):
+                    if boxed {
+                        buffer.appendInt32(-1056001329)
+                    }
+                    serializeString(id, buffer: buffer, boxed: false)
+                    serializeBytes(tmpPassword, buffer: buffer, boxed: false)
+                    break
+    }
+    }
+    
+    public func descriptionFields() -> (String, [(String, Any)]) {
+        switch self {
+                case .inputPaymentCredentials(let flags, let data):
+                return ("inputPaymentCredentials", [("flags", flags as Any), ("data", data as Any)])
+                case .inputPaymentCredentialsApplePay(let paymentData):
+                return ("inputPaymentCredentialsApplePay", [("paymentData", paymentData as Any)])
+                case .inputPaymentCredentialsGooglePay(let paymentToken):
+                return ("inputPaymentCredentialsGooglePay", [("paymentToken", paymentToken as Any)])
+                case .inputPaymentCredentialsSaved(let id, let tmpPassword):
+                return ("inputPaymentCredentialsSaved", [("id", id as Any), ("tmpPassword", tmpPassword as Any)])
+    }
+    }
+    
+        public static func parse_inputPaymentCredentials(_ reader: BufferReader) -> InputPaymentCredentials? {
+            var _1: Int32?
+            _1 = reader.readInt32()
+            var _2: Api.DataJSON?
+            if let signature = reader.readInt32() {
+                _2 = Api.parse(reader, signature: signature) as? Api.DataJSON
             }
             let _c1 = _1 != nil
             let _c2 = _2 != nil
             if _c1 && _c2 {
-                return Api.KeyboardButton.inputKeyboardButtonUserProfile(text: _1!, userId: _2!)
+                return Api.InputPaymentCredentials.inputPaymentCredentials(flags: _1!, data: _2!)
             }
             else {
                 return nil
             }
         }
-        public static func parse_keyboardButton(_ reader: BufferReader) -> KeyboardButton? {
-            var _1: String?
-            _1 = parseString(reader)
+        public static func parse_inputPaymentCredentialsApplePay(_ reader: BufferReader) -> InputPaymentCredentials? {
+            var _1: Api.DataJSON?
+            if let signature = reader.readInt32() {
+                _1 = Api.parse(reader, signature: signature) as? Api.DataJSON
+            }
             let _c1 = _1 != nil
             if _c1 {
-                return Api.KeyboardButton.keyboardButton(text: _1!)
+                return Api.InputPaymentCredentials.inputPaymentCredentialsApplePay(paymentData: _1!)
             }
             else {
                 return nil
             }
         }
-        public static func parse_keyboardButtonBuy(_ reader: BufferReader) -> KeyboardButton? {
-            var _1: String?
-            _1 = parseString(reader)
+        public static func parse_inputPaymentCredentialsGooglePay(_ reader: BufferReader) -> InputPaymentCredentials? {
+            var _1: Api.DataJSON?
+            if let signature = reader.readInt32() {
+                _1 = Api.parse(reader, signature: signature) as? Api.DataJSON
+            }
             let _c1 = _1 != nil
             if _c1 {
-                return Api.KeyboardButton.keyboardButtonBuy(text: _1!)
+                return Api.InputPaymentCredentials.inputPaymentCredentialsGooglePay(paymentToken: _1!)
             }
             else {
                 return nil
             }
         }
-        public static func parse_keyboardButtonCallback(_ reader: BufferReader) -> KeyboardButton? {
-            var _1: Int32?
-            _1 = reader.readInt32()
-            var _2: String?
-            _2 = parseString(reader)
-            var _3: Buffer?
-            _3 = parseBytes(reader)
+        public static func parse_inputPaymentCredentialsSaved(_ reader: BufferReader) -> InputPaymentCredentials? {
+            var _1: String?
+            _1 = parseString(reader)
+            var _2: Buffer?
+            _2 = parseBytes(reader)
+            let _c1 = _1 != nil
+            let _c2 = _2 != nil
+            if _c1 && _c2 {
+                return Api.InputPaymentCredentials.inputPaymentCredentialsSaved(id: _1!, tmpPassword: _2!)
+            }
+            else {
+                return nil
+            }
+        }
+    
+    }
+}
+public extension Api {
+    indirect enum InputPeer: TypeConstructorDescription {
+        case inputPeerChannel(channelId: Int64, accessHash: Int64)
+        case inputPeerChannelFromMessage(peer: Api.InputPeer, msgId: Int32, channelId: Int64)
+        case inputPeerChat(chatId: Int64)
+        case inputPeerEmpty
+        case inputPeerSelf
+        case inputPeerUser(userId: Int64, accessHash: Int64)
+        case inputPeerUserFromMessage(peer: Api.InputPeer, msgId: Int32, userId: Int64)
+    
+    public func serialize(_ buffer: Buffer, _ boxed: Swift.Bool) {
+    switch self {
+                case .inputPeerChannel(let channelId, let accessHash):
+                    if boxed {
+                        buffer.appendInt32(666680316)
+                    }
+                    serializeInt64(channelId, buffer: buffer, boxed: false)
+                    serializeInt64(accessHash, buffer: buffer, boxed: false)
+                    break
+                case .inputPeerChannelFromMessage(let peer, let msgId, let channelId):
+                    if boxed {
+                        buffer.appendInt32(-1121318848)
+                    }
+                    peer.serialize(buffer, true)
+                    serializeInt32(msgId, buffer: buffer, boxed: false)
+                    serializeInt64(channelId, buffer: buffer, boxed: false)
+                    break
+                case .inputPeerChat(let chatId):
+                    if boxed {
+                        buffer.appendInt32(900291769)
+                    }
+                    serializeInt64(chatId, buffer: buffer, boxed: false)
+                    break
+                case .inputPeerEmpty:
+                    if boxed {
+                        buffer.appendInt32(2134579434)
+                    }
+                    
+                    break
+                case .inputPeerSelf:
+                    if boxed {
+                        buffer.appendInt32(2107670217)
+                    }
+                    
+                    break
+                case .inputPeerUser(let userId, let accessHash):
+                    if boxed {
+                        buffer.appendInt32(-571955892)
+                    }
+                    serializeInt64(userId, buffer: buffer, boxed: false)
+                    serializeInt64(accessHash, buffer: buffer, boxed: false)
+                    break
+                case .inputPeerUserFromMessage(let peer, let msgId, let userId):
+                    if boxed {
+                        buffer.appendInt32(-1468331492)
+                    }
+                    peer.serialize(buffer, true)
+                    serializeInt32(msgId, buffer: buffer, boxed: false)
+                    serializeInt64(userId, buffer: buffer, boxed: false)
+                    break
+    }
+    }
+    
+    public func descriptionFields() -> (String, [(String, Any)]) {
+        switch self {
+                case .inputPeerChannel(let channelId, let accessHash):
+                return ("inputPeerChannel", [("channelId", channelId as Any), ("accessHash", accessHash as Any)])
+                case .inputPeerChannelFromMessage(let peer, let msgId, let channelId):
+                return ("inputPeerChannelFromMessage", [("peer", peer as Any), ("msgId", msgId as Any), ("channelId", channelId as Any)])
+                case .inputPeerChat(let chatId):
+                return ("inputPeerChat", [("chatId", chatId as Any)])
+                case .inputPeerEmpty:
+                return ("inputPeerEmpty", [])
+                case .inputPeerSelf:
+                return ("inputPeerSelf", [])
+                case .inputPeerUser(let userId, let accessHash):
+                return ("inputPeerUser", [("userId", userId as Any), ("accessHash", accessHash as Any)])
+                case .inputPeerUserFromMessage(let peer, let msgId, let userId):
+                return ("inputPeerUserFromMessage", [("peer", peer as Any), ("msgId", msgId as Any), ("userId", userId as Any)])
+    }
+    }
+    
+        public static func parse_inputPeerChannel(_ reader: BufferReader) -> InputPeer? {
+            var _1: Int64?
+            _1 = reader.readInt64()
+            var _2: Int64?
+            _2 = reader.readInt64()
+            let _c1 = _1 != nil
+            let _c2 = _2 != nil
+            if _c1 && _c2 {
+                return Api.InputPeer.inputPeerChannel(channelId: _1!, accessHash: _2!)
+            }
+            else {
+                return nil
+            }
+        }
+        public static func parse_inputPeerChannelFromMessage(_ reader: BufferReader) -> InputPeer? {
+            var _1: Api.InputPeer?
+            if let signature = reader.readInt32() {
+                _1 = Api.parse(reader, signature: signature) as? Api.InputPeer
+            }
+            var _2: Int32?
+            _2 = reader.readInt32()
+            var _3: Int64?
+            _3 = reader.readInt64()
             let _c1 = _1 != nil
             let _c2 = _2 != nil
             let _c3 = _3 != nil
             if _c1 && _c2 && _c3 {
-                return Api.KeyboardButton.keyboardButtonCallback(flags: _1!, text: _2!, data: _3!)
+                return Api.InputPeer.inputPeerChannelFromMessage(peer: _1!, msgId: _2!, channelId: _3!)
             }
             else {
                 return nil
             }
         }
-        public static func parse_keyboardButtonGame(_ reader: BufferReader) -> KeyboardButton? {
-            var _1: String?
-            _1 = parseString(reader)
+        public static func parse_inputPeerChat(_ reader: BufferReader) -> InputPeer? {
+            var _1: Int64?
+            _1 = reader.readInt64()
             let _c1 = _1 != nil
             if _c1 {
-                return Api.KeyboardButton.keyboardButtonGame(text: _1!)
+                return Api.InputPeer.inputPeerChat(chatId: _1!)
             }
             else {
                 return nil
             }
         }
-        public static func parse_keyboardButtonRequestGeoLocation(_ reader: BufferReader) -> KeyboardButton? {
-            var _1: String?
-            _1 = parseString(reader)
+        public static func parse_inputPeerEmpty(_ reader: BufferReader) -> InputPeer? {
+            return Api.InputPeer.inputPeerEmpty
+        }
+        public static func parse_inputPeerSelf(_ reader: BufferReader) -> InputPeer? {
+            return Api.InputPeer.inputPeerSelf
+        }
+        public static func parse_inputPeerUser(_ reader: BufferReader) -> InputPeer? {
+            var _1: Int64?
+            _1 = reader.readInt64()
+            var _2: Int64?
+            _2 = reader.readInt64()
             let _c1 = _1 != nil
-            if _c1 {
-                return Api.KeyboardButton.keyboardButtonRequestGeoLocation(text: _1!)
+            let _c2 = _2 != nil
+            if _c1 && _c2 {
+                return Api.InputPeer.inputPeerUser(userId: _1!, accessHash: _2!)
             }
             else {
                 return nil
             }
         }
-        public static func parse_keyboardButtonRequestPeer(_ reader: BufferReader) -> KeyboardButton? {
-            var _1: String?
-            _1 = parseString(reader)
+        public static func parse_inputPeerUserFromMessage(_ reader: BufferReader) -> InputPeer? {
+            var _1: Api.InputPeer?
+            if let signature = reader.readInt32() {
+                _1 = Api.parse(reader, signature: signature) as? Api.InputPeer
+            }
             var _2: Int32?
             _2 = reader.readInt32()
-            var _3: Api.RequestPeerType?
-            if let signature = reader.readInt32() {
-                _3 = Api.parse(reader, signature: signature) as? Api.RequestPeerType
-            }
-            var _4: Int32?
-            _4 = reader.readInt32()
+            var _3: Int64?
+            _3 = reader.readInt64()
             let _c1 = _1 != nil
             let _c2 = _2 != nil
             let _c3 = _3 != nil
-            let _c4 = _4 != nil
-            if _c1 && _c2 && _c3 && _c4 {
-                return Api.KeyboardButton.keyboardButtonRequestPeer(text: _1!, buttonId: _2!, peerType: _3!, maxQuantity: _4!)
+            if _c1 && _c2 && _c3 {
+                return Api.InputPeer.inputPeerUserFromMessage(peer: _1!, msgId: _2!, userId: _3!)
             }
             else {
                 return nil
             }
         }
-        public static func parse_keyboardButtonRequestPhone(_ reader: BufferReader) -> KeyboardButton? {
-            var _1: String?
-            _1 = parseString(reader)
-            let _c1 = _1 != nil
-            if _c1 {
-                return Api.KeyboardButton.keyboardButtonRequestPhone(text: _1!)
-            }
-            else {
-                return nil
-            }
-        }
-        public static func parse_keyboardButtonRequestPoll(_ reader: BufferReader) -> KeyboardButton? {
+    
+    }
+}
+public extension Api {
+    enum InputPeerNotifySettings: TypeConstructorDescription {
+        case inputPeerNotifySettings(flags: Int32, showPreviews: Api.Bool?, silent: Api.Bool?, muteUntil: Int32?, sound: Api.NotificationSound?, storiesMuted: Api.Bool?, storiesHideSender: Api.Bool?, storiesSound: Api.NotificationSound?)
+    
+    public func serialize(_ buffer: Buffer, _ boxed: Swift.Bool) {
+    switch self {
+                case .inputPeerNotifySettings(let flags, let showPreviews, let silent, let muteUntil, let sound, let storiesMuted, let storiesHideSender, let storiesSound):
+                    if boxed {
+                        buffer.appendInt32(-892638494)
+                    }
+                    serializeInt32(flags, buffer: buffer, boxed: false)
+                    if Int(flags) & Int(1 << 0) != 0 {showPreviews!.serialize(buffer, true)}
+                    if Int(flags) & Int(1 << 1) != 0 {silent!.serialize(buffer, true)}
+                    if Int(flags) & Int(1 << 2) != 0 {serializeInt32(muteUntil!, buffer: buffer, boxed: false)}
+                    if Int(flags) & Int(1 << 3) != 0 {sound!.serialize(buffer, true)}
+                    if Int(flags) & Int(1 << 6) != 0 {storiesMuted!.serialize(buffer, true)}
+                    if Int(flags) & Int(1 << 7) != 0 {storiesHideSender!.serialize(buffer, true)}
+                    if Int(flags) & Int(1 << 8) != 0 {storiesSound!.serialize(buffer, true)}
+                    break
+    }
+    }
+    
+    public func descriptionFields() -> (String, [(String, Any)]) {
+        switch self {
+                case .inputPeerNotifySettings(let flags, let showPreviews, let silent, let muteUntil, let sound, let storiesMuted, let storiesHideSender, let storiesSound):
+                return ("inputPeerNotifySettings", [("flags", flags as Any), ("showPreviews", showPreviews as Any), ("silent", silent as Any), ("muteUntil", muteUntil as Any), ("sound", sound as Any), ("storiesMuted", storiesMuted as Any), ("storiesHideSender", storiesHideSender as Any), ("storiesSound", storiesSound as Any)])
+    }
+    }
+    
+        public static func parse_inputPeerNotifySettings(_ reader: BufferReader) -> InputPeerNotifySettings? {
             var _1: Int32?
             _1 = reader.readInt32()
             var _2: Api.Bool?
             if Int(_1!) & Int(1 << 0) != 0 {if let signature = reader.readInt32() {
                 _2 = Api.parse(reader, signature: signature) as? Api.Bool
             } }
-            var _3: String?
-            _3 = parseString(reader)
-            let _c1 = _1 != nil
-            let _c2 = (Int(_1!) & Int(1 << 0) == 0) || _2 != nil
-            let _c3 = _3 != nil
-            if _c1 && _c2 && _c3 {
-                return Api.KeyboardButton.keyboardButtonRequestPoll(flags: _1!, quiz: _2, text: _3!)
-            }
-            else {
-                return nil
-            }
-        }
-        public static func parse_keyboardButtonSimpleWebView(_ reader: BufferReader) -> KeyboardButton? {
-            var _1: String?
-            _1 = parseString(reader)
-            var _2: String?
-            _2 = parseString(reader)
-            let _c1 = _1 != nil
-            let _c2 = _2 != nil
-            if _c1 && _c2 {
-                return Api.KeyboardButton.keyboardButtonSimpleWebView(text: _1!, url: _2!)
-            }
-            else {
-                return nil
-            }
-        }
-        public static func parse_keyboardButtonSwitchInline(_ reader: BufferReader) -> KeyboardButton? {
-            var _1: Int32?
-            _1 = reader.readInt32()
-            var _2: String?
-            _2 = parseString(reader)
-            var _3: String?
-            _3 = parseString(reader)
-            var _4: [Api.InlineQueryPeerType]?
-            if Int(_1!) & Int(1 << 1) != 0 {if let _ = reader.readInt32() {
-                _4 = Api.parseVector(reader, elementSignature: 0, elementType: Api.InlineQueryPeerType.self)
+            var _3: Api.Bool?
+            if Int(_1!) & Int(1 << 1) != 0 {if let signature = reader.readInt32() {
+                _3 = Api.parse(reader, signature: signature) as? Api.Bool
+            } }
+            var _4: Int32?
+            if Int(_1!) & Int(1 << 2) != 0 {_4 = reader.readInt32() }
+            var _5: Api.NotificationSound?
+            if Int(_1!) & Int(1 << 3) != 0 {if let signature = reader.readInt32() {
+                _5 = Api.parse(reader, signature: signature) as? Api.NotificationSound
+            } }
+            var _6: Api.Bool?
+            if Int(_1!) & Int(1 << 6) != 0 {if let signature = reader.readInt32() {
+                _6 = Api.parse(reader, signature: signature) as? Api.Bool
+            } }
+            var _7: Api.Bool?
+            if Int(_1!) & Int(1 << 7) != 0 {if let signature = reader.readInt32() {
+                _7 = Api.parse(reader, signature: signature) as? Api.Bool
+            } }
+            var _8: Api.NotificationSound?
+            if Int(_1!) & Int(1 << 8) != 0 {if let signature = reader.readInt32() {
+                _8 = Api.parse(reader, signature: signature) as? Api.NotificationSound
             } }
             let _c1 = _1 != nil
-            let _c2 = _2 != nil
-            let _c3 = _3 != nil
-            let _c4 = (Int(_1!) & Int(1 << 1) == 0) || _4 != nil
-            if _c1 && _c2 && _c3 && _c4 {
-                return Api.KeyboardButton.keyboardButtonSwitchInline(flags: _1!, text: _2!, query: _3!, peerTypes: _4)
+            let _c2 = (Int(_1!) & Int(1 << 0) == 0) || _2 != nil
+            let _c3 = (Int(_1!) & Int(1 << 1) == 0) || _3 != nil
+            let _c4 = (Int(_1!) & Int(1 << 2) == 0) || _4 != nil
+            let _c5 = (Int(_1!) & Int(1 << 3) == 0) || _5 != nil
+            let _c6 = (Int(_1!) & Int(1 << 6) == 0) || _6 != nil
+            let _c7 = (Int(_1!) & Int(1 << 7) == 0) || _7 != nil
+            let _c8 = (Int(_1!) & Int(1 << 8) == 0) || _8 != nil
+            if _c1 && _c2 && _c3 && _c4 && _c5 && _c6 && _c7 && _c8 {
+                return Api.InputPeerNotifySettings.inputPeerNotifySettings(flags: _1!, showPreviews: _2, silent: _3, muteUntil: _4, sound: _5, storiesMuted: _6, storiesHideSender: _7, storiesSound: _8)
             }
             else {
                 return nil
             }
         }
-        public static func parse_keyboardButtonUrl(_ reader: BufferReader) -> KeyboardButton? {
-            var _1: String?
-            _1 = parseString(reader)
-            var _2: String?
-            _2 = parseString(reader)
-            let _c1 = _1 != nil
-            let _c2 = _2 != nil
-            if _c1 && _c2 {
-                return Api.KeyboardButton.keyboardButtonUrl(text: _1!, url: _2!)
-            }
-            else {
-                return nil
-            }
-        }
-        public static func parse_keyboardButtonUrlAuth(_ reader: BufferReader) -> KeyboardButton? {
-            var _1: Int32?
-            _1 = reader.readInt32()
-            var _2: String?
-            _2 = parseString(reader)
-            var _3: String?
-            if Int(_1!) & Int(1 << 0) != 0 {_3 = parseString(reader) }
-            var _4: String?
-            _4 = parseString(reader)
-            var _5: Int32?
-            _5 = reader.readInt32()
-            let _c1 = _1 != nil
-            let _c2 = _2 != nil
-            let _c3 = (Int(_1!) & Int(1 << 0) == 0) || _3 != nil
-            let _c4 = _4 != nil
-            let _c5 = _5 != nil
-            if _c1 && _c2 && _c3 && _c4 && _c5 {
-                return Api.KeyboardButton.keyboardButtonUrlAuth(flags: _1!, text: _2!, fwdText: _3, url: _4!, buttonId: _5!)
-            }
-            else {
-                return nil
-            }
-        }
-        public static func parse_keyboardButtonUserProfile(_ reader: BufferReader) -> KeyboardButton? {
-            var _1: String?
-            _1 = parseString(reader)
+    
+    }
+}
+public extension Api {
+    enum InputPhoneCall: TypeConstructorDescription {
+        case inputPhoneCall(id: Int64, accessHash: Int64)
+    
+    public func serialize(_ buffer: Buffer, _ boxed: Swift.Bool) {
+    switch self {
+                case .inputPhoneCall(let id, let accessHash):
+                    if boxed {
+                        buffer.appendInt32(506920429)
+                    }
+                    serializeInt64(id, buffer: buffer, boxed: false)
+                    serializeInt64(accessHash, buffer: buffer, boxed: false)
+                    break
+    }
+    }
+    
+    public func descriptionFields() -> (String, [(String, Any)]) {
+        switch self {
+                case .inputPhoneCall(let id, let accessHash):
+                return ("inputPhoneCall", [("id", id as Any), ("accessHash", accessHash as Any)])
+    }
+    }
+    
+        public static func parse_inputPhoneCall(_ reader: BufferReader) -> InputPhoneCall? {
+            var _1: Int64?
+            _1 = reader.readInt64()
             var _2: Int64?
             _2 = reader.readInt64()
             let _c1 = _1 != nil
             let _c2 = _2 != nil
             if _c1 && _c2 {
-                return Api.KeyboardButton.keyboardButtonUserProfile(text: _1!, userId: _2!)
-            }
-            else {
-                return nil
-            }
-        }
-        public static func parse_keyboardButtonWebView(_ reader: BufferReader) -> KeyboardButton? {
-            var _1: String?
-            _1 = parseString(reader)
-            var _2: String?
-            _2 = parseString(reader)
-            let _c1 = _1 != nil
-            let _c2 = _2 != nil
-            if _c1 && _c2 {
-                return Api.KeyboardButton.keyboardButtonWebView(text: _1!, url: _2!)
+                return Api.InputPhoneCall.inputPhoneCall(id: _1!, accessHash: _2!)
             }
             else {
                 return nil
@@ -863,205 +585,229 @@ public extension Api {
     }
 }
 public extension Api {
-    enum KeyboardButtonRow: TypeConstructorDescription {
-        case keyboardButtonRow(buttons: [Api.KeyboardButton])
+    enum InputPhoto: TypeConstructorDescription {
+        case inputPhoto(id: Int64, accessHash: Int64, fileReference: Buffer)
+        case inputPhotoEmpty
     
     public func serialize(_ buffer: Buffer, _ boxed: Swift.Bool) {
     switch self {
-                case .keyboardButtonRow(let buttons):
+                case .inputPhoto(let id, let accessHash, let fileReference):
                     if boxed {
-                        buffer.appendInt32(2002815875)
+                        buffer.appendInt32(1001634122)
                     }
-                    buffer.appendInt32(481674261)
-                    buffer.appendInt32(Int32(buttons.count))
-                    for item in buttons {
-                        item.serialize(buffer, true)
+                    serializeInt64(id, buffer: buffer, boxed: false)
+                    serializeInt64(accessHash, buffer: buffer, boxed: false)
+                    serializeBytes(fileReference, buffer: buffer, boxed: false)
+                    break
+                case .inputPhotoEmpty:
+                    if boxed {
+                        buffer.appendInt32(483901197)
                     }
+                    
                     break
     }
     }
     
     public func descriptionFields() -> (String, [(String, Any)]) {
         switch self {
-                case .keyboardButtonRow(let buttons):
-                return ("keyboardButtonRow", [("buttons", buttons as Any)])
+                case .inputPhoto(let id, let accessHash, let fileReference):
+                return ("inputPhoto", [("id", id as Any), ("accessHash", accessHash as Any), ("fileReference", fileReference as Any)])
+                case .inputPhotoEmpty:
+                return ("inputPhotoEmpty", [])
     }
     }
     
-        public static func parse_keyboardButtonRow(_ reader: BufferReader) -> KeyboardButtonRow? {
-            var _1: [Api.KeyboardButton]?
-            if let _ = reader.readInt32() {
-                _1 = Api.parseVector(reader, elementSignature: 0, elementType: Api.KeyboardButton.self)
-            }
-            let _c1 = _1 != nil
-            if _c1 {
-                return Api.KeyboardButtonRow.keyboardButtonRow(buttons: _1!)
-            }
-            else {
-                return nil
-            }
-        }
-    
-    }
-}
-public extension Api {
-    enum LabeledPrice: TypeConstructorDescription {
-        case labeledPrice(label: String, amount: Int64)
-    
-    public func serialize(_ buffer: Buffer, _ boxed: Swift.Bool) {
-    switch self {
-                case .labeledPrice(let label, let amount):
-                    if boxed {
-                        buffer.appendInt32(-886477832)
-                    }
-                    serializeString(label, buffer: buffer, boxed: false)
-                    serializeInt64(amount, buffer: buffer, boxed: false)
-                    break
-    }
-    }
-    
-    public func descriptionFields() -> (String, [(String, Any)]) {
-        switch self {
-                case .labeledPrice(let label, let amount):
-                return ("labeledPrice", [("label", label as Any), ("amount", amount as Any)])
-    }
-    }
-    
-        public static func parse_labeledPrice(_ reader: BufferReader) -> LabeledPrice? {
-            var _1: String?
-            _1 = parseString(reader)
+        public static func parse_inputPhoto(_ reader: BufferReader) -> InputPhoto? {
+            var _1: Int64?
+            _1 = reader.readInt64()
             var _2: Int64?
             _2 = reader.readInt64()
+            var _3: Buffer?
+            _3 = parseBytes(reader)
             let _c1 = _1 != nil
             let _c2 = _2 != nil
-            if _c1 && _c2 {
-                return Api.LabeledPrice.labeledPrice(label: _1!, amount: _2!)
+            let _c3 = _3 != nil
+            if _c1 && _c2 && _c3 {
+                return Api.InputPhoto.inputPhoto(id: _1!, accessHash: _2!, fileReference: _3!)
             }
             else {
                 return nil
             }
         }
+        public static func parse_inputPhotoEmpty(_ reader: BufferReader) -> InputPhoto? {
+            return Api.InputPhoto.inputPhotoEmpty
+        }
     
     }
 }
 public extension Api {
-    enum LangPackDifference: TypeConstructorDescription {
-        case langPackDifference(langCode: String, fromVersion: Int32, version: Int32, strings: [Api.LangPackString])
+    enum InputPrivacyKey: TypeConstructorDescription {
+        case inputPrivacyKeyAbout
+        case inputPrivacyKeyAddedByPhone
+        case inputPrivacyKeyBirthday
+        case inputPrivacyKeyChatInvite
+        case inputPrivacyKeyForwards
+        case inputPrivacyKeyNoPaidMessages
+        case inputPrivacyKeyPhoneCall
+        case inputPrivacyKeyPhoneNumber
+        case inputPrivacyKeyPhoneP2P
+        case inputPrivacyKeyProfilePhoto
+        case inputPrivacyKeyStarGiftsAutoSave
+        case inputPrivacyKeyStatusTimestamp
+        case inputPrivacyKeyVoiceMessages
     
     public func serialize(_ buffer: Buffer, _ boxed: Swift.Bool) {
     switch self {
-                case .langPackDifference(let langCode, let fromVersion, let version, let strings):
+                case .inputPrivacyKeyAbout:
                     if boxed {
-                        buffer.appendInt32(-209337866)
+                        buffer.appendInt32(941870144)
                     }
-                    serializeString(langCode, buffer: buffer, boxed: false)
-                    serializeInt32(fromVersion, buffer: buffer, boxed: false)
-                    serializeInt32(version, buffer: buffer, boxed: false)
-                    buffer.appendInt32(481674261)
-                    buffer.appendInt32(Int32(strings.count))
-                    for item in strings {
-                        item.serialize(buffer, true)
+                    
+                    break
+                case .inputPrivacyKeyAddedByPhone:
+                    if boxed {
+                        buffer.appendInt32(-786326563)
                     }
+                    
+                    break
+                case .inputPrivacyKeyBirthday:
+                    if boxed {
+                        buffer.appendInt32(-698740276)
+                    }
+                    
+                    break
+                case .inputPrivacyKeyChatInvite:
+                    if boxed {
+                        buffer.appendInt32(-1107622874)
+                    }
+                    
+                    break
+                case .inputPrivacyKeyForwards:
+                    if boxed {
+                        buffer.appendInt32(-1529000952)
+                    }
+                    
+                    break
+                case .inputPrivacyKeyNoPaidMessages:
+                    if boxed {
+                        buffer.appendInt32(-1111124044)
+                    }
+                    
+                    break
+                case .inputPrivacyKeyPhoneCall:
+                    if boxed {
+                        buffer.appendInt32(-88417185)
+                    }
+                    
+                    break
+                case .inputPrivacyKeyPhoneNumber:
+                    if boxed {
+                        buffer.appendInt32(55761658)
+                    }
+                    
+                    break
+                case .inputPrivacyKeyPhoneP2P:
+                    if boxed {
+                        buffer.appendInt32(-610373422)
+                    }
+                    
+                    break
+                case .inputPrivacyKeyProfilePhoto:
+                    if boxed {
+                        buffer.appendInt32(1461304012)
+                    }
+                    
+                    break
+                case .inputPrivacyKeyStarGiftsAutoSave:
+                    if boxed {
+                        buffer.appendInt32(-512548031)
+                    }
+                    
+                    break
+                case .inputPrivacyKeyStatusTimestamp:
+                    if boxed {
+                        buffer.appendInt32(1335282456)
+                    }
+                    
+                    break
+                case .inputPrivacyKeyVoiceMessages:
+                    if boxed {
+                        buffer.appendInt32(-1360618136)
+                    }
+                    
                     break
     }
     }
     
     public func descriptionFields() -> (String, [(String, Any)]) {
         switch self {
-                case .langPackDifference(let langCode, let fromVersion, let version, let strings):
-                return ("langPackDifference", [("langCode", langCode as Any), ("fromVersion", fromVersion as Any), ("version", version as Any), ("strings", strings as Any)])
+                case .inputPrivacyKeyAbout:
+                return ("inputPrivacyKeyAbout", [])
+                case .inputPrivacyKeyAddedByPhone:
+                return ("inputPrivacyKeyAddedByPhone", [])
+                case .inputPrivacyKeyBirthday:
+                return ("inputPrivacyKeyBirthday", [])
+                case .inputPrivacyKeyChatInvite:
+                return ("inputPrivacyKeyChatInvite", [])
+                case .inputPrivacyKeyForwards:
+                return ("inputPrivacyKeyForwards", [])
+                case .inputPrivacyKeyNoPaidMessages:
+                return ("inputPrivacyKeyNoPaidMessages", [])
+                case .inputPrivacyKeyPhoneCall:
+                return ("inputPrivacyKeyPhoneCall", [])
+                case .inputPrivacyKeyPhoneNumber:
+                return ("inputPrivacyKeyPhoneNumber", [])
+                case .inputPrivacyKeyPhoneP2P:
+                return ("inputPrivacyKeyPhoneP2P", [])
+                case .inputPrivacyKeyProfilePhoto:
+                return ("inputPrivacyKeyProfilePhoto", [])
+                case .inputPrivacyKeyStarGiftsAutoSave:
+                return ("inputPrivacyKeyStarGiftsAutoSave", [])
+                case .inputPrivacyKeyStatusTimestamp:
+                return ("inputPrivacyKeyStatusTimestamp", [])
+                case .inputPrivacyKeyVoiceMessages:
+                return ("inputPrivacyKeyVoiceMessages", [])
     }
     }
     
-        public static func parse_langPackDifference(_ reader: BufferReader) -> LangPackDifference? {
-            var _1: String?
-            _1 = parseString(reader)
-            var _2: Int32?
-            _2 = reader.readInt32()
-            var _3: Int32?
-            _3 = reader.readInt32()
-            var _4: [Api.LangPackString]?
-            if let _ = reader.readInt32() {
-                _4 = Api.parseVector(reader, elementSignature: 0, elementType: Api.LangPackString.self)
-            }
-            let _c1 = _1 != nil
-            let _c2 = _2 != nil
-            let _c3 = _3 != nil
-            let _c4 = _4 != nil
-            if _c1 && _c2 && _c3 && _c4 {
-                return Api.LangPackDifference.langPackDifference(langCode: _1!, fromVersion: _2!, version: _3!, strings: _4!)
-            }
-            else {
-                return nil
-            }
+        public static func parse_inputPrivacyKeyAbout(_ reader: BufferReader) -> InputPrivacyKey? {
+            return Api.InputPrivacyKey.inputPrivacyKeyAbout
         }
-    
-    }
-}
-public extension Api {
-    enum LangPackLanguage: TypeConstructorDescription {
-        case langPackLanguage(flags: Int32, name: String, nativeName: String, langCode: String, baseLangCode: String?, pluralCode: String, stringsCount: Int32, translatedCount: Int32, translationsUrl: String)
-    
-    public func serialize(_ buffer: Buffer, _ boxed: Swift.Bool) {
-    switch self {
-                case .langPackLanguage(let flags, let name, let nativeName, let langCode, let baseLangCode, let pluralCode, let stringsCount, let translatedCount, let translationsUrl):
-                    if boxed {
-                        buffer.appendInt32(-288727837)
-                    }
-                    serializeInt32(flags, buffer: buffer, boxed: false)
-                    serializeString(name, buffer: buffer, boxed: false)
-                    serializeString(nativeName, buffer: buffer, boxed: false)
-                    serializeString(langCode, buffer: buffer, boxed: false)
-                    if Int(flags) & Int(1 << 1) != 0 {serializeString(baseLangCode!, buffer: buffer, boxed: false)}
-                    serializeString(pluralCode, buffer: buffer, boxed: false)
-                    serializeInt32(stringsCount, buffer: buffer, boxed: false)
-                    serializeInt32(translatedCount, buffer: buffer, boxed: false)
-                    serializeString(translationsUrl, buffer: buffer, boxed: false)
-                    break
-    }
-    }
-    
-    public func descriptionFields() -> (String, [(String, Any)]) {
-        switch self {
-                case .langPackLanguage(let flags, let name, let nativeName, let langCode, let baseLangCode, let pluralCode, let stringsCount, let translatedCount, let translationsUrl):
-                return ("langPackLanguage", [("flags", flags as Any), ("name", name as Any), ("nativeName", nativeName as Any), ("langCode", langCode as Any), ("baseLangCode", baseLangCode as Any), ("pluralCode", pluralCode as Any), ("stringsCount", stringsCount as Any), ("translatedCount", translatedCount as Any), ("translationsUrl", translationsUrl as Any)])
-    }
-    }
-    
-        public static func parse_langPackLanguage(_ reader: BufferReader) -> LangPackLanguage? {
-            var _1: Int32?
-            _1 = reader.readInt32()
-            var _2: String?
-            _2 = parseString(reader)
-            var _3: String?
-            _3 = parseString(reader)
-            var _4: String?
-            _4 = parseString(reader)
-            var _5: String?
-            if Int(_1!) & Int(1 << 1) != 0 {_5 = parseString(reader) }
-            var _6: String?
-            _6 = parseString(reader)
-            var _7: Int32?
-            _7 = reader.readInt32()
-            var _8: Int32?
-            _8 = reader.readInt32()
-            var _9: String?
-            _9 = parseString(reader)
-            let _c1 = _1 != nil
-            let _c2 = _2 != nil
-            let _c3 = _3 != nil
-            let _c4 = _4 != nil
-            let _c5 = (Int(_1!) & Int(1 << 1) == 0) || _5 != nil
-            let _c6 = _6 != nil
-            let _c7 = _7 != nil
-            let _c8 = _8 != nil
-            let _c9 = _9 != nil
-            if _c1 && _c2 && _c3 && _c4 && _c5 && _c6 && _c7 && _c8 && _c9 {
-                return Api.LangPackLanguage.langPackLanguage(flags: _1!, name: _2!, nativeName: _3!, langCode: _4!, baseLangCode: _5, pluralCode: _6!, stringsCount: _7!, translatedCount: _8!, translationsUrl: _9!)
-            }
-            else {
-                return nil
-            }
+        public static func parse_inputPrivacyKeyAddedByPhone(_ reader: BufferReader) -> InputPrivacyKey? {
+            return Api.InputPrivacyKey.inputPrivacyKeyAddedByPhone
+        }
+        public static func parse_inputPrivacyKeyBirthday(_ reader: BufferReader) -> InputPrivacyKey? {
+            return Api.InputPrivacyKey.inputPrivacyKeyBirthday
+        }
+        public static func parse_inputPrivacyKeyChatInvite(_ reader: BufferReader) -> InputPrivacyKey? {
+            return Api.InputPrivacyKey.inputPrivacyKeyChatInvite
+        }
+        public static func parse_inputPrivacyKeyForwards(_ reader: BufferReader) -> InputPrivacyKey? {
+            return Api.InputPrivacyKey.inputPrivacyKeyForwards
+        }
+        public static func parse_inputPrivacyKeyNoPaidMessages(_ reader: BufferReader) -> InputPrivacyKey? {
+            return Api.InputPrivacyKey.inputPrivacyKeyNoPaidMessages
+        }
+        public static func parse_inputPrivacyKeyPhoneCall(_ reader: BufferReader) -> InputPrivacyKey? {
+            return Api.InputPrivacyKey.inputPrivacyKeyPhoneCall
+        }
+        public static func parse_inputPrivacyKeyPhoneNumber(_ reader: BufferReader) -> InputPrivacyKey? {
+            return Api.InputPrivacyKey.inputPrivacyKeyPhoneNumber
+        }
+        public static func parse_inputPrivacyKeyPhoneP2P(_ reader: BufferReader) -> InputPrivacyKey? {
+            return Api.InputPrivacyKey.inputPrivacyKeyPhoneP2P
+        }
+        public static func parse_inputPrivacyKeyProfilePhoto(_ reader: BufferReader) -> InputPrivacyKey? {
+            return Api.InputPrivacyKey.inputPrivacyKeyProfilePhoto
+        }
+        public static func parse_inputPrivacyKeyStarGiftsAutoSave(_ reader: BufferReader) -> InputPrivacyKey? {
+            return Api.InputPrivacyKey.inputPrivacyKeyStarGiftsAutoSave
+        }
+        public static func parse_inputPrivacyKeyStatusTimestamp(_ reader: BufferReader) -> InputPrivacyKey? {
+            return Api.InputPrivacyKey.inputPrivacyKeyStatusTimestamp
+        }
+        public static func parse_inputPrivacyKeyVoiceMessages(_ reader: BufferReader) -> InputPrivacyKey? {
+            return Api.InputPrivacyKey.inputPrivacyKeyVoiceMessages
         }
     
     }

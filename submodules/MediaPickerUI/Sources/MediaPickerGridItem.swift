@@ -17,6 +17,7 @@ import ImageBlur
 import FastBlur
 import MediaEditor
 import RadialStatusNode
+import MediaAssetsContext
 
 private let leftShadowImage: UIImage = {
     let baseImage = UIImage(bundleImageName: "Peer Info/MediaGridShadow")!
@@ -48,7 +49,7 @@ private let rightShadowImage: UIImage = {
 
 enum MediaPickerGridItemContent: Equatable {
     case asset(PHFetchResult<PHAsset>, Int)
-    case media(MediaPickerScreen.Subject.Media, Int)
+    case media(MediaPickerScreenImpl.Subject.Media, Int)
     case draft(MediaEditorDraft, Int)
 }
 
@@ -131,8 +132,15 @@ final class MediaPickerGridItemNode: GridItemNode {
     private var interaction: MediaPickerInteraction?
     private var theme: PresentationTheme?
         
+    private struct SelectionState: Equatable {
+        let selected: Bool
+        let index: Int?
+        let count: Int
+    }
+    private let selectionPromise = ValuePromise<SelectionState>(SelectionState(selected: false, index: nil, count: 0))
     private let spoilerDisposable = MetaDisposable()
     var spoilerNode: SpoilerOverlayNode?
+    var priceNode: PriceNode?
     
     private let progressDisposable = MetaDisposable()
     
@@ -233,7 +241,7 @@ final class MediaPickerGridItemNode: GridItemNode {
         }
     }
     
-    func updateSelectionState(animated: Bool = false) {
+    func updateSelectionState(isFirstTime: Bool = false, animated: Bool = false) {
         if self.checkNode == nil, let _ = self.interaction?.selectionState, self.selectable, let theme = self.theme {
             let checkNode = InteractiveCheckNode(theme: CheckNodeTheme(theme: theme, style: .overlay))
             checkNode.valueChanged = { [weak self] value in
@@ -246,17 +254,25 @@ final class MediaPickerGridItemNode: GridItemNode {
             self.addSubnode(checkNode)
             self.checkNode = checkNode
             self.setNeedsLayout()
+            
+            if !isFirstTime {
+                checkNode.layer.animateScale(from: 0.2, to: 1.0, duration: 0.5, timingFunction: kCAMediaTimingFunctionSpring)
+                checkNode.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.5, timingFunction: kCAMediaTimingFunctionSpring)
+            }
         }
 
-        if let interaction = self.interaction, let selectionState = interaction.selectionState  {
+        if let interaction = self.interaction, let selectionState = interaction.selectionState {
             let selected = selectionState.isIdentifierSelected(self.identifier)
+            var selectionIndex: Int?
             if let selectableItem = self.selectableItem {
                 let index = selectionState.index(of: selectableItem)
                 if index != NSNotFound {
                     self.checkNode?.content = .counter(Int(index))
+                    selectionIndex = Int(index)
                 }
             }
             self.checkNode?.setSelected(selected, animated: animated)
+            self.selectionPromise.set(SelectionState(selected: selected, index: selectionIndex, count: selectionState.selectedItems().count))
         }
     }
     
@@ -284,7 +300,8 @@ final class MediaPickerGridItemNode: GridItemNode {
         self.typeIconNode.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.3)
         self.durationNode.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.3)
         self.draftNode.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.3)
-        if animateSpoilerNode {
+        self.priceNode?.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.3)
+        if animateSpoilerNode || self.priceNode != nil {
             self.spoilerNode?.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.3)
         }
     }
@@ -384,7 +401,7 @@ final class MediaPickerGridItemNode: GridItemNode {
         self.updateHiddenMedia()
     }
     
-    func setup(interaction: MediaPickerInteraction, media: MediaPickerScreen.Subject.Media, index: Int, theme: PresentationTheme, selectable: Bool, enableAnimations: Bool, stories: Bool) {
+    func setup(interaction: MediaPickerInteraction, media: MediaPickerScreenImpl.Subject.Media, index: Int, theme: PresentationTheme, selectable: Bool, enableAnimations: Bool, stories: Bool) {
         self.interaction = interaction
         self.theme = theme
         self.selectable = selectable
@@ -417,6 +434,8 @@ final class MediaPickerGridItemNode: GridItemNode {
     }
         
     func setup(interaction: MediaPickerInteraction, fetchResult: PHFetchResult<PHAsset>, index: Int, theme: PresentationTheme, selectable: Bool, enableAnimations: Bool, stories: Bool) {
+        let isFirstTime = self.currentAssetState == nil
+        
         self.interaction = interaction
         self.theme = theme
         self.selectable = selectable
@@ -545,12 +564,27 @@ final class MediaPickerGridItemNode: GridItemNode {
                 }
             }
             
-            self.spoilerDisposable.set((spoilerSignal
-            |> deliverOnMainQueue).start(next: { [weak self] hasSpoiler in
+            let priceSignal = Signal<Int64?, NoError> { subscriber in
+                if let signal = editingContext.priceSignal(forIdentifier: asset.localIdentifier) {
+                    let disposable = signal.start(next: { next in
+                        subscriber.putNext(next as? Int64)
+                    }, error: { _ in
+                    }, completed: nil)!
+                    
+                    return ActionDisposable {
+                        disposable.dispose()
+                    }
+                } else {
+                    return EmptyDisposable
+                }
+            }
+            
+            self.spoilerDisposable.set((combineLatest(spoilerSignal, priceSignal, self.selectionPromise.get())
+            |> deliverOnMainQueue).start(next: { [weak self] hasSpoiler, price, selectionState in
                 guard let strongSelf = self else {
                     return
                 }
-                strongSelf.updateHasSpoiler(hasSpoiler)
+                strongSelf.updateHasSpoiler(hasSpoiler, price: selectionState.selected ? price : nil, isSingle: selectionState.count == 1 || selectionState.index == 1)
             }))
             
             if self.currentDraftState != nil {
@@ -559,9 +593,7 @@ final class MediaPickerGridItemNode: GridItemNode {
             
             var typeIcon: UIImage?
             var duration: String?
-            if asset.isFavorite {
-                typeIcon = generateTintedImage(image: UIImage(bundleImageName: "Media Grid/Favorite"), color: .white)
-            } else if asset.mediaType == .video {
+            if asset.mediaType == .video {
                 if asset.mediaSubtypes.contains(.videoHighFrameRate) {
                     typeIcon = UIImage(bundleImageName: "Media Editor/MediaSlomo")
                 } else if asset.mediaSubtypes.contains(.videoTimelapse) {
@@ -570,6 +602,9 @@ final class MediaPickerGridItemNode: GridItemNode {
                     typeIcon = UIImage(bundleImageName: "Media Editor/MediaVideo")
                 }
                 duration = stringForDuration(Int32(asset.duration))
+            }
+            if asset.isFavorite {
+                typeIcon = generateTintedImage(image: UIImage(bundleImageName: "Media Grid/Favorite"), color: .white)
             }
             
             if typeIcon != nil {
@@ -611,19 +646,21 @@ final class MediaPickerGridItemNode: GridItemNode {
             self.setNeedsLayout()
         }
         
-        self.updateSelectionState()
+        self.updateSelectionState(isFirstTime: isFirstTime)
         self.updateHiddenMedia()
     }
     
+    private var currentPrice: Int64?
     private var didSetupSpoiler = false
-    private func updateHasSpoiler(_ hasSpoiler: Bool) {
+    private func updateHasSpoiler(_ hasSpoiler: Bool, price: Int64?, isSingle: Bool) {
         var animated = true
         if !self.didSetupSpoiler {
             animated = false
             self.didSetupSpoiler = true
         }
-    
-        if hasSpoiler {
+        self.currentPrice = isSingle ? price : nil
+        
+        if hasSpoiler || price != nil {
             if self.spoilerNode == nil {
                 let spoilerNode = SpoilerOverlayNode(enableAnimations: self.enableAnimations)
                 self.insertSubnode(spoilerNode, aboveSubnode: self.imageNode)
@@ -635,13 +672,40 @@ final class MediaPickerGridItemNode: GridItemNode {
                     spoilerNode.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.2)
                 }
             }
-            self.spoilerNode?.update(size: self.bounds.size, transition: .immediate)
-            self.spoilerNode?.frame = CGRect(origin: .zero, size: self.bounds.size)
+            let bounds = self.bounds
+            self.spoilerNode?.update(size: bounds.size, transition: .immediate)
+            self.spoilerNode?.frame = CGRect(origin: .zero, size: bounds.size)
+            
+            if let price {
+                let priceNode: PriceNode
+                if let currentPriceNode = self.priceNode {
+                    priceNode = currentPriceNode
+                } else {
+                    priceNode = PriceNode()
+                    if let spoilerNode = self.spoilerNode {
+                        self.insertSubnode(priceNode, aboveSubnode: spoilerNode)
+                    }
+                    self.priceNode = priceNode
+                    
+                    if animated {
+                        priceNode.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.2)
+                    }
+                }
+                
+                self.priceNode?.update(size: bounds.size, price: isSingle ? price : nil, small: true, transition: .immediate)
+            }
         } else if let spoilerNode = self.spoilerNode {
             self.spoilerNode = nil
             spoilerNode.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.2, removeOnCompletion: false, completion: { [weak spoilerNode] _ in
                 spoilerNode?.removeFromSupernode()
             })
+            
+            if let priceNode = self.priceNode {
+                self.priceNode = nil
+                priceNode.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.2, removeOnCompletion: false, completion: { [weak priceNode] _ in
+                    priceNode?.removeFromSupernode()
+                })
+            }
         }
     }
     
@@ -672,6 +736,11 @@ final class MediaPickerGridItemNode: GridItemNode {
         if let spoilerNode = self.spoilerNode, self.bounds.width > 0.0 {
             spoilerNode.frame = self.bounds
             spoilerNode.update(size: self.bounds.size, transition: .immediate)
+        }
+        
+        if let priceNode = self.priceNode, self.bounds.width > 0.0 {
+            priceNode.frame = self.bounds
+            priceNode.update(size: self.bounds.size, price: self.currentPrice, small: true, transition: .immediate)
         }
         
         let statusSize = CGSize(width: 40.0, height: 40.0)

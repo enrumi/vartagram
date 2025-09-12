@@ -64,11 +64,11 @@ public class ChatMessageFileBubbleContentNode: ChatMessageBubbleContentNode {
             }
         }
         
-        self.interactiveFileNode.dateAndStatusNode.reactionSelected = { [weak self] value in
+        self.interactiveFileNode.dateAndStatusNode.reactionSelected = { [weak self] _, value, sourceView in
             guard let strongSelf = self, let item = strongSelf.item else {
                 return
             }
-            item.controllerInteraction.updateMessageReaction(item.message, .reaction(value))
+            item.controllerInteraction.updateMessageReaction(item.topMessage, .reaction(value), false, sourceView)
         }
         
         self.interactiveFileNode.dateAndStatusNode.openReactionPreview = { [weak self] gesture, sourceNode, value in
@@ -106,14 +106,22 @@ public class ChatMessageFileBubbleContentNode: ChatMessageBubbleContentNode {
                     selectedFile = telegramFile
                 }
             }
+            if let updatingMedia = item.attributes.updatingMedia, case let .update(media) = updatingMedia.media, let file = media.media as? TelegramMediaFile {
+                selectedFile = file
+            }
             
             var incoming = item.message.effectivelyIncoming(item.context.account.peerId)
             if let subject = item.associatedData.subject, case let .messageOptions(_, _, info) = subject, case .forward = info {
                 incoming = false
             }
             let statusType: ChatMessageDateAndStatusType?
-            switch preparePosition {
-            case .linear(_, .None), .linear(_, .Neighbour(true, _, _)):
+            if case .customChatContents = item.associatedData.subject {
+                statusType = nil
+            } else if item.message.timestamp == 0 {
+                statusType = nil
+            } else {
+                switch preparePosition {
+                case .linear(_, .None), .linear(_, .Neighbour(true, _, _)):
                     if incoming {
                         statusType = .BubbleIncoming
                     } else {
@@ -127,9 +135,10 @@ public class ChatMessageFileBubbleContentNode: ChatMessageBubbleContentNode {
                     }
                 default:
                     statusType = nil
+                }
             }
             
-            let automaticDownload = shouldDownloadMediaAutomatically(settings: item.controllerInteraction.automaticMediaDownloadSettings, peerType: item.associatedData.automaticDownloadPeerType, networkType: item.associatedData.automaticDownloadNetworkType, authorPeerId: item.message.author?.id, contactsPeerIds: item.associatedData.contactsPeerIds, media: selectedFile!)
+            let automaticDownload = shouldDownloadMediaAutomatically(settings: item.controllerInteraction.automaticMediaDownloadSettings, peerType: item.associatedData.automaticDownloadPeerType, networkType: item.associatedData.automaticDownloadNetworkType, authorPeerId: item.message.author?.id, contactsPeerIds: item.associatedData.contactsPeerIds, media: selectedFile)
             
             let (initialWidth, refineLayout) = interactiveFileLayout(ChatMessageInteractiveFileNode.Arguments(
                 context: item.context,
@@ -242,6 +251,13 @@ public class ChatMessageFileBubbleContentNode: ChatMessageBubbleContentNode {
     override public func reactionTargetView(value: MessageReaction.Reaction) -> UIView? {
         if !self.interactiveFileNode.dateAndStatusNode.isHidden {
             return self.interactiveFileNode.dateAndStatusNode.reactionView(value: value)
+        }
+        return nil
+    }
+    
+    override public func messageEffectTargetView() -> UIView? {
+        if !self.interactiveFileNode.dateAndStatusNode.isHidden {
+            return self.interactiveFileNode.dateAndStatusNode.messageEffectTargetView()
         }
         return nil
     }

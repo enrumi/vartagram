@@ -181,7 +181,37 @@ func messagesIdsGroupedByPeerId(_ ids: ReferencedReplyMessageIds) -> [PeerId: Re
     return dict
 }
 
-func locallyRenderedMessage(message: StoreMessage, peers: [PeerId: Peer], associatedThreadInfo: Message.AssociatedThreadInfo? = nil) -> Message? {
+func messagesIdsGroupedByPeerId(_ ids: Set<MessageAndThreadId>) -> [PeerAndThreadId: [MessageId]] {
+    var dict: [PeerAndThreadId: [MessageId]] = [:]
+
+    for id in ids {
+        let peerAndThreadId = PeerAndThreadId(peerId: id.messageId.peerId, threadId: id.threadId)
+        if dict[peerAndThreadId] == nil {
+            dict[peerAndThreadId] = [id.messageId]
+        } else {
+            dict[peerAndThreadId]!.append(id.messageId)
+        }
+    }
+
+    return dict
+}
+
+func messagesIdsGroupedByPeerId(_ ids: [MessageAndThreadId]) -> [PeerAndThreadId: [MessageId]] {
+    var dict: [PeerAndThreadId: [MessageId]] = [:]
+
+    for id in ids {
+        let peerAndThreadId = PeerAndThreadId(peerId: id.messageId.peerId, threadId: id.threadId)
+        if dict[peerAndThreadId] == nil {
+            dict[peerAndThreadId] = [id.messageId]
+        } else {
+            dict[peerAndThreadId]!.append(id.messageId)
+        }
+    }
+
+    return dict
+}
+
+func locallyRenderedMessage(message: StoreMessage, peers: [PeerId: Peer], associatedThreadInfo: Message.AssociatedThreadInfo? = nil, associatedMessages: SimpleDictionary<MessageId, Message> = SimpleDictionary()) -> Message? {
     guard case let .Id(id) = message.id else {
         return nil
     }
@@ -202,6 +232,30 @@ func locallyRenderedMessage(message: StoreMessage, peers: [PeerId: Peer], associ
         if let group = peer as? TelegramGroup, let migrationReference = group.migrationReference {
             if let channelPeer = peers[migrationReference.peerId] {
                 messagePeers[channelPeer.id] = channelPeer
+            }
+        }
+
+        if let channel = peer as? TelegramChannel, channel.isMonoForum, let linkedMonoforumId = channel.linkedMonoforumId {
+            if let channelPeer = peers[linkedMonoforumId] {
+                messagePeers[channelPeer.id] = channelPeer
+            }
+
+            if let threadId = message.threadId {
+                if let threadPeer = peers[PeerId(threadId)] {
+                    messagePeers[threadPeer.id] = threadPeer
+                }
+            }
+        }
+
+        if let channel = peer as? TelegramChannel, let linkedBotId = channel.linkedBotId {
+            if let channelPeer = peers[linkedBotId] {
+                messagePeers[linkedBotId] = channelPeer
+            }
+
+            if let threadId = message.threadId {
+                if let threadPeer = peers[PeerId(threadId)] {
+                    messagePeers[threadPeer.id] = threadPeer
+                }
             }
         }
     }
@@ -234,7 +288,7 @@ func locallyRenderedMessage(message: StoreMessage, peers: [PeerId: Peer], associ
     let second = UInt32(hashValue & 0xffffffff)
     let stableId = first &+ second
         
-    return Message(stableId: stableId, stableVersion: 0, id: id, globallyUniqueId: nil, groupingKey: nil, groupInfo: nil, threadId: message.threadId, timestamp: message.timestamp, flags: MessageFlags(message.flags), tags: message.tags, globalTags: message.globalTags, localTags: message.localTags, forwardInfo: forwardInfo, author: author, text: message.text, attributes: message.attributes, media: message.media, peers: messagePeers, associatedMessages: SimpleDictionary(), associatedMessageIds: [], associatedMedia: [:], associatedThreadInfo: associatedThreadInfo, associatedStories: [:])
+    return Message(stableId: stableId, stableVersion: 0, id: id, globallyUniqueId: nil, groupingKey: nil, groupInfo: nil, threadId: message.threadId, timestamp: message.timestamp, flags: MessageFlags(message.flags), tags: message.tags, globalTags: message.globalTags, localTags: message.localTags, customTags: [], forwardInfo: forwardInfo, author: author, text: message.text, attributes: message.attributes, media: message.media, peers: messagePeers, associatedMessages: associatedMessages, associatedMessageIds: [], associatedMedia: [:], associatedThreadInfo: associatedThreadInfo, associatedStories: [:])
 }
 
 func locallyRenderedMessage(message: StoreMessage, peers: AccumulatedPeers, associatedThreadInfo: Message.AssociatedThreadInfo? = nil) -> Message? {
@@ -290,7 +344,7 @@ func locallyRenderedMessage(message: StoreMessage, peers: AccumulatedPeers, asso
     let second = UInt32(hashValue & 0xffffffff)
     let stableId = first &+ second
         
-    return Message(stableId: stableId, stableVersion: 0, id: id, globallyUniqueId: nil, groupingKey: nil, groupInfo: nil, threadId: message.threadId, timestamp: message.timestamp, flags: MessageFlags(message.flags), tags: message.tags, globalTags: message.globalTags, localTags: message.localTags, forwardInfo: forwardInfo, author: author, text: message.text, attributes: message.attributes, media: message.media, peers: messagePeers, associatedMessages: SimpleDictionary(), associatedMessageIds: [], associatedMedia: [:], associatedThreadInfo: associatedThreadInfo, associatedStories: [:])
+    return Message(stableId: stableId, stableVersion: 0, id: id, globallyUniqueId: nil, groupingKey: nil, groupInfo: nil, threadId: message.threadId, timestamp: message.timestamp, flags: MessageFlags(message.flags), tags: message.tags, globalTags: message.globalTags, localTags: message.localTags, customTags: [], forwardInfo: forwardInfo, author: author, text: message.text, attributes: message.attributes, media: message.media, peers: messagePeers, associatedMessages: SimpleDictionary(), associatedMessageIds: [], associatedMedia: [:], associatedThreadInfo: associatedThreadInfo, associatedStories: [:])
 }
 
 public extension Message {
@@ -314,6 +368,9 @@ public extension Message {
                 return false
             }
         } else if self.author?.id == accountPeerId {
+            if let channel = self.peers[self.id.peerId] as? TelegramChannel, case .broadcast = channel.info {
+                return true
+            }
             return false
         } else if self.flags.contains(.Incoming) {
             return true
@@ -344,6 +401,18 @@ public extension Message {
         } else {
             return false
         }
+    }
+
+    func isSensitiveContent(platform: String) -> Bool {
+        if let rule = self.restrictedContentAttribute?.rules.first(where: { $0.reason == "sensitive" }) {
+            if rule.platform == "all" || rule.platform == platform {
+                return true
+            }
+        }
+        if let peer = self.peers[self.id.peerId], peer.hasSensitiveContent(platform: platform) {
+            return true
+        }
+        return false
     }
 }
 
@@ -407,6 +476,42 @@ public extension Message {
         }
         return nil
     }
+
+    var factCheckAttribute: FactCheckMessageAttribute? {
+        for attribute in self.attributes {
+            if let attribute = attribute as? FactCheckMessageAttribute {
+                return attribute
+            }
+        }
+        return nil
+    }
+
+    var inlineBotAttribute: InlineBusinessBotMessageAttribute? {
+        for attribute in self.attributes {
+            if let attribute = attribute as? InlineBusinessBotMessageAttribute {
+                return attribute
+            }
+        }
+        return nil
+    }
+
+    var derivedDataAttribute: DerivedDataMessageAttribute? {
+        for attribute in self.attributes {
+            if let attribute = attribute as? DerivedDataMessageAttribute {
+                return attribute
+            }
+        }
+        return nil
+    }
+
+    var forwardVideoTimestampAttribute: ForwardVideoTimestampAttribute? {
+        for attribute in self.attributes {
+            if let attribute = attribute as? ForwardVideoTimestampAttribute {
+                return attribute
+            }
+        }
+        return nil
+    }
 }
 public extension Message {
     var reactionsAttribute: ReactionsMessageAttribute? {
@@ -417,12 +522,23 @@ public extension Message {
         }
         return nil
     }
-    var effectiveReactions: [MessageReaction]? {
+    func effectiveReactionsAttribute(isTags: Bool) -> ReactionsMessageAttribute? {
+        if !self.hasReactions {
+            return nil
+        }
+
+        if let result = mergedMessageReactions(attributes: self.attributes, isTags: isTags) {
+            return result
+        } else {
+            return nil
+        }
+    }
+    func effectiveReactions(isTags: Bool) -> [MessageReaction]? {
         if !self.hasReactions {
             return nil
         }
         
-        if let result = mergedMessageReactions(attributes: self.attributes) {
+        if let result = mergedMessageReactions(attributes: self.attributes, isTags: isTags) {
             return result.reactions
         } else {
             return nil
@@ -463,6 +579,28 @@ public extension Message {
         }
         return nil
     }
+
+    var paidContent: TelegramMediaPaidContent? {
+        return self.media.first(where: { $0 is TelegramMediaPaidContent }) as? TelegramMediaPaidContent
+    }
+
+    var authorSignatureAttribute: AuthorSignatureMessageAttribute? {
+        for attribute in self.attributes {
+            if let attribute = attribute as? AuthorSignatureMessageAttribute {
+                return attribute
+            }
+        }
+        return nil
+    }
+
+    var paidStarsAttribute: PaidStarsMessageAttribute? {
+        for attribute in self.attributes {
+            if let attribute = attribute as? PaidStarsMessageAttribute {
+                return attribute
+            }
+        }
+        return nil
+    }
 }
 
 public extension Message {
@@ -474,6 +612,46 @@ public extension Message {
         }
         return nil
     }
+    var invertMedia: Bool {
+        for attribute in self.attributes {
+            if let _ = attribute as? InvertMediaMessageAttribute {
+                return true
+            }
+        }
+        return false
+    }
+    var invertMediaAttribute: InvertMediaMessageAttribute? {
+        for attribute in self.attributes {
+            if let attribute = attribute as? InvertMediaMessageAttribute {
+                return attribute
+            }
+        }
+        return nil
+    }
+}
+
+public extension Message {
+    var pendingProcessingAttribute: PendingProcessingMessageAttribute? {
+        for attribute in self.attributes {
+            if let attribute = attribute as? PendingProcessingMessageAttribute {
+                return attribute
+            }
+        }
+        return nil
+    }
+}
+
+public extension Message {
+    func areReactionsTags(accountPeerId: PeerId) -> Bool {
+        if self.id.peerId == accountPeerId {
+            if let reactionsAttribute = self.reactionsAttribute, !reactionsAttribute.reactions.isEmpty {
+                return reactionsAttribute.isTags
+            } else {
+                return true
+            }
+        }
+        return false
+    }
 }
 
 public func _internal_parseMediaAttachment(data: Data) -> Media? {
@@ -483,7 +661,7 @@ public func _internal_parseMediaAttachment(data: Data) -> Media? {
     if let photo = object as? Api.Photo {
         return telegramMediaImageFromApiPhoto(photo)
     } else if let file = object as? Api.Document {
-        return telegramMediaFileFromApiDocument(file)
+        return telegramMediaFileFromApiDocument(file, altDocuments: [])
     } else {
         return nil
     }
@@ -496,7 +674,7 @@ public extension Message {
         }
         return false
     }
-    
+
     var isPeerOrForwardSourceBroadcastChannel: Bool {
         if self.isPeerBroadcastChannel {
             return true
@@ -506,10 +684,27 @@ public extension Message {
         }
         return false
     }
-    
+
     var channelUsername: String? {
         if let channel = self.peers[self.id.peerId] as? TelegramChannel {
             return channel.username
+        }
+        return nil
+    }
+
+    func messageEffect(availableMessageEffects: AvailableMessageEffects?) -> AvailableMessageEffects.MessageEffect? {
+        guard let availableMessageEffects else {
+            return nil
+        }
+        for attribute in self.attributes {
+            if let attribute = attribute as? EffectMessageAttribute {
+                for effect in availableMessageEffects.messageEffects {
+                    if effect.id == attribute.id {
+                        return effect
+                    }
+                }
+                break
+            }
         }
         return nil
     }

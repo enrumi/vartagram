@@ -46,7 +46,7 @@ private enum JoinState: Equatable {
     }
 }
 
-final class InstantPagePeerReferenceNode: ASDisplayNode, InstantPageNode {
+public final class InstantPagePeerReferenceNode: ASDisplayNode, InstantPageNode {
     private let context: AccountContext
     let safeInset: CGFloat
     private let transparent: Bool
@@ -149,7 +149,7 @@ final class InstantPagePeerReferenceNode: ASDisplayNode, InstantPageNode {
         let signal: Signal<EnginePeer, NoError> = actualizedPeer(accountPeerId: account.peerId, postbox: account.postbox, network: account.network, peer: initialPeer._asPeer())
         |> mapToSignal({ peer -> Signal<EnginePeer, NoError> in
             if let peer = peer as? TelegramChannel, let username = peer.addressName, peer.accessHash == nil {
-                return .single(.channel(peer)) |> then(engine.peers.resolvePeerByName(name: username)
+                return .single(.channel(peer)) |> then(engine.peers.resolvePeerByName(name: username, referrer: nil)
                 |> mapToSignal({ result -> Signal<EnginePeer, NoError> in
                     guard case let .result(updatedPeer) = result else {
                         return .complete()
@@ -197,7 +197,7 @@ final class InstantPagePeerReferenceNode: ASDisplayNode, InstantPageNode {
         self.joinDisposable.dispose()
     }
     
-    func update(strings: PresentationStrings, theme: InstantPageTheme) {
+    public func update(strings: PresentationStrings, theme: InstantPageTheme) {
         if self.strings !== strings || self.theme !== theme {
             let themeUpdated = self.theme !== theme
             self.strings = strings
@@ -206,7 +206,7 @@ final class InstantPagePeerReferenceNode: ASDisplayNode, InstantPageNode {
         }
     }
     
-    func updateLayout(size: CGSize, transition: ContainedViewLayoutTransition) {
+    public func updateLayout(size: CGSize, transition: ContainedViewLayoutTransition) {
     }
     
     private func applyThemeAndStrings(themeUpdated: Bool) {
@@ -263,7 +263,7 @@ final class InstantPagePeerReferenceNode: ASDisplayNode, InstantPageNode {
         }
     }
     
-    override func layout() {
+    public override func layout() {
         super.layout()
         
         let size = self.bounds.size
@@ -290,14 +290,14 @@ final class InstantPagePeerReferenceNode: ASDisplayNode, InstantPageNode {
         }
     }
     
-    func transitionNode(media: InstantPageMedia) -> (ASDisplayNode, CGRect, () -> (UIView?, UIView?))? {
+    public func transitionNode(media: InstantPageMedia) -> (ASDisplayNode, CGRect, () -> (UIView?, UIView?))? {
         return nil
     }
     
-    func updateHiddenMedia(media: InstantPageMedia?) {
+    public func updateHiddenMedia(media: InstantPageMedia?) {
     }
     
-    func updateIsVisible(_ isVisible: Bool) {
+    public func updateIsVisible(_ isVisible: Bool) {
     }
     
     @objc func buttonPressed() {

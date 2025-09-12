@@ -50,7 +50,7 @@ public class ChatMessageRestrictedBubbleContentNode: ChatMessageBubbleContentNod
                 let textConstrainedSize = CGSize(width: min(maxTextWidth, constrainedSize.width - horizontalInset), height: constrainedSize.height)
                 
                 let hideReactions = item.message.isPeerBroadcastChannel && item.context.sharedContext.currentPtgSettings.with { $0.hideReactionsInChannels }
-                
+
                 var edited = false
                 if item.attributes.updatingMedia != nil {
                     edited = true
@@ -58,7 +58,8 @@ public class ChatMessageRestrictedBubbleContentNode: ChatMessageBubbleContentNod
                 var viewCount: Int?
                 var rawText = ""
                 var dateReplies = 0
-                var dateReactionsAndPeers = !hideReactions ? mergedMessageReactionsAndPeers(accountPeer: item.associatedData.accountPeer, message: item.message) : (reactions: [], peers: [])
+                var starsCount: Int64?
+                var dateReactionsAndPeers = !hideReactions ? mergedMessageReactionsAndPeers(accountPeerId: item.context.account.peerId, accountPeer: item.associatedData.accountPeer, message: item.message) : (reactions: [], peers: [])
                 if item.message.isRestricted(platform: "ios", contentSettings: item.context.currentContentSettings.with { $0 }) {
                     dateReactionsAndPeers = ([], [])
                 }
@@ -73,29 +74,35 @@ public class ChatMessageRestrictedBubbleContentNode: ChatMessageBubbleContentNod
                         if let channel = item.message.peers[item.message.id.peerId] as? TelegramChannel, case .group = channel.info {
                             dateReplies = Int(attribute.count)
                         }
+                    } else if let attribute = attribute as? PaidStarsMessageAttribute, item.message.id.peerId.namespace == Namespaces.Peer.CloudChannel {
+                        starsCount = attribute.stars.value
                     }
                 }
                 
                 let dateText = stringForMessageTimestampStatus(accountPeerId: item.context.account.peerId, message: item.message, dateTimeFormat: item.presentationData.dateTimeFormat, nameDisplayOrder: item.presentationData.nameDisplayOrder, strings: item.presentationData.strings, associatedData: item.associatedData)
                 
                 let statusType: ChatMessageDateAndStatusType?
-                switch position {
-                case .linear(_, .None), .linear(_, .Neighbour(true, _, _)):
-                    if incoming {
-                        statusType = .BubbleIncoming
-                    } else {
-                        if message.flags.contains(.Failed) {
-                            statusType = .BubbleOutgoing(.Failed)
-                        } else if message.flags.isSending && !message.isSentOrAcknowledged {
-                            statusType = .BubbleOutgoing(.Sending)
-                        } else {
-                            statusType = .BubbleOutgoing(.Sent(read: item.read))
-                        }
-                    }
-                default:
+                if case .customChatContents = item.associatedData.subject {
                     statusType = nil
+                } else {
+                    switch position {
+                    case .linear(_, .None), .linear(_, .Neighbour(true, _, _)):
+                        if incoming {
+                            statusType = .BubbleIncoming
+                        } else {
+                            if message.flags.contains(.Failed) {
+                                statusType = .BubbleOutgoing(.Failed)
+                            } else if message.flags.isSending && !message.isSentOrAcknowledged {
+                                statusType = .BubbleOutgoing(.Sending)
+                            } else {
+                                statusType = .BubbleOutgoing(.Sent(read: item.read))
+                            }
+                        }
+                    default:
+                        statusType = nil
+                    }
                 }
-                
+
                 let entities = [MessageTextEntity(range: 0..<rawText.count, type: .Italic)]
                 
                 let messageTheme = incoming ? item.presentationData.theme.theme.chat.message.incoming : item.presentationData.theme.theme.chat.message.outgoing
@@ -131,13 +138,18 @@ public class ChatMessageRestrictedBubbleContentNode: ChatMessageBubbleContentNod
                         layoutInput: .trailingContent(contentWidth: textLayout.trailingLineWidth, reactionSettings: ChatMessageDateAndStatusNode.TrailingReactionSettings(displayInline: shouldDisplayInlineDateReactions(message: message, isPremium: item.associatedData.isPremium, forceInline: item.associatedData.forceInlineReactions), preferAdditionalInset: false)),
                         constrainedSize: textConstrainedSize,
                         availableReactions: item.associatedData.availableReactions,
+                        savedMessageTags: item.associatedData.savedMessageTags,
                         reactions: dateReactionsAndPeers.reactions,
                         reactionPeers: dateReactionsAndPeers.peers,
                         displayAllReactionPeers: item.message.id.peerId.namespace == Namespaces.Peer.CloudUser,
+                        areReactionsTags: item.topMessage.areReactionsTags(accountPeerId: item.context.account.peerId),
+                        areStarReactionsEnabled: item.associatedData.areStarReactionsEnabled,
+                        messageEffect: item.topMessage.messageEffect(availableMessageEffects: item.associatedData.availableMessageEffects),
                         replyCount: dateReplies,
+                        starsCount: starsCount,
                         isPinned: item.message.tags.contains(.pinned) && !item.associatedData.isInPinnedListMode && isReplyThread,
                         hasAutoremove: item.message.isSelfExpiring,
-                        canViewReactionList: canViewMessageReactionList(message: item.message),
+                        canViewReactionList: canViewMessageReactionList(message: item.topMessage),
                         animationCache: item.controllerInteraction.presentationContext.animationCache,
                         animationRenderer: item.controllerInteraction.presentationContext.animationRenderer
                     ))

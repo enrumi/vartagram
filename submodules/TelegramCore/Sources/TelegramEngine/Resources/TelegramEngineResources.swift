@@ -345,8 +345,8 @@ public extension TelegramEngine {
             }
         }
 
-        public func httpData(url: String) -> Signal<Data, EngineMediaResource.Fetch.Error> {
-            return fetchHttpResource(url: url)
+        public func httpData(url: String, preserveExactUrl: Bool = false) -> Signal<Data, EngineMediaResource.Fetch.Error> {
+            return fetchHttpResource(url: url, preserveExactUrl: preserveExactUrl)
             |> mapError { _ -> EngineMediaResource.Fetch.Error in
                 return .generic
             }
@@ -366,11 +366,10 @@ public extension TelegramEngine {
             |> take(1)
             |> mapToSignal { datacenterId -> Signal<EngineMediaResource.Fetch.Result, EngineMediaResource.Fetch.Error> in
                 let resource = AlbumCoverResource(datacenterId: Int(datacenterId), file: file, title: title, performer: performer, isThumbnail: isThumbnail)
-                
                 return multipartFetch(accountPeerId: self.account.peerId, postbox: self.account.postbox, network: self.account.network, mediaReferenceRevalidationContext: self.account.mediaReferenceRevalidationContext, networkStatsContext: self.account.networkStatsContext, resource: resource, datacenterId: Int(datacenterId), size: nil, intervals: .single([(0 ..< Int64.max, .default)]), parameters: MediaResourceFetchParameters(
                     tag: nil,
                     info: TelegramCloudMediaResourceFetchInfo(
-                        reference: MediaResourceReference.standalone(resource: resource),
+                        reference: file?.resourceReference(resource) ?? MediaResourceReference.standalone(resource: resource),
                         preferBackgroundReferenceRevalidation: false,
                         continueInBackground: false
                     ),
@@ -415,6 +414,10 @@ public extension TelegramEngine {
         
         public func pushPriorityDownload(resourceId: String, priority: Int = 1) -> Disposable {
             return self.account.network.multiplexedRequestManager.pushPriority(resourceId: resourceId, priority: priority)
+        }
+        
+        public func applicationIcons() -> Signal<TelegramApplicationIcons, NoError> {
+            return _internal_applicationIcons(account: account)
         }
     }
 }

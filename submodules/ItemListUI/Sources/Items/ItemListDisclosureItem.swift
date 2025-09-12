@@ -8,6 +8,8 @@ import ShimmerEffect
 import AvatarNode
 import TelegramCore
 import AccountContext
+import TextNodeWithEntities
+import ListItemComponentAdaptor
 
 private let avatarFont = avatarPlaceholderFont(size: 16.0)
 
@@ -39,41 +41,59 @@ public enum ItemListDisclosureLabelStyle {
     case image(image: UIImage, size: CGSize)
 }
 
-public class ItemListDisclosureItem: ListViewItem, ItemListItem {
+public enum ItemListDisclosureItemDetailLabelColor {
+    case generic
+    case constructive
+    case destructive
+}
+
+public class ItemListDisclosureItem: ListViewItem, ItemListItem, ListItemComponentAdaptor.ItemGenerator {
     let presentationData: ItemListPresentationData
     let icon: UIImage?
     let context: AccountContext?
     let iconPeer: EnginePeer?
     let title: String
+    let attributedTitle: NSAttributedString?
     let titleColor: ItemListDisclosureItemTitleColor
     let titleFont: ItemListDisclosureItemTitleFont
+    let titleIcon: UIImage?
+    let titleBadge: String?
     let enabled: Bool
     let label: String
+    let attributedLabel: NSAttributedString?
     let labelStyle: ItemListDisclosureLabelStyle
     let additionalDetailLabel: String?
+    let additionalDetailLabelColor: ItemListDisclosureItemDetailLabelColor
     public let sectionId: ItemListSectionId
     let style: ItemListStyle
     let disclosureStyle: ItemListDisclosureStyle
+    let noInsets: Bool
     let action: (() -> Void)?
     let clearHighlightAutomatically: Bool
     public let tag: ItemListItemTag?
     public let shimmeringIndex: Int?
     
-    public init(presentationData: ItemListPresentationData, icon: UIImage? = nil, context: AccountContext? = nil, iconPeer: EnginePeer? = nil, title: String, enabled: Bool = true, titleColor: ItemListDisclosureItemTitleColor = .primary, titleFont: ItemListDisclosureItemTitleFont = .regular, label: String, labelStyle: ItemListDisclosureLabelStyle = .text, additionalDetailLabel: String? = nil, sectionId: ItemListSectionId, style: ItemListStyle, disclosureStyle: ItemListDisclosureStyle = .arrow, action: (() -> Void)?, clearHighlightAutomatically: Bool = true, tag: ItemListItemTag? = nil, shimmeringIndex: Int? = nil) {
+    public init(presentationData: ItemListPresentationData, icon: UIImage? = nil, context: AccountContext? = nil, iconPeer: EnginePeer? = nil, title: String, attributedTitle: NSAttributedString? = nil, enabled: Bool = true, titleColor: ItemListDisclosureItemTitleColor = .primary, titleFont: ItemListDisclosureItemTitleFont = .regular, titleIcon: UIImage? = nil, titleBadge: String? = nil, label: String, attributedLabel: NSAttributedString? = nil, labelStyle: ItemListDisclosureLabelStyle = .text, additionalDetailLabel: String? = nil, additionalDetailLabelColor: ItemListDisclosureItemDetailLabelColor = .generic, sectionId: ItemListSectionId, style: ItemListStyle, disclosureStyle: ItemListDisclosureStyle = .arrow, noInsets: Bool = false, action: (() -> Void)?, clearHighlightAutomatically: Bool = true, tag: ItemListItemTag? = nil, shimmeringIndex: Int? = nil) {
         self.presentationData = presentationData
         self.icon = icon
         self.context = context
         self.iconPeer = iconPeer
         self.title = title
+        self.attributedTitle = attributedTitle
         self.titleColor = titleColor
         self.titleFont = titleFont
+        self.titleIcon = titleIcon
+        self.titleBadge = titleBadge
         self.enabled = enabled
         self.labelStyle = labelStyle
         self.label = label
+        self.attributedLabel = attributedLabel
         self.additionalDetailLabel = additionalDetailLabel
+        self.additionalDetailLabelColor = additionalDetailLabelColor
         self.sectionId = sectionId
         self.style = style
         self.disclosureStyle = disclosureStyle
+        self.noInsets = noInsets
         self.action = action
         self.clearHighlightAutomatically = clearHighlightAutomatically
         self.tag = tag
@@ -123,6 +143,27 @@ public class ItemListDisclosureItem: ListViewItem, ItemListItem {
             self.action?()
         }
     }
+    
+    public func item() -> ListViewItem {
+        return self
+    }
+    
+    public static func ==(lhs: ItemListDisclosureItem, rhs: ItemListDisclosureItem) -> Bool {
+        if lhs.presentationData != rhs.presentationData {
+            return false
+        }
+        if lhs.context !== rhs.context {
+            return false
+        }
+        if lhs.title != rhs.title {
+            return false
+        }
+        if lhs.label != rhs.label {
+            return false
+        }
+        
+        return true
+    }
 }
 
 private let badgeFont = Font.regular(15.0)
@@ -137,12 +178,16 @@ public class ItemListDisclosureItemNode: ListViewItemNode, ItemListItemNode {
     
     var avatarNode: AvatarNode?
     let iconNode: ASImageNode
-    let titleNode: TextNode
+    let titleNode: TextNodeWithEntities
+    let titleIconNode: ASImageNode
     public let labelNode: TextNode
     var additionalDetailLabelNode: TextNode?
     let arrowNode: ASImageNode
     let labelBadgeNode: ASImageNode
     let labelImageNode: ASImageNode
+    
+    var titleBadgeNode: ASImageNode?
+    var titleBadgeTextNode: TextNode?
     
     private let activateArea: AccessibilityAreaNode
     
@@ -181,8 +226,12 @@ public class ItemListDisclosureItemNode: ListViewItemNode, ItemListItemNode {
         self.iconNode.isLayerBacked = true
         self.iconNode.displaysAsynchronously = false
         
-        self.titleNode = TextNode()
-        self.titleNode.isUserInteractionEnabled = false
+        self.titleNode = TextNodeWithEntities()
+        self.titleNode.textNode.isUserInteractionEnabled = false
+        
+        self.titleIconNode = ASImageNode()
+        self.titleIconNode.displayWithoutProcessing = true
+        self.titleIconNode.displaysAsynchronously = false
         
         self.labelNode = TextNode()
         self.labelNode.isUserInteractionEnabled = false
@@ -205,7 +254,7 @@ public class ItemListDisclosureItemNode: ListViewItemNode, ItemListItemNode {
         
         super.init(layerBacked: false, dynamicBounce: false)
         
-        self.addSubnode(self.titleNode)
+        self.addSubnode(self.titleNode.textNode)
         self.addSubnode(self.labelNode)
         self.addSubnode(self.arrowNode)
         
@@ -233,9 +282,12 @@ public class ItemListDisclosureItemNode: ListViewItemNode, ItemListItemNode {
     }
     
     public func asyncLayout() -> (_ item: ItemListDisclosureItem, _ params: ListViewItemLayoutParams, _ insets: ItemListNeighbors) -> (ListViewItemNodeLayout, () -> Void) {
-        let makeTitleLayout = TextNode.asyncLayout(self.titleNode)
+        let makeTitleLayout = TextNode.asyncLayout(self.titleNode.textNode)
+        let makeTitleWithEntitiesLayout = TextNodeWithEntities.asyncLayout(self.titleNode)
         let makeLabelLayout = TextNode.asyncLayout(self.labelNode)
         let makeAdditionalDetailLabelLayout = TextNode.asyncLayout(self.additionalDetailLabelNode)
+        
+        let makeTitleBadgeTextNodeLayout = TextNode.asyncLayout(self.titleBadgeTextNode)
         
         let currentItem = self.item
         
@@ -310,14 +362,14 @@ public class ItemListDisclosureItemNode: ListViewItemNode, ItemListItemNode {
             }
             
             let contentSize: CGSize
-            let insets: UIEdgeInsets
+            var insets: UIEdgeInsets
             let separatorHeight = UIScreenPixel
             let itemBackgroundColor: UIColor
             let itemSeparatorColor: UIColor
             
             var leftInset = 16.0 + params.leftInset
             if item.icon != nil {
-                leftInset += 43.0
+                leftInset += item.noInsets ? 49.0 : 43.0
             } else if item.iconPeer != nil {
                 leftInset += 46.0
             }
@@ -355,7 +407,18 @@ public class ItemListDisclosureItemNode: ListViewItemNode, ItemListItemNode {
                 maxTitleWidth -= 40.0
             }
             
-            let (titleLayout, titleApply) = makeTitleLayout(TextNodeLayoutArguments(attributedString: NSAttributedString(string: item.title, font: titleFont, textColor: titleColor), backgroundColor: nil, maximumNumberOfLines: 1, truncationType: .end, constrainedSize: CGSize(width: maxTitleWidth, height: CGFloat.greatestFiniteMagnitude), alignment: .natural, cutout: nil, insets: UIEdgeInsets()))
+            var titleBadgeTextNodeLayout: (TextNodeLayout, () -> TextNode)?
+            if let titleBadge = item.titleBadge {
+                let titleBadgeTextNodeLayoutValue = makeTitleBadgeTextNodeLayout(TextNodeLayoutArguments(attributedString: item.attributedTitle ?? NSAttributedString(string: titleBadge, font: Font.medium(11.0), textColor: item.presentationData.theme.list.itemCheckColors.foregroundColor), backgroundColor: nil, maximumNumberOfLines: 1, truncationType: .end, constrainedSize: CGSize(width: 100.0, height: CGFloat.greatestFiniteMagnitude), alignment: .natural, cutout: nil, insets: UIEdgeInsets()))
+                titleBadgeTextNodeLayout = titleBadgeTextNodeLayoutValue
+                maxTitleWidth -= 5.0 + titleBadgeTextNodeLayoutValue.0.size.width
+            }
+            
+            let titleArguments = TextNodeLayoutArguments(attributedString: item.attributedTitle ?? NSAttributedString(string: item.title, font: titleFont, textColor: titleColor), backgroundColor: nil, maximumNumberOfLines: item.attributedTitle != nil ? 0 : 1, truncationType: .end, constrainedSize: CGSize(width: maxTitleWidth, height: CGFloat.greatestFiniteMagnitude), alignment: .natural, cutout: nil, insets: UIEdgeInsets())
+            let (titleLayoutAndApply) = item.context == nil ? makeTitleLayout(titleArguments) : nil
+            let (titleWithEntitiesLayoutAndApply) = item.context != nil ? makeTitleWithEntitiesLayout(titleArguments) : nil
+            
+            let titleLayout: TextNodeLayout = (titleWithEntitiesLayoutAndApply?.0 ?? titleLayoutAndApply?.0)!
             
             let detailFont = Font.regular(floor(item.presentationData.fontSize.itemListBaseFontSize * 15.0 / 17.0))
             
@@ -393,15 +456,24 @@ public class ItemListDisclosureItemNode: ListViewItemNode, ItemListItemNode {
                 multilineLabel = true
             }
             
-            let (labelLayout, labelApply) = makeLabelLayout(TextNodeLayoutArguments(attributedString: NSAttributedString(string: item.label, font: labelFont, textColor: labelBadgeColor), backgroundColor: nil, maximumNumberOfLines: multilineLabel ? 0 : 1, truncationType: .end, constrainedSize: CGSize(width: labelConstrain, height: CGFloat.greatestFiniteMagnitude), alignment: .natural, cutout: nil, insets: UIEdgeInsets()))
+            let (labelLayout, labelApply) = makeLabelLayout(TextNodeLayoutArguments(attributedString: item.attributedLabel ?? NSAttributedString(string: item.label, font: labelFont, textColor: labelBadgeColor), backgroundColor: nil, maximumNumberOfLines: multilineLabel ? 0 : 1, truncationType: .end, constrainedSize: CGSize(width: labelConstrain, height: CGFloat.greatestFiniteMagnitude), alignment: .natural, cutout: nil, insets: UIEdgeInsets()))
             
             var additionalDetailLabelInfo: (TextNodeLayout, () -> TextNode)?
             if let additionalDetailLabel = item.additionalDetailLabel {
                 var detailRightInset: CGFloat = 20.0 + params.rightInset + additionalTextRightInset
                 if labelLayout.size.width != 0 {
-                    detailRightInset += labelLayout.size.width + 12.0
+                    detailRightInset += labelLayout.size.width + 7.0
                 }
-                additionalDetailLabelInfo = makeAdditionalDetailLabelLayout(TextNodeLayoutArguments(attributedString: NSAttributedString(string: additionalDetailLabel, font: detailFont, textColor: item.presentationData.theme.list.itemSecondaryTextColor), backgroundColor: nil, maximumNumberOfLines: 1, truncationType: .end, constrainedSize: CGSize(width: params.width - leftInset - detailRightInset, height: CGFloat.greatestFiniteMagnitude), alignment: .natural, cutout: nil, insets: UIEdgeInsets()))
+                let additionalDetailColor: UIColor
+                switch item.additionalDetailLabelColor {
+                case .generic:
+                    additionalDetailColor = item.presentationData.theme.list.itemSecondaryTextColor
+                case .constructive:
+                    additionalDetailColor = item.presentationData.theme.list.itemDisclosureActions.constructive.fillColor
+                case .destructive:
+                    additionalDetailColor = item.presentationData.theme.list.itemDestructiveColor
+                }
+                additionalDetailLabelInfo = makeAdditionalDetailLabelLayout(TextNodeLayoutArguments(attributedString: NSAttributedString(string: additionalDetailLabel, font: detailFont, textColor: additionalDetailColor), backgroundColor: nil, maximumNumberOfLines: 1, truncationType: .end, constrainedSize: CGSize(width: params.width - leftInset - detailRightInset, height: CGFloat.greatestFiniteMagnitude), alignment: .natural, cutout: nil, insets: UIEdgeInsets()))
             }
             
             let verticalInset: CGFloat
@@ -435,6 +507,10 @@ public class ItemListDisclosureItemNode: ListViewItemNode, ItemListItemNode {
                 itemSeparatorColor = item.presentationData.theme.list.itemPlainSeparatorColor
                 contentSize = CGSize(width: params.width, height: height)
                 insets = itemListNeighborsPlainInsets(neighbors)
+                if item.noInsets {
+                    insets.top = 0.0
+                    insets.bottom = 0.0
+                }
             case .blocks:
                 itemBackgroundColor = item.presentationData.theme.list.itemBlocksBackgroundColor
                 itemSeparatorColor = item.presentationData.theme.list.itemBlocksSeparatorColor
@@ -488,7 +564,7 @@ public class ItemListDisclosureItemNode: ListViewItemNode, ItemListItemNode {
                         let avatarSize: CGFloat = 40.0
                         avatarNode.frame = CGRect(origin: CGPoint(x: params.leftInset + floor((leftInset - params.leftInset - avatarSize) / 2.0), y: floor((height - avatarSize) / 2.0)), size: CGSize(width: avatarSize, height: avatarSize))
                         var clipStyle: AvatarNodeClipStyle = .round
-                        if case let .channel(channel) = iconPeer, channel.flags.contains(.isForum) {
+                        if case let .channel(channel) = iconPeer, channel.isForumOrMonoForum {
                             clipStyle = .roundedRect
                         }
                         var overrideImage: AvatarNodeImageOverride?
@@ -511,8 +587,21 @@ public class ItemListDisclosureItemNode: ListViewItemNode, ItemListItemNode {
                         strongSelf.backgroundNode.backgroundColor = itemBackgroundColor
                         strongSelf.highlightedBackgroundNode.backgroundColor = item.presentationData.theme.list.itemHighlightedBackgroundColor
                     }
+                                        
+                    if let titleWithEntitiesApply = titleWithEntitiesLayoutAndApply?.1, let context = item.context {
+                        let _ = titleWithEntitiesApply(
+                            TextNodeWithEntities.Arguments(
+                                context: context,
+                                cache: context.animationCache,
+                                renderer: context.animationRenderer,
+                                placeholderColor: item.presentationData.theme.chat.inputPanel.inputTextColor.withAlphaComponent(0.12),
+                                attemptSynchronous: false
+                            )
+                        )
+                    } else if let titleApply = titleLayoutAndApply?.1 {
+                        let _ = titleApply()
+                    }
                     
-                    let _ = titleApply()
                     let _ = labelApply()
                     
                     switch item.style {
@@ -587,7 +676,7 @@ public class ItemListDisclosureItemNode: ListViewItemNode, ItemListItemNode {
                     }
                     
                     let titleFrame = CGRect(origin: CGPoint(x: leftInset, y: floor((height - centralContentHeight) / 2.0)), size: titleLayout.size)
-                    strongSelf.titleNode.frame = titleFrame
+                    strongSelf.titleNode.textNode.frame = titleFrame
                     
                     if let updateBadgeImage = updatedLabelBadgeImage {
                         if strongSelf.labelBadgeNode.supernode == nil {
@@ -633,6 +722,54 @@ public class ItemListDisclosureItemNode: ListViewItemNode, ItemListItemNode {
                     } else if let additionalDetailLabelNode = strongSelf.additionalDetailLabelNode {
                         strongSelf.additionalDetailLabelNode = nil
                         additionalDetailLabelNode.removeFromSupernode()
+                    }
+                    
+                    if let (badgeTextLayout, badgeTextApply) = titleBadgeTextNodeLayout {
+                        let titleBadgeNode: ASImageNode
+                        if let current = strongSelf.titleBadgeNode {
+                            titleBadgeNode = current
+                        } else {
+                            titleBadgeNode = ASImageNode()
+                            strongSelf.titleBadgeNode = titleBadgeNode
+                            strongSelf.addSubnode(titleBadgeNode)
+                            
+                            titleBadgeNode.image = generateFilledRoundedRectImage(size: CGSize(width: 16.0, height: 16.0), cornerRadius: 5.0, color: item.presentationData.theme.list.itemCheckColors.fillColor)?.stretchableImage(withLeftCapWidth: 6, topCapHeight: 6)
+                        }
+                        
+                        let titleBadgeTextNode = badgeTextApply()
+                        if titleBadgeTextNode.supernode == nil {
+                            strongSelf.addSubnode(titleBadgeTextNode)
+                        }
+                        let badgeSideInset: CGFloat = 5.0
+                        let badgeVerticalInset: CGFloat = 2.0
+                        let badgeSize = CGSize(width: badgeTextLayout.size.width + badgeSideInset * 2.0, height: badgeTextLayout.size.height + badgeVerticalInset * 2.0)
+                        let titleBadgeFrame = CGRect(origin: CGPoint(x: titleFrame.maxX + 5.0, y: titleFrame.minY + floorToScreenPixels((titleFrame.height - badgeSize.height) * 0.5)), size: badgeSize)
+                        let titleBadgeTextFrame = CGRect(origin: CGPoint(x: titleBadgeFrame.minX + badgeSideInset, y: titleBadgeFrame.minY + badgeVerticalInset), size: badgeTextLayout.size)
+                        
+                        titleBadgeNode.frame = titleBadgeFrame
+                        titleBadgeTextNode.frame = titleBadgeTextFrame
+                    } else {
+                        if let titleBadgeTextNode = strongSelf.titleBadgeTextNode {
+                            strongSelf.titleBadgeTextNode = nil
+                            titleBadgeTextNode.removeFromSupernode()
+                        }
+                        if let titleBadgeNode = strongSelf.titleBadgeNode {
+                            strongSelf.titleBadgeNode = nil
+                            titleBadgeNode.removeFromSupernode()
+                        }
+                    }
+                    
+                    if let titleIcon = item.titleIcon {
+                        if strongSelf.titleIconNode.supernode == nil {
+                            strongSelf.addSubnode(strongSelf.titleIconNode)
+                        }
+                        
+                        strongSelf.titleIconNode.image = titleIcon
+                        strongSelf.titleIconNode.frame = CGRect(origin: CGPoint(x: titleFrame.maxX + 5.0, y: floor((layout.contentSize.height - titleIcon.size.height) / 2.0) - 1.0), size: titleIcon.size)
+                    } else {
+                        if strongSelf.titleIconNode.supernode != nil {
+                            strongSelf.titleIconNode.removeFromSupernode()
+                        }
                     }
  
                     if case .textWithIcon = item.labelStyle {
@@ -713,7 +850,7 @@ public class ItemListDisclosureItemNode: ListViewItemNode, ItemListItemNode {
                         let titleLineWidth: CGFloat = (shimmeringIndex % 2 == 0) ? 120.0 : 80.0
                         let lineDiameter: CGFloat = 8.0
 
-                        let titleFrame = strongSelf.titleNode.frame
+                        let titleFrame = strongSelf.titleNode.textNode.frame
                         shapes.append(.roundedRectLine(startPoint: CGPoint(x: titleFrame.minX, y: titleFrame.minY + floor((titleFrame.height - lineDiameter) / 2.0)), width: titleLineWidth, diameter: lineDiameter))
 
                         shimmerNode.update(backgroundColor: item.presentationData.theme.list.itemBlocksBackgroundColor, foregroundColor: item.presentationData.theme.list.mediaPlaceholderColor, shimmeringColor: item.presentationData.theme.list.itemBlocksBackgroundColor.withAlphaComponent(0.4), shapes: shapes, size: contentSize)
@@ -764,7 +901,7 @@ public class ItemListDisclosureItemNode: ListViewItemNode, ItemListItemNode {
         }
     }
     
-    override public func animateInsertion(_ currentTimestamp: Double, duration: Double, short: Bool) {
+    override public func animateInsertion(_ currentTimestamp: Double, duration: Double, options: ListViewItemAnimationOptions) {
         self.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.4)
     }
     

@@ -30,6 +30,8 @@
 @property (nonatomic, readonly) CGFloat minZoomLevel;
 @property (nonatomic, readonly) CGFloat maxZoomLevel;
 
+@property (nonatomic, strong) NSArray<NSNumber *> *zoomLevels;
+
 - (void)setZoomLevel:(CGFloat)zoomLevel animated:(bool)animated;
 
 @property (nonatomic, readonly) bool hasUltrawideCamera;

@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import AsyncDisplayKit
 import Display
 import TelegramPresentationData
@@ -8,7 +9,9 @@ import ReactionSelectionNode
 import ComponentFlow
 import TabSelectorComponent
 import PlainButtonComponent
+import MultilineTextComponent
 import ComponentDisplayAdapters
+import AccountContext
 
 final class ContextSourceContainer: ASDisplayNode {
     final class Source {
@@ -16,6 +19,8 @@ final class ContextSourceContainer: ASDisplayNode {
         
         let id: AnyHashable
         let title: String
+        let footer: String?
+        let context: AccountContext?
         let source: ContextContentSource
         let closeActionTitle: String?
         let closeAction: (() -> Void)?
@@ -32,7 +37,7 @@ final class ContextSourceContainer: ASDisplayNode {
         var delayLayoutUpdate: Bool = false
         var isAnimatingOut: Bool = false
         
-        let itemsDisposable = MetaDisposable()
+        var itemsDisposables = DisposableSet()
         
         let ready = Promise<Bool>()
         private let contentReady = Promise<Bool>()
@@ -42,6 +47,8 @@ final class ContextSourceContainer: ASDisplayNode {
             controller: ContextController,
             id: AnyHashable,
             title: String,
+            footer: String?,
+            context: AccountContext?,
             source: ContextContentSource,
             items: Signal<ContextController.Items, NoError>,
             closeActionTitle: String? = nil,
@@ -50,6 +57,8 @@ final class ContextSourceContainer: ASDisplayNode {
             self.controller = controller
             self.id = id
             self.title = title
+            self.footer = footer
+            self.context = context
             self.source = source
             self.closeActionTitle = closeActionTitle
             self.closeAction = closeAction
@@ -65,6 +74,7 @@ final class ContextSourceContainer: ASDisplayNode {
                 self.contentReady.set(.single(true))
                 
                 let presentationNode = ContextControllerExtractedPresentationNode(
+                    context: self.context,
                     getController: { [weak self] in
                         guard let self else {
                             return nil
@@ -105,6 +115,7 @@ final class ContextSourceContainer: ASDisplayNode {
                 self.contentReady.set(.single(true))
                 
                 let presentationNode = ContextControllerExtractedPresentationNode(
+                    context: self.context,
                     getController: { [weak self] in
                         guard let self else {
                             return nil
@@ -145,6 +156,7 @@ final class ContextSourceContainer: ASDisplayNode {
                 self.contentReady.set(.single(true))
                 
                 let presentationNode = ContextControllerExtractedPresentationNode(
+                    context: self.context,
                     getController: { [weak self] in
                         guard let self else {
                             return nil
@@ -188,6 +200,7 @@ final class ContextSourceContainer: ASDisplayNode {
                 self.contentReady.set(source.controller.ready.get())
                 
                 let presentationNode = ContextControllerExtractedPresentationNode(
+                    context: self.context,
                     getController: { [weak self] in
                         guard let self else {
                             return nil
@@ -226,7 +239,7 @@ final class ContextSourceContainer: ASDisplayNode {
                 self._presentationNode = presentationNode
             }
             
-            self.itemsDisposable.set((items |> deliverOnMainQueue).start(next: { [weak self] items in
+            self.itemsDisposables.add((items |> deliverOnMainQueue).start(next: { [weak self] items in
                 guard let self else {
                     return
                 }
@@ -237,7 +250,7 @@ final class ContextSourceContainer: ASDisplayNode {
         }
         
         deinit {
-            self.itemsDisposable.dispose()
+            self.itemsDisposables.dispose()
         }
         
         func animateIn() {
@@ -269,12 +282,14 @@ final class ContextSourceContainer: ASDisplayNode {
             self.presentationNode.cancelReactionAnimation()
         }
         
-        func animateOutToReaction(value: MessageReaction.Reaction, targetView: UIView, hideNode: Bool, animateTargetContainer: UIView?, addStandaloneReactionAnimation: ((StandaloneReactionAnimation) -> Void)?, reducedCurve: Bool, completion: @escaping () -> Void) {
-            self.presentationNode.animateOutToReaction(value: value, targetView: targetView, hideNode: hideNode, animateTargetContainer: animateTargetContainer, addStandaloneReactionAnimation: addStandaloneReactionAnimation, reducedCurve: reducedCurve, completion: completion)
+        func animateOutToReaction(value: MessageReaction.Reaction, targetView: UIView, hideNode: Bool, animateTargetContainer: UIView?, addStandaloneReactionAnimation: ((StandaloneReactionAnimation) -> Void)?, reducedCurve: Bool, onHit: (() -> Void)?, completion: @escaping () -> Void) {
+            self.presentationNode.animateOutToReaction(value: value, targetView: targetView, hideNode: hideNode, animateTargetContainer: animateTargetContainer, addStandaloneReactionAnimation: addStandaloneReactionAnimation, reducedCurve: reducedCurve, onHit: onHit, completion: completion)
         }
         
         func setItems(items: Signal<ContextController.Items, NoError>, animated: Bool) {
-            self.itemsDisposable.set((items
+            self.itemsDisposables.dispose()
+            self.itemsDisposables = DisposableSet()
+            self.itemsDisposables.add((items
             |> deliverOnMainQueue).start(next: { [weak self] items in
                 guard let self else {
                     return
@@ -288,7 +303,7 @@ final class ContextSourceContainer: ASDisplayNode {
         }
         
         func pushItems(items: Signal<ContextController.Items, NoError>) {
-            self.itemsDisposable.set((items
+            self.itemsDisposables.add((items
             |> deliverOnMainQueue).start(next: { [weak self] items in
                 guard let self else {
                     return
@@ -298,6 +313,7 @@ final class ContextSourceContainer: ASDisplayNode {
         }
         
         func popItems() {
+            self.itemsDisposables.removeLast()
             self.presentationNode.popItems()
         }
         
@@ -351,6 +367,7 @@ final class ContextSourceContainer: ASDisplayNode {
     var activeIndex: Int = 0
     
     private var tabSelector: ComponentView<Empty>?
+    private var footer: ComponentView<Empty>?
     private var closeButton: ComponentView<Empty>?
     
     private var presentationData: PresentationData?
@@ -370,7 +387,7 @@ final class ContextSourceContainer: ASDisplayNode {
         return self.activeSource?.presentationNode.wantsDisplayBelowKeyboard() ?? false
     }
     
-    init(controller: ContextController, configuration: ContextController.Configuration) {
+    init(controller: ContextController, configuration: ContextController.Configuration, context: AccountContext?) {
         self.controller = controller
         
         self.backgroundNode = NavigationBackgroundNode(color: .clear, enableBlur: false)
@@ -386,6 +403,8 @@ final class ContextSourceContainer: ASDisplayNode {
                 controller: controller,
                 id: source.id,
                 title: source.title,
+                footer: source.footer,
+                context: context,
                 source: source.source,
                 items: source.items,
                 closeActionTitle: source.closeActionTitle,
@@ -464,8 +483,14 @@ final class ContextSourceContainer: ASDisplayNode {
     func animateIn() {
         self.backgroundNode.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.2)
         
-        if let activeSource = self.activeSource {
-            activeSource.animateIn()
+//        if let activeSource = self.activeSource {
+//            activeSource.animateIn()
+//        }
+        for source in self.sources {
+            source.animateIn()
+        }
+        if let footerView = self.footer?.view {
+            footerView.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.2)
         }
         if let tabSelectorView = self.tabSelector?.view {
             tabSelectorView.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.2)
@@ -488,11 +513,20 @@ final class ContextSourceContainer: ASDisplayNode {
             }
         })
         
+        if let footerView = self.footer?.view {
+            footerView.layer.animateAlpha(from: 1.0, to: 0.0, duration: duration, delay: delay, removeOnCompletion: false)
+        }
         if let tabSelectorView = self.tabSelector?.view {
             tabSelectorView.layer.animateAlpha(from: 1.0, to: 0.0, duration: duration, delay: delay, removeOnCompletion: false)
         }
         if let closeButtonView = self.closeButton?.view {
             closeButtonView.layer.animateAlpha(from: 1.0, to: 0.0, duration: duration, delay: delay, removeOnCompletion: false)
+        }
+        
+        for source in self.sources {
+            if source !== self.activeSource {
+                source.animateOut(result: result, completion: {})
+            }
         }
         
         if let activeSource = self.activeSource {
@@ -540,9 +574,9 @@ final class ContextSourceContainer: ASDisplayNode {
         }
     }
     
-    func animateOutToReaction(value: MessageReaction.Reaction, targetView: UIView, hideNode: Bool, animateTargetContainer: UIView?, addStandaloneReactionAnimation: ((StandaloneReactionAnimation) -> Void)?, reducedCurve: Bool, completion: @escaping () -> Void) {
+    func animateOutToReaction(value: MessageReaction.Reaction, targetView: UIView, hideNode: Bool, animateTargetContainer: UIView?, addStandaloneReactionAnimation: ((StandaloneReactionAnimation) -> Void)?, reducedCurve: Bool, onHit: (() -> Void)?, completion: @escaping () -> Void) {
         if let activeSource = self.activeSource {
-            activeSource.animateOutToReaction(value: value, targetView: targetView, hideNode: hideNode, animateTargetContainer: animateTargetContainer, addStandaloneReactionAnimation: addStandaloneReactionAnimation, reducedCurve: reducedCurve, completion: completion)
+            activeSource.animateOutToReaction(value: value, targetView: targetView, hideNode: hideNode, animateTargetContainer: animateTargetContainer, addStandaloneReactionAnimation: addStandaloneReactionAnimation, reducedCurve: reducedCurve, onHit: onHit, completion: completion)
         } else {
             completion()
         }
@@ -632,12 +666,13 @@ final class ContextSourceContainer: ASDisplayNode {
                 return TabSelectorComponent.Item(id: source.id, title: source.title)
             }
             let tabSelectorSize = tabSelector.update(
-                transition: Transition(transition),
+                transition: ComponentTransition(transition),
                 component: AnyComponent(TabSelectorComponent(
                     colors: TabSelectorComponent.Colors(
                         foreground: presentationData.theme.contextMenu.primaryColor.withMultipliedAlpha(0.8),
                         selection: presentationData.theme.contextMenu.primaryColor.withMultipliedAlpha(0.1)
                     ),
+                    theme: presentationData.theme,
                     customLayout: TabSelectorComponent.CustomLayout(
                         font: Font.medium(14.0),
                         spacing: 9.0
@@ -659,6 +694,49 @@ final class ContextSourceContainer: ASDisplayNode {
             )
             childLayout.intrinsicInsets.bottom += 30.0
             
+            if let footerText = self.activeSource?.footer {
+                var footerTransition = transition
+                let footer: ComponentView<Empty>
+                if let current = self.footer {
+                    footer = current
+                } else {
+                    footerTransition = .immediate
+                    footer = ComponentView()
+                    self.footer = footer
+                }
+                
+                let footerSize = footer.update(
+                    transition: ComponentTransition(footerTransition),
+                    component: AnyComponent(
+                        MultilineTextComponent(
+                            text: .plain(NSAttributedString(string: footerText, font: Font.regular(13.0), textColor: presentationData.theme.contextMenu.primaryColor.withMultipliedAlpha(0.4))),
+                            horizontalAlignment: .center,
+                            maximumNumberOfLines: 0,
+                            lineSpacing: 0.1
+                        )
+                    ),
+                    environment: {},
+                    containerSize: CGSize(width: layout.size.width, height: 144.0)
+                )
+                
+                let spacing: CGFloat = 20.0
+                childLayout.intrinsicInsets.bottom += footerSize.height + spacing
+                
+                if let footerView = footer.view {
+                    if footerView.superview == nil {
+                        self.view.addSubview(footerView)
+                        
+                        footerView.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.25)
+                    }
+                    footerTransition.updateFrame(view: footerView, frame: CGRect(origin: CGPoint(x: floor((layout.size.width - footerSize.width) * 0.5), y: layout.size.height - layout.intrinsicInsets.bottom - tabSelectorSize.height - footerSize.height - spacing), size: footerSize))
+                }
+            } else if let footer = self.footer {
+                self.footer = nil
+                footer.view?.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.25, removeOnCompletion: false, completion: { _ in
+                    footer.view?.removeFromSuperview()
+                })
+            }
+            
             if let tabSelectorView = tabSelector.view {
                 if tabSelectorView.superview == nil {
                     self.view.addSubview(tabSelectorView)
@@ -675,7 +753,7 @@ final class ContextSourceContainer: ASDisplayNode {
             }
             
             let closeButtonSize = closeButton.update(
-                transition: Transition(transition),
+                transition: ComponentTransition(transition),
                 component: AnyComponent(PlainButtonComponent(
                     content: AnyComponent(
                         CloseButtonComponent(
@@ -693,8 +771,9 @@ final class ContextSourceContainer: ASDisplayNode {
                         } else {
                             self.controller?.dismiss(result: .dismissWithoutContent, completion: nil)
                         }
-                    })
-                ),
+                    },
+                    animateAlpha: false
+                )),
                 environment: {},
                 containerSize: CGSize(width: layout.size.width, height: 44.0)
             )

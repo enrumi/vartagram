@@ -73,7 +73,7 @@ public final class TelegramEngine {
     }()
 
     public lazy var data: EngineData = {
-        return EngineData(postbox: self.account.postbox)
+        return EngineData(accountPeerId: self.account.peerId, postbox: self.account.postbox)
     }()
 
     public lazy var orderedLists: OrderedLists = {
@@ -106,6 +106,14 @@ public final class TelegramEngineUnauthorized {
 
     public lazy var localization: Localization = {
         return Localization(account: self.account)
+    }()
+    
+    public lazy var payments: Payments = {
+        return Payments(account: self.account)
+    }()
+    
+    public lazy var itemCache: ItemCache = {
+        return ItemCache(account: self.account)
     }()
 }
 

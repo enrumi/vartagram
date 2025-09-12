@@ -161,7 +161,8 @@ public final class WindowHostView {
     let updateSupportedInterfaceOrientations: (UIInterfaceOrientationMask) -> Void
     let updateDeferScreenEdgeGestures: (UIRectEdge) -> Void
     let updatePrefersOnScreenNavigationHidden: (Bool) -> Void
-    
+    let updateStatusBar: (UIStatusBarStyle, Bool, ContainedViewLayoutTransition) -> Void
+
     var present: ((ContainableController, PresentationSurfaceLevel, Bool, @escaping () -> Void) -> Void)?
     var presentInGlobalOverlay: ((_ controller: ContainableController) -> Void)?
     var addGlobalPortalHostViewImpl: ((PortalSourceView) -> Void)?
@@ -180,8 +181,8 @@ public final class WindowHostView {
     var getAccessibilityElements: (() -> [Any]?)?
     
     public var motionShakeImpl: (() -> Void)?
-    
-    init(containerView: UIView, eventView: UIView, isRotating: @escaping () -> Bool, systemUserInterfaceStyle: Signal<WindowUserInterfaceStyle, NoError>, currentInterfaceOrientation: @escaping () -> UIInterfaceOrientation, updateSupportedInterfaceOrientations: @escaping (UIInterfaceOrientationMask) -> Void, updateDeferScreenEdgeGestures: @escaping (UIRectEdge) -> Void, updatePrefersOnScreenNavigationHidden: @escaping (Bool) -> Void) {
+
+    init(containerView: UIView, eventView: UIView, isRotating: @escaping () -> Bool, systemUserInterfaceStyle: Signal<WindowUserInterfaceStyle, NoError>, currentInterfaceOrientation: @escaping () -> UIInterfaceOrientation, updateSupportedInterfaceOrientations: @escaping (UIInterfaceOrientationMask) -> Void, updateDeferScreenEdgeGestures: @escaping (UIRectEdge) -> Void, updatePrefersOnScreenNavigationHidden: @escaping (Bool) -> Void, updateStatusBar: @escaping (UIStatusBarStyle, Bool, ContainedViewLayoutTransition) -> Void) {
         self.containerView = containerView
         self.eventView = eventView
         self.isRotating = isRotating
@@ -190,6 +191,7 @@ public final class WindowHostView {
         self.updateSupportedInterfaceOrientations = updateSupportedInterfaceOrientations
         self.updateDeferScreenEdgeGestures = updateDeferScreenEdgeGestures
         self.updatePrefersOnScreenNavigationHidden = updatePrefersOnScreenNavigationHidden
+        self.updateStatusBar = updateStatusBar
     }
     
     fileprivate var onScreenNavigationHeight: CGFloat? {
@@ -233,6 +235,16 @@ private func layoutMetricsForScreenSize(size: CGSize, orientation: UIInterfaceOr
 }
 
 public final class WindowKeyboardGestureRecognizerDelegate: NSObject, UIGestureRecognizerDelegate {
+    public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        if let view = gestureRecognizer.view {
+            let location = touch.location(in: gestureRecognizer.view)
+            if location.y > view.bounds.height - 44.0 {
+                return false
+            }
+        }
+        return true
+    }
+
     public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
         return true
     }
@@ -245,7 +257,6 @@ public final class WindowKeyboardGestureRecognizerDelegate: NSObject, UIGestureR
 public class Window1 {
     public let hostView: WindowHostView
     public let badgeView: UIImageView
-    private let customProximityDimView: UIView
     
     private var deviceMetrics: DeviceMetrics
     
@@ -332,11 +343,7 @@ public class Window1 {
         self.badgeView = UIImageView()
         self.badgeView.image = UIImage(bundleImageName: "Components/AppBadge")
         self.badgeView.isHidden = true
-        
-        self.customProximityDimView = UIView()
-        self.customProximityDimView.backgroundColor = .black
-        self.customProximityDimView.isHidden = true
-        
+
         self.systemUserInterfaceStyle = hostView.systemUserInterfaceStyle
         
         let boundsSize = self.hostView.eventView.bounds.size
@@ -382,7 +389,10 @@ public class Window1 {
         self.presentationContext.updateIsInteractionBlocked = { [weak self] value in
             self?.isInteractionBlocked = value
         }
-        
+        self.presentationContext.updateStatusBar = { [weak self] transition in
+            self?.updateStatusBar(transition: transition)
+        }
+
         let updateOpaqueOverlays: () -> Void = { [weak self] in
             guard let strongSelf = self else {
                 return
@@ -395,7 +405,10 @@ public class Window1 {
         self.topPresentationContext.updateHasOpaqueOverlay = { value in
             updateOpaqueOverlays()
         }
-        
+        self.topPresentationContext.updateStatusBar = { [weak self] transition in
+            self?.updateStatusBar(transition: transition)
+        }
+
         self.hostView.present = { [weak self] controller, level, blockInteraction, completion in
             self?.present(controller, on: level, blockInteraction: blockInteraction, completion: completion)
         }
@@ -457,14 +470,16 @@ public class Window1 {
         self.topPresentationContext.containerLayoutUpdated(containedLayoutForWindowLayout(self.windowLayout, deviceMetrics: self.deviceMetrics), transition: .immediate)
         self.overlayPresentationContext.containerLayoutUpdated(containedLayoutForWindowLayout(self.windowLayout, deviceMetrics: self.deviceMetrics), transition: .immediate)
         
-        self.statusBarChangeObserver = NotificationCenter.default.addObserver(forName: UIApplication.willChangeStatusBarFrameNotification, object: nil, queue: OperationQueue.main, using: { [weak self] notification in
+        //TODO:release check old iOS
+        /*self.statusBarChangeObserver = NotificationCenter.default.addObserver(forName: UIApplication.willChangeStatusBarFrameNotification, object: nil, queue: OperationQueue.main, using: { [weak self] notification in
             if let strongSelf = self, strongSelf.statusBarHost != nil {
                 let statusBarHeight: CGFloat = max(defaultStatusBarHeight, (notification.userInfo?[UIApplication.statusBarFrameUserInfoKey] as? NSValue)?.cgRectValue.height ?? defaultStatusBarHeight)
                 
                 let transition: ContainedViewLayoutTransition = .animated(duration: 0.35, curve: .easeInOut)
                 strongSelf.updateLayout { $0.update(statusBarHeight: statusBarHeight, transition: transition, overrideTransition: false) }
             }
-        })
+        })*/
+
         self.keyboardRotationChangeObserver = NotificationCenter.default.addObserver(forName: NSNotification.Name("UITextEffectsWindowDidRotateNotification"), object: nil, queue: nil, using: { [weak self] notification in
             if let strongSelf = self {
                 if !strongSelf.hostView.isUpdatingOrientationLayout {
@@ -675,7 +690,6 @@ public class Window1 {
         self.windowPanRecognizer = recognizer
         self.hostView.containerView.addGestureRecognizer(recognizer)
         self.hostView.containerView.addSubview(self.badgeView)
-        self.hostView.containerView.addSubview(self.customProximityDimView)
     }
             
     public required init(coder aDecoder: NSCoder) {
@@ -709,11 +723,18 @@ public class Window1 {
         self.updateBadgeVisibility()
     }
     
+    private var proximityDimController: CustomDimController?
     public func setProximityDimHidden(_ hidden: Bool) {
-        guard hidden != self.customProximityDimView.isHidden else {
-            return
+        if !hidden {
+            if self.proximityDimController == nil {
+                let proximityDimController = CustomDimController(navigationBarPresentationData: nil)
+                self.proximityDimController = proximityDimController
+                (self.viewController as? NavigationController)?.presentOverlay(controller: proximityDimController, inGlobal: true, blockInteraction: false)
+            }
+        } else if let proximityDimController = self.proximityDimController {
+            self.proximityDimController = nil
+            proximityDimController.dismiss()
         }
-        self.customProximityDimView.isHidden = hidden
     }
     
     private func updateBadgeVisibility() {
@@ -872,11 +893,18 @@ public class Window1 {
                         }
                         strongSelf.hostView.updateSupportedInterfaceOrientations(resolvedOrientations)
                     }
+                    rootController.updateStatusBar = { [weak self] transition in
+                        guard let self else {
+                            return
+                        }
+                        self.updateStatusBar(transition: transition)
+                    }
                     rootController.keyboardViewManager = self.keyboardViewManager
                     rootController.inCallNavigate = { [weak self] in
                         self?.inCallNavigate?()
                     }
                 }
+
                 self.hostView.containerView.insertSubview(rootController.view, at: 0)
                 if !self.windowLayout.size.width.isZero && !self.windowLayout.size.height.isZero {
                     rootController.displayNode.frame = CGRect(origin: CGPoint(), size: self.windowLayout.size)
@@ -961,6 +989,29 @@ public class Window1 {
         }
     }
     
+    private func updateStatusBar(transition: ContainedViewLayoutTransition) {
+        var style: UIStatusBarStyle = .default
+        var isHidden = false
+
+        if let rootController = self._rootController as? NavigationController {
+            let statusBar = rootController.statusBar
+            style = statusBar.style
+            isHidden = statusBar.isHidden
+        }
+
+        if let statusBar = self.presentationContext.statusBar {
+            style = statusBar.style
+            isHidden = statusBar.isHidden
+        }
+
+        if let statusBar = self.topPresentationContext.statusBar {
+            style = statusBar.style
+            isHidden = statusBar.isHidden
+        }
+
+        self.hostView.updateStatusBar(style, isHidden, transition)
+    }
+
     private func layoutSubviews(force: Bool) {
         if self.tracingStatusBarsInvalidated, let _ = keyboardManager {
             self.tracingStatusBarsInvalidated = false
@@ -1171,19 +1222,17 @@ public class Window1 {
                 }
                 
                 self.secondaryCoveringViewLayoutSizeUpdate?(self.windowLayout.size)
-                
+
                 if let image = self.badgeView.image {
                     self.updateBadgeVisibility()
                     self.badgeView.frame = CGRect(origin: CGPoint(x: floorToScreenPixels((self.windowLayout.size.width - image.size.width) / 2.0), y: 5.0), size: image.size)
                 }
-                
-                self.customProximityDimView.frame = CGRect(origin: .zero, size: self.windowLayout.size)
             }
         }
     }
     
     public var secondaryCoveringViewLayoutSizeUpdate: ((CGSize) -> Void)?
-    
+
     public func present(_ controller: ContainableController, on level: PresentationSurfaceLevel, blockInteraction: Bool = false, completion: @escaping () -> Void = {}) {
         if level.rawValue <= 3, let controller = controller as? ViewController {
             for presentedController in self.presentationContext.controllers.reversed() {
@@ -1308,7 +1357,7 @@ public class Window1 {
         }
     }
     
-    @objc func panGesture(_ recognizer: UIPanGestureRecognizer) {
+    @objc func panGesture(_ recognizer: WindowPanRecognizer) {
         switch recognizer.state {
             case .began:
                 self.panGestureBegan(location: recognizer.location(in: recognizer.view))
@@ -1401,7 +1450,7 @@ public class Window1 {
             self.shouldNotAnimateLikelyKeyboardAutocorrectionSwitch = false
         }
     }
-    
+
     public var isKeyboardVisible: Bool {
         // self.keyboardManager?.getCurrentKeyboardHeight() sometimes may return 0, when keyboard is visible
         guard let keyboardView = self.statusBarHost?.keyboardView else {
@@ -1409,7 +1458,7 @@ public class Window1 {
         }
         return keyboardView.bounds.height > 0.0
     }
-    
+
     public func dismissSensitiveViewControllers() {
         self.forEachViewController { controller in
             if let controller = controller as? UIViewController {
@@ -1435,7 +1484,7 @@ extension UIView {
 
 extension UIViewController {
     private static var sensitiveUIKey: Int?
-    
+
     public var isSensitiveUI: Bool {
         get {
             return objc_getAssociatedObject(self, &Self.sensitiveUIKey) != nil
@@ -1447,3 +1496,25 @@ extension UIViewController {
 }
 
 public var _animationsTemporarilyDisabledForCoverUp: Bool = false
+
+private class CustomDimController: ViewController {
+    class Node: ASDisplayNode {
+        override init() {
+            super.init()
+
+            self.backgroundColor = .black
+        }
+    }
+    override init(navigationBarPresentationData: NavigationBarPresentationData?) {
+        super.init(navigationBarPresentationData: nil)
+    }
+
+    required public init(coder aDecoder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func loadDisplayNode() {
+        let node = Node()
+        self.displayNode = node
+    }
+}

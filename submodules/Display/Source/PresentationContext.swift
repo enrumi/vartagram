@@ -18,7 +18,7 @@ public enum PresentationContextType {
 
 public final class PresentationContext {
     private var _view: UIView?
-    var view: UIView? {
+    public var view: UIView? {
         get {
             return self._view
         } set(value) {
@@ -46,13 +46,41 @@ public final class PresentationContext {
         }
     }
     
+    var statusBar: (style: UIStatusBarStyle, isHidden: Bool)? {
+        for (controller, _) in self.controllers.reversed() {
+            if let controller = controller as? ViewController {
+                if controller.statusBar.statusBarStyle != .Ignore {
+                    var style: UIStatusBarStyle = .default
+                    var isHidden: Bool = false
+                    switch controller.statusBar.statusBarStyle {
+                    case .White:
+                        style = .lightContent
+                    case .Black:
+                        style = .darkContent
+                    case .Ignore, .Hide:
+                        style = .darkContent
+                        isHidden = true
+                    }
+                    return (style, isHidden)
+                }
+            }
+        }
+        return nil
+    }
+    var updateStatusBar: ((ContainedViewLayoutTransition) -> Void)?
+    
     private var layout: ContainerViewLayout?
     
     private var ready: Bool {
         return self.view != nil && self.layout != nil
     }
     
-    private(set) var controllers: [(ContainableController, PresentationSurfaceLevel)] = []
+    public private(set) var controllers: [(ContainableController, PresentationSurfaceLevel)] = [] {
+        didSet {
+            self.controllersUpdated(self.controllers)
+        }
+    }
+    public var controllersUpdated: ([(ContainableController, PresentationSurfaceLevel)]) -> Void = { _ in }
     
     private var presentationDisposables = DisposableSet()
     
@@ -121,6 +149,9 @@ public final class PresentationContext {
     
     private func layoutForController(containerLayout: ContainerViewLayout, controller: ContainableController) -> (ContainerViewLayout, CGRect) {
         return (containerLayout, CGRect(origin: CGPoint(), size: containerLayout.size))
+    }
+    
+    public init() {
     }
     
     public func present(_ controller: ContainableController, on level: PresentationSurfaceLevel, blockInteraction: Bool = false, completion: @escaping () -> Void) {
@@ -300,6 +331,8 @@ public final class PresentationContext {
                 controller.displayNode.accessibilityElementsHidden = false
             }
         }
+        
+        self.updateStatusBar?(.animated(duration: 0.2, curve: .easeInOut))
     }
     
     private func notifyAccessibilityScreenChanged() {

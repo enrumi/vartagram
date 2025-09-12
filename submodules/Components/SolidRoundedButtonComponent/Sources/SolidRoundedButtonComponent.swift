@@ -9,6 +9,7 @@ public final class SolidRoundedButtonComponent: Component {
     public typealias Theme = SolidRoundedButtonTheme
     
     public let title: String?
+    public let subtitle: String?
     public let label: String?
     public let badge: String?
     public let icon: UIImage?
@@ -28,6 +29,7 @@ public final class SolidRoundedButtonComponent: Component {
     
     public init(
         title: String? = nil,
+        subtitle: String? = nil,
         label: String? = nil,
         badge: String? = nil,
         icon: UIImage? = nil,
@@ -46,6 +48,7 @@ public final class SolidRoundedButtonComponent: Component {
         action: @escaping () -> Void
     ) {
         self.title = title
+        self.subtitle = subtitle
         self.label = label
         self.badge = badge
         self.icon = icon
@@ -66,6 +69,9 @@ public final class SolidRoundedButtonComponent: Component {
     
     public static func ==(lhs: SolidRoundedButtonComponent, rhs: SolidRoundedButtonComponent) -> Bool {
         if lhs.title != rhs.title {
+            return false
+        }
+        if lhs.subtitle != rhs.subtitle {
             return false
         }
         if lhs.label != rhs.label {
@@ -122,7 +128,7 @@ public final class SolidRoundedButtonComponent: Component {
         
         private var currentIsLoading = false
         
-        public func update(component: SolidRoundedButtonComponent, availableSize: CGSize, transition: Transition) -> CGSize {
+        public func update(component: SolidRoundedButtonComponent, availableSize: CGSize, transition: ComponentTransition) -> CGSize {
             if self.button == nil {
                 let button = SolidRoundedButtonView(
                     title: component.title,
@@ -147,6 +153,7 @@ public final class SolidRoundedButtonComponent: Component {
             
             if let button = self.button {
                 button.title = component.title
+                button.subtitle = component.subtitle
                 button.label = component.label
                 button.badge = component.badge
                 button.iconPosition = component.iconPosition
@@ -182,7 +189,7 @@ public final class SolidRoundedButtonComponent: Component {
         return View()
     }
     
-    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, transition: transition)
     }
 }

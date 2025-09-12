@@ -1,3 +1,4 @@
+#import <LegacyComponents/LegacyComponents.h>
 #import "TGMediaAssetsPickerController.h"
 
 #import <Photos/Photos.h>
@@ -17,7 +18,7 @@
 #import <LegacyComponents/TGGifConverter.h>
 #import <CommonCrypto/CommonDigest.h>
 
-#import "TGModernBarButton.h"
+#import <LegacyComponents/TGModernBarButton.h>
 #import <LegacyComponents/TGMediaPickerToolbarView.h>
 
 #import <LegacyComponents/TGMediaAsset+TGMediaEditableItem.h>
@@ -28,7 +29,7 @@
 #import <LegacyComponents/TGVideoEditAdjustments.h>
 #import <LegacyComponents/TGPaintingData.h>
 
-#import "TGModernButton.h"
+#import <LegacyComponents/TGModernButton.h>
 #import "PGPhotoEditor.h"
 
 @interface TGMediaPickerAccessView: UIView
@@ -260,6 +261,7 @@
         pickerController.hasSilentPosting = strongController.hasSilentPosting;
         pickerController.hasSchedule = strongController.hasSchedule;
         pickerController.reminder = strongController.reminder;
+        pickerController.hasCoverButton = strongController.hasCoverButton;
         pickerController.forum = strongController.forum;
         pickerController.isSuggesting = strongController.isSuggesting;
         pickerController.presentScheduleController = strongController.presentScheduleController;
@@ -363,6 +365,12 @@
 {
     _reminder = reminder;
     self.pickerController.reminder = reminder;
+}
+
+- (void)setHasCoverButton:(bool)hasCoverButton
+{
+    _hasCoverButton = hasCoverButton;
+    self.pickerController.hasCoverButton = hasCoverButton;
 }
 
 - (void)setForum:(bool)forum {
@@ -549,6 +557,9 @@
         
         if (allowGrouping)
         {
+            if (_groupingChangedDisposable) {
+                [_groupingChangedDisposable dispose];
+            }
             _groupingChangedDisposable = [[SMetaDisposable alloc] init];
             [_groupingChangedDisposable setDisposable:[_selectionContext.groupingChangedSignal startStrictWithNext:^(NSNumber *next)
             {
@@ -561,12 +572,18 @@
             
             if (_editingContext != nil)
             {
+                if (_timersChangedDisposable) {
+                    [_timersChangedDisposable dispose];
+                }
                 _timersChangedDisposable = [[SMetaDisposable alloc] init];
                 [_timersChangedDisposable setDisposable:[_editingContext.timersUpdatedSignal startStrictWithNext:^(__unused NSNumber *next)
                 {
                     updateGroupingButtonVisibility();
                 } file:__FILE_NAME__ line:__LINE__]];
                 
+                if (_adjustmentsChangedDisposable) {
+                    [_adjustmentsChangedDisposable dispose];
+                }
                 _adjustmentsChangedDisposable = [[SMetaDisposable alloc] init];
                 [_adjustmentsChangedDisposable setDisposable:[_editingContext.adjustmentsUpdatedSignal startStrictWithNext:^(__unused NSNumber *next)
                 {
@@ -583,9 +600,9 @@
     self.delegate = nil;
     [_selectionChangedDisposable dispose];
     [_tooltipDismissDisposable dispose];
-    [_groupingChangedDisposable dispose];
     [_timersChangedDisposable dispose];
     [_adjustmentsChangedDisposable dispose];
+    [_groupingChangedDisposable dispose];
 }
 
 - (void)loadView
@@ -854,7 +871,7 @@
     
     if (_intent == TGMediaAssetsControllerSendMediaIntent && _selectionContext.allowGrouping)
         [[NSUserDefaults standardUserDefaults] setObject:@(!_selectionContext.grouping) forKey:@"TG_mediaGroupingDisabled_v0"];
-    
+
     return [TGMediaAssetsController resultSignalsForSelectionContext:_selectionContext editingContext:_editingContext intent:_intent currentItem:currentItem storeAssets:storeAssets convertToJpeg:false descriptionGenerator:descriptionGenerator saveEditedPhotos:_saveEditedPhotos];
 }
 
@@ -872,6 +889,9 @@
     if (selectedItems.count == 0 && currentItem != nil)
         [selectedItems addObject:currentItem];
     
+    if (intent == TGMediaAssetsControllerSendMediaIntent)
+        [[NSUserDefaults standardUserDefaults] setObject:@(editingContext.isHighQualityPhoto) forKey:@"TG_photoHighQuality_v0"];
+
     if (saveEditedPhotos && storeAssets && editingContext != nil)
     {
         NSMutableArray *fullSizeSignals = [[NSMutableArray alloc] init];
@@ -933,6 +953,9 @@
     NSInteger num = 0;
     bool grouping = selectionContext.grouping;
     
+    bool isHighQualityPhoto = editingContext.isHighQualityPhoto;
+
+    NSNumber *price;
     bool hasAnyTimers = false;
     if (editingContext != nil || grouping)
     {
@@ -940,6 +963,9 @@
         {
             if ([editingContext timerForItem:asset] != nil) {
                 hasAnyTimers = true;
+            }
+            if (price == nil) {
+                price = [editingContext priceForItem:asset];
             }
             id<TGMediaEditAdjustments> adjustments = [editingContext adjustmentsForItem:asset];
             if ([adjustments isKindOfClass:[TGVideoEditAdjustments class]]) {
@@ -1048,9 +1074,14 @@
                         else if (groupedId != nil && !hasAnyTimers)
                             dict[@"groupedId"] = groupedId;
                         
-                        if (spoiler) {
+                        if (price != nil)
+                            dict[@"price"] = price;
+
+                        if (spoiler)
                             dict[@"spoiler"] = @true;
-                        }
+
+                        if (isHighQualityPhoto)
+                            dict[@"hd"] = @true;
                         
                         id generatedItem = descriptionGenerator(dict, caption, nil, asset.identifier);
                         return generatedItem;
@@ -1128,6 +1159,9 @@
                                 else if (groupedId != nil && !hasAnyTimers)
                                     dict[@"groupedId"] = groupedId;
                                 
+                                if (price != nil)
+                                    dict[@"price"] = price;
+
                                 if (spoiler) {
                                     dict[@"spoiler"] = @true;
                                 }
@@ -1176,6 +1210,9 @@
                             if (adjustments.paintingData.stickers.count > 0)
                                 dict[@"stickers"] = adjustments.paintingData.stickers;
                             
+                            if (isHighQualityPhoto)
+                                dict[@"hd"] = @true;
+
                             bool animated = adjustments.paintingData.hasAnimation;
                             if (animated) {
                                 dict[@"isAnimation"] = @true;
@@ -1208,6 +1245,9 @@
                             else if (groupedId != nil && !hasAnyTimers)
                                 dict[@"groupedId"] = groupedId;
                             
+                            if (price != nil)
+                                dict[@"price"] = price;
+
                             if (spoiler) {
                                 dict[@"spoiler"] = @true;
                             }
@@ -1252,6 +1292,9 @@
                         if (groupedId != nil)
                             dict[@"groupedId"] = groupedId;
                         
+                        if (price != nil)
+                            dict[@"price"] = price;
+
                         if (spoiler) {
                             dict[@"spoiler"] = @true;
                         }
@@ -1306,6 +1349,8 @@
                     CGSize dimensions = [TGMediaVideoConverter dimensionsFor:asset.originalSize adjustments:adjustments preset:preset];
                     NSTimeInterval duration = adjustments.trimApplied ? (adjustments.trimEndValue - adjustments.trimStartValue) : asset.videoDuration;
                     
+                    UIImage *coverImage = [editingContext coverImageForItem:asset];
+
                     [signals addObject:[thumbnailSignal map:^id(UIImage *image)
                     {
                         NSMutableDictionary *dict = [[NSMutableDictionary alloc] init];
@@ -1316,7 +1361,8 @@
                         dict[@"adjustments"] = adjustments;
                         dict[@"dimensions"] = [NSValue valueWithCGSize:dimensions];
                         dict[@"duration"] = @(duration);
-                        
+                        dict[@"coverImage"] = coverImage;
+
                         if (adjustments.paintingData.stickers.count > 0)
                             dict[@"stickers"] = adjustments.paintingData.stickers;
                         
@@ -1325,6 +1371,9 @@
                         else if (groupedId != nil && !hasAnyTimers)
                             dict[@"groupedId"] = groupedId;
                         
+                        if (price != nil)
+                            dict[@"price"] = price;
+
                         if (spoiler) {
                             dict[@"spoiler"] = @true;
                         }
@@ -1406,6 +1455,9 @@
                     if (timer != nil)
                         dict[@"timer"] = timer;
                     
+                    if (price != nil)
+                        dict[@"price"] = price;
+
                     if (spoiler) {
                         dict[@"spoiler"] = @true;
                     }

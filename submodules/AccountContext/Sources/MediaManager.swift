@@ -12,6 +12,7 @@ public enum PeerMessagesMediaPlaylistId: Equatable, SharedMediaPlaylistId {
     case peer(PeerId)
     case recentActions(PeerId)
     case feed(Int32)
+    case savedMusic(PeerId)
     case custom
     
     public func isEqual(to: SharedMediaPlaylistId) -> Bool {
@@ -26,7 +27,8 @@ public enum PeerMessagesPlaylistLocation: Equatable, SharedMediaPlaylistLocation
     case messages(chatLocation: ChatLocation, tagMask: MessageTags, at: MessageId)
     case singleMessage(MessageId)
     case recentActions(Message)
-    case custom(messages: Signal<([Message], Int32, Bool), NoError>, at: MessageId, loadMore: (() -> Void)?)
+    case savedMusic(context: ProfileSavedMusicContext, at: Int32, canReorder: Bool)
+    case custom(messages: Signal<([Message], Int32, Bool), NoError>, canReorder: Bool, at: MessageId, loadMore: (() -> Void)?)
 
     public var playlistId: PeerMessagesMediaPlaylistId {
         switch self {
@@ -36,21 +38,62 @@ public enum PeerMessagesPlaylistLocation: Equatable, SharedMediaPlaylistLocation
                     return .peer(peerId)
                 case let .replyThread(replyThreaMessage):
                     return .peer(replyThreaMessage.peerId)
-                case let .feed(id):
-                    return .feed(id)
+                case .customChatContents:
+                    return .custom
                 }
             case let .singleMessage(id):
                 return .peer(id.peerId)
             case let .recentActions(message):
                 return .recentActions(message.id.peerId)
+            case let .savedMusic(context, _, _):
+                return .savedMusic(context.peerId)
             case .custom:
                 return .custom
         }
     }
     
+    public func effectiveLocation(context: AccountContext) -> PeerMessagesPlaylistLocation {
+        switch self {
+        case let .savedMusic(savedMusicContext, at, canReorder):
+            let peerId = savedMusicContext.peerId
+            return .custom(
+                messages: combineLatest(
+                    savedMusicContext.state,
+                    context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: savedMusicContext.peerId))
+                )
+                |> map { state, peer in
+                    var messages: [Message] = []
+                    var peers = SimpleDictionary<PeerId, Peer>()
+                    if let peer {
+                        peers[peerId] = peer._asPeer()
+                    }
+                    for file in state.files {
+                        let stableId = UInt32(clamping: file.fileId.id % Int64(Int32.max))
+                        messages.append(Message(stableId: stableId, stableVersion: 0, id: MessageId(peerId: peerId, namespace: Namespaces.Message.Local, id: Int32(stableId)), globallyUniqueId: nil, groupingKey: nil, groupInfo: nil, threadId: nil, timestamp: 0, flags: [], tags: [.music], globalTags: [], localTags: [], customTags: [], forwardInfo: nil, author: nil, text: "", attributes: [], media: [file], peers: peers, associatedMessages: SimpleDictionary(), associatedMessageIds: [], associatedMedia: [:], associatedThreadInfo: nil, associatedStories: [:]))
+                    }
+                    var canLoadMore = false
+                    if case let .ready(canLoadMoreValue) = state.dataState {
+                        canLoadMore = canLoadMoreValue
+                    }
+                    return (messages, Int32(messages.count), canLoadMore)
+                },
+                canReorder: canReorder,
+                at: MessageId(peerId: peerId, namespace: Namespaces.Message.Local, id: at),
+                loadMore: { [weak savedMusicContext] in
+                    guard let savedMusicContext else {
+                        return
+                    }
+                    savedMusicContext.loadMore()
+                }
+            )
+        default:
+            return self
+        }
+    }
+    
     public var messageId: MessageId? {
         switch self {
-            case let .messages(_, _, messageId), let .singleMessage(messageId), let .custom(_, messageId, _):
+            case let .messages(_, _, messageId), let .singleMessage(messageId), let .custom(_, _, messageId, _):
                 return messageId
             default:
                 return nil
@@ -85,8 +128,14 @@ public enum PeerMessagesPlaylistLocation: Equatable, SharedMediaPlaylistLocation
                 } else {
                     return false
                 }
-            case let .custom(_, lhsAt, _):
-                if case let .custom(_, rhsAt, _) = rhs, lhsAt == rhsAt {
+            case let .savedMusic(lhsContext, lhsAt, _):
+                if case let .savedMusic(rhsContext, rhsAt, _) = rhs {
+                    return lhsContext.peerId == rhsContext.peerId && lhsAt == rhsAt
+                } else {
+                    return false
+                }
+            case let .custom(_, _, lhsAt, _):
+                if case let .custom(_, _, rhsAt, _) = rhs, lhsAt == rhsAt {
                     return true
                 } else {
                     return false
@@ -120,8 +169,10 @@ public func peerMessageMediaPlayerType(_ message: EngineMessage) -> MediaManager
     return nil
 }
     
-public func peerMessagesMediaPlaylistAndItemId(_ message: EngineMessage, isRecentActions: Bool, isGlobalSearch: Bool, isDownloadList: Bool) -> (SharedMediaPlaylistId, SharedMediaPlaylistItemId)? {
-    if isGlobalSearch && !isDownloadList {
+public func peerMessagesMediaPlaylistAndItemId(_ message: EngineMessage, isRecentActions: Bool, isGlobalSearch: Bool, isDownloadList: Bool, isSavedMusic: Bool) -> (SharedMediaPlaylistId, SharedMediaPlaylistItemId)? {
+    if isSavedMusic {
+        return (PeerMessagesMediaPlaylistId.savedMusic(message.id.peerId), PeerMessagesMediaPlaylistItemId(messageId: message.id, messageIndex: message.index))
+    } else if isGlobalSearch && !isDownloadList {
         return (PeerMessagesMediaPlaylistId.custom, PeerMessagesMediaPlaylistItemId(messageId: message.id, messageIndex: message.index))
     } else if isRecentActions && !isDownloadList {
         return (PeerMessagesMediaPlaylistId.recentActions(message.id.peerId), PeerMessagesMediaPlaylistItemId(messageId: message.id, messageIndex: message.index))
@@ -136,17 +187,29 @@ public enum MediaManagerPlayerType {
     case file
 }
 
+public struct AudioRecorderResumeData {
+    public let compressedData: Data
+    public let resumeData: Data
+    
+    public init(compressedData: Data, resumeData: Data) {
+        self.compressedData = compressedData
+        self.resumeData = resumeData
+    }
+}
+
 public protocol MediaManager: AnyObject {
     var audioSession: ManagedAudioSession { get }
     var galleryHiddenMediaManager: GalleryHiddenMediaManager { get }
     var universalVideoManager: UniversalVideoManager { get }
     var overlayMediaManager: OverlayMediaManager { get }
     
+    var currentPictureInPictureNode: AnyObject? { get set }
+    
     var globalMediaPlayerState: Signal<(Account, SharedMediaPlayerItemPlaybackStateOrLoading, MediaManagerPlayerType)?, NoError> { get }
     var musicMediaPlayerState: Signal<(Account, SharedMediaPlayerItemPlaybackStateOrLoading, MediaManagerPlayerType)?, NoError> { get }
     var activeGlobalMediaPlayerAccountId: Signal<(AccountRecordId, Bool)?, NoError> { get }
     
-    func setPlaylist(_ playlist: (Account, SharedMediaPlaylist)?, type: MediaManagerPlayerType, control: SharedMediaPlayerControlAction)
+    func setPlaylist(_ playlist: (AccountContext, SharedMediaPlaylist)?, type: MediaManagerPlayerType, control: SharedMediaPlayerControlAction)
     func playlistControl(_ control: SharedMediaPlayerControlAction, type: MediaManagerPlayerType?)
     
     func filteredPlaylistState(accountId: AccountRecordId, playlistId: SharedMediaPlaylistId, itemId: SharedMediaPlaylistItemId, type: MediaManagerPlayerType) -> Signal<SharedMediaPlayerItemPlaybackState?, NoError>
@@ -155,7 +218,12 @@ public protocol MediaManager: AnyObject {
     func setOverlayVideoNode(_ node: OverlayMediaItemNode?)
     func hasOverlayVideoNode(_ node: OverlayMediaItemNode) -> Bool
     
-    func audioRecorder(beginWithTone: Bool, applicationBindings: TelegramApplicationBindings, beganWithTone: @escaping (Bool) -> Void) -> Signal<ManagedAudioRecorder?, NoError>
+    func audioRecorder(
+        resumeData: AudioRecorderResumeData?,
+        beginWithTone: Bool,
+        applicationBindings: TelegramApplicationBindings,
+        beganWithTone: @escaping (Bool) -> Void
+    ) -> Signal<ManagedAudioRecorder?, NoError>
 }
 
 public enum GalleryHiddenMediaId: Hashable {
@@ -202,6 +270,7 @@ public protocol UniversalVideoManager: AnyObject {
     func removePlaybackCompleted(id: AnyHashable, index: Int)
     func statusSignal(content: UniversalVideoContent) -> Signal<MediaPlayerStatus?, NoError>
     func bufferingStatusSignal(content: UniversalVideoContent) -> Signal<(RangeSet<Int64>, Int64)?, NoError>
+    func isNativePictureInPictureActiveSignal(content: UniversalVideoContent) -> Signal<Bool, NoError>
 }
 
 public enum AudioRecordingState: Equatable {
@@ -212,13 +281,17 @@ public enum AudioRecordingState: Equatable {
 
 public struct RecordedAudioData {
     public let compressedData: Data
+    public let resumeData: Data?
     public let duration: Double
     public let waveform: Data?
+    public let trimRange: Range<Double>?
     
-    public init(compressedData: Data, duration: Double, waveform: Data?) {
+    public init(compressedData: Data, resumeData: Data?, duration: Double, waveform: Data?, trimRange: Range<Double>?) {
         self.compressedData = compressedData
+        self.resumeData = resumeData
         self.duration = duration
         self.waveform = waveform
+        self.trimRange = trimRange
     }
 }
 
@@ -228,6 +301,10 @@ public protocol ManagedAudioRecorder: AnyObject {
     var recordingState: Signal<AudioRecordingState, NoError> { get }
     
     func start()
+    func pause()
+    func resume()
     func stop()
     func takenRecordedData() -> Signal<RecordedAudioData?, NoError>
+    
+    func updateTrimRange(start: Double, end: Double, updatedEnd: Bool, apply: Bool)
 }

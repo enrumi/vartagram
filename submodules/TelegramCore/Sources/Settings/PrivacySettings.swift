@@ -35,8 +35,8 @@ public final class SelectivePrivacyPeer: Equatable {
 
 public enum SelectivePrivacySettings: Equatable {
     case enableEveryone(disableFor: [PeerId: SelectivePrivacyPeer])
-    case enableContacts(enableFor: [PeerId: SelectivePrivacyPeer], disableFor: [PeerId: SelectivePrivacyPeer])
-    case disableEveryone(enableFor: [PeerId: SelectivePrivacyPeer], enableForCloseFriends: Bool)
+    case enableContacts(enableFor: [PeerId: SelectivePrivacyPeer], disableFor: [PeerId: SelectivePrivacyPeer], enableForPremium: Bool, enableForBots: Bool)
+    case disableEveryone(enableFor: [PeerId: SelectivePrivacyPeer], enableForCloseFriends: Bool, enableForPremium: Bool, enableForBots: Bool)
     
     public static func ==(lhs: SelectivePrivacySettings, rhs: SelectivePrivacySettings) -> Bool {
         switch lhs {
@@ -46,14 +46,14 @@ public enum SelectivePrivacySettings: Equatable {
                 } else {
                     return false
                 }
-            case let .enableContacts(enableFor, disableFor):
-                if case .enableContacts(enableFor, disableFor) = rhs {
+            case let .enableContacts(enableFor, disableFor, enableForPremium, enableForBots):
+                if case .enableContacts(enableFor, disableFor, enableForPremium, enableForBots) = rhs {
                     return true
                 } else {
                     return false
                 }
-            case let .disableEveryone(enableFor, enableForCloseFriends):
-                if case .disableEveryone(enableFor, enableForCloseFriends) = rhs {
+            case let .disableEveryone(enableFor, enableForCloseFriends, enableForPremium, enableForBots):
+                if case .disableEveryone(enableFor, enableForCloseFriends, enableForPremium, enableForBots) = rhs {
                     return true
                 } else {
                     return false
@@ -63,10 +63,10 @@ public enum SelectivePrivacySettings: Equatable {
     
     func withEnabledPeers(_ peers: [PeerId: SelectivePrivacyPeer]) -> SelectivePrivacySettings {
         switch self {
-            case let .disableEveryone(enableFor, enableForCloseFriends):
-                return .disableEveryone(enableFor: enableFor.merging(peers, uniquingKeysWith: { lhs, rhs in lhs }), enableForCloseFriends: enableForCloseFriends)
-            case let .enableContacts(enableFor, disableFor):
-                return .enableContacts(enableFor: enableFor.merging(peers, uniquingKeysWith: { lhs, rhs in lhs }), disableFor: disableFor)
+            case let .disableEveryone(enableFor, enableForCloseFriends, enableForPremium, enableForBots):
+                return .disableEveryone(enableFor: enableFor.merging(peers, uniquingKeysWith: { lhs, rhs in lhs }), enableForCloseFriends: enableForCloseFriends, enableForPremium: enableForPremium, enableForBots: enableForBots)
+            case let .enableContacts(enableFor, disableFor, enableForPremium, enableForBots):
+                return .enableContacts(enableFor: enableFor.merging(peers, uniquingKeysWith: { lhs, rhs in lhs }), disableFor: disableFor, enableForPremium: enableForPremium, enableForBots: enableForBots)
             case .enableEveryone:
                 return self
         }
@@ -76,42 +76,67 @@ public enum SelectivePrivacySettings: Equatable {
         switch self {
             case .disableEveryone:
                 return self
-            case let .enableContacts(enableFor, disableFor):
-                return .enableContacts(enableFor: enableFor, disableFor: disableFor.merging(peers, uniquingKeysWith: { lhs, rhs in lhs }))
+            case let .enableContacts(enableFor, disableFor, enableForPremium, enableForBots):
+                return .enableContacts(enableFor: enableFor, disableFor: disableFor.merging(peers, uniquingKeysWith: { lhs, rhs in lhs }), enableForPremium: enableForPremium, enableForBots: enableForBots)
             case let .enableEveryone(disableFor):
                 return .enableEveryone(disableFor: disableFor.merging(peers, uniquingKeysWith: { lhs, rhs in lhs }))
         }
     }
     
+    func withEnableForPremium(_ enableForPremium: Bool) -> SelectivePrivacySettings {
+        switch self {
+        case let .disableEveryone(enableFor, enableForCloseFriends, _, enableForBots):
+            return .disableEveryone(enableFor: enableFor, enableForCloseFriends: enableForCloseFriends, enableForPremium: enableForPremium, enableForBots: enableForBots)
+        case let .enableContacts(enableFor, disableFor, _, enableForBots):
+            return .enableContacts(enableFor: enableFor, disableFor: disableFor, enableForPremium: enableForPremium, enableForBots: enableForBots)
+        case .enableEveryone:
+            return self
+        }
+    }
+    
     func withEnableForCloseFriends(_ enableForCloseFriends: Bool) -> SelectivePrivacySettings {
         switch self {
-        case let .disableEveryone(enableFor, _):
-            return .disableEveryone(enableFor: enableFor, enableForCloseFriends: enableForCloseFriends)
+        case let .disableEveryone(enableFor, _, enableForPremium, enableForBots):
+            return .disableEveryone(enableFor: enableFor, enableForCloseFriends: enableForCloseFriends, enableForPremium: enableForPremium, enableForBots: enableForBots)
         case .enableContacts:
             return self
         case .enableEveryone:
             return self
         }
     }
+    
+    func withEnableForBots(_ enableForBots: Bool?) -> SelectivePrivacySettings {
+        switch self {
+        case let .disableEveryone(enableFor, enableForCloseFriends, enableForPremium, _):
+            return .disableEveryone(enableFor: enableFor, enableForCloseFriends: enableForCloseFriends, enableForPremium: enableForPremium, enableForBots: enableForBots == true)
+        case let .enableContacts(enableFor, disableFor, enableForPremium, _):
+            return .enableContacts(enableFor: enableFor, disableFor: disableFor, enableForPremium: enableForPremium, enableForBots: enableForBots == true)
+        case let .enableEveryone(disableFor):
+            return .enableEveryone(disableFor: disableFor)
+        }
+    }
 }
 
 public struct AccountPrivacySettings: Equatable {
-    public let presence: SelectivePrivacySettings
-    public let groupInvitations: SelectivePrivacySettings
-    public let voiceCalls: SelectivePrivacySettings
-    public let voiceCallsP2P: SelectivePrivacySettings
-    public let profilePhoto: SelectivePrivacySettings
-    public let forwards: SelectivePrivacySettings
-    public let phoneNumber: SelectivePrivacySettings
-    public let phoneDiscoveryEnabled: Bool
-    public let voiceMessages: SelectivePrivacySettings
-    public let bio: SelectivePrivacySettings
+    public var presence: SelectivePrivacySettings
+    public var groupInvitations: SelectivePrivacySettings
+    public var voiceCalls: SelectivePrivacySettings
+    public var voiceCallsP2P: SelectivePrivacySettings
+    public var profilePhoto: SelectivePrivacySettings
+    public var forwards: SelectivePrivacySettings
+    public var phoneNumber: SelectivePrivacySettings
+    public var phoneDiscoveryEnabled: Bool
+    public var voiceMessages: SelectivePrivacySettings
+    public var bio: SelectivePrivacySettings
+    public var birthday: SelectivePrivacySettings
+    public var giftsAutoSave: SelectivePrivacySettings
+    public var noPaidMessages: SelectivePrivacySettings
     
-    public let globalSettings: GlobalPrivacySettings
-    public let accountRemovalTimeout: Int32
-    public let messageAutoremoveTimeout: Int32?
+    public var globalSettings: GlobalPrivacySettings
+    public var accountRemovalTimeout: Int32
+    public var messageAutoremoveTimeout: Int32?
     
-    public init(presence: SelectivePrivacySettings, groupInvitations: SelectivePrivacySettings, voiceCalls: SelectivePrivacySettings, voiceCallsP2P: SelectivePrivacySettings, profilePhoto: SelectivePrivacySettings, forwards: SelectivePrivacySettings, phoneNumber: SelectivePrivacySettings, phoneDiscoveryEnabled: Bool, voiceMessages: SelectivePrivacySettings, bio: SelectivePrivacySettings, globalSettings: GlobalPrivacySettings, accountRemovalTimeout: Int32, messageAutoremoveTimeout: Int32?) {
+    public init(presence: SelectivePrivacySettings, groupInvitations: SelectivePrivacySettings, voiceCalls: SelectivePrivacySettings, voiceCallsP2P: SelectivePrivacySettings, profilePhoto: SelectivePrivacySettings, forwards: SelectivePrivacySettings, phoneNumber: SelectivePrivacySettings, phoneDiscoveryEnabled: Bool, voiceMessages: SelectivePrivacySettings, bio: SelectivePrivacySettings, birthday: SelectivePrivacySettings, giftsAutoSave: SelectivePrivacySettings, noPaidMessages: SelectivePrivacySettings, globalSettings: GlobalPrivacySettings, accountRemovalTimeout: Int32, messageAutoremoveTimeout: Int32?) {
         self.presence = presence
         self.groupInvitations = groupInvitations
         self.voiceCalls = voiceCalls
@@ -122,6 +147,9 @@ public struct AccountPrivacySettings: Equatable {
         self.phoneDiscoveryEnabled = phoneDiscoveryEnabled
         self.voiceMessages = voiceMessages
         self.bio = bio
+        self.birthday = birthday
+        self.giftsAutoSave = giftsAutoSave
+        self.noPaidMessages = noPaidMessages
         self.globalSettings = globalSettings
         self.accountRemovalTimeout = accountRemovalTimeout
         self.messageAutoremoveTimeout = messageAutoremoveTimeout
@@ -158,6 +186,15 @@ public struct AccountPrivacySettings: Equatable {
         if lhs.bio != rhs.bio {
             return false
         }
+        if lhs.birthday != rhs.birthday {
+            return false
+        }
+        if lhs.giftsAutoSave != rhs.giftsAutoSave {
+            return false
+        }
+        if lhs.noPaidMessages != rhs.noPaidMessages {
+            return false
+        }
         if lhs.globalSettings != rhs.globalSettings {
             return false
         }
@@ -174,18 +211,20 @@ public struct AccountPrivacySettings: Equatable {
 
 extension SelectivePrivacySettings {
     init(apiRules: [Api.PrivacyRule], peers: [PeerId: SelectivePrivacyPeer]) {
-        var current: SelectivePrivacySettings = .disableEveryone(enableFor: [:], enableForCloseFriends: false)
+        var current: SelectivePrivacySettings = .disableEveryone(enableFor: [:], enableForCloseFriends: false, enableForPremium: false, enableForBots: false)
         
         var disableFor: [PeerId: SelectivePrivacyPeer] = [:]
         var enableFor: [PeerId: SelectivePrivacyPeer] = [:]
         var enableForCloseFriends: Bool = false
+        var enableForPremium: Bool = false
+        var enableForBots: Bool?
         
         for rule in apiRules {
             switch rule {
                 case .privacyValueAllowAll:
                     current = .enableEveryone(disableFor: [:])
                 case .privacyValueAllowContacts:
-                    current = .enableContacts(enableFor: [:], disableFor: [:])
+                    current = .enableContacts(enableFor: [:], disableFor: [:], enableForPremium: false, enableForBots: false)
                 case let .privacyValueAllowUsers(users):
                     for id in users {
                         if let peer = peers[PeerId(namespace: Namespaces.Peer.CloudUser, id: PeerId.Id._internalFromInt64Value(id))] {
@@ -220,10 +259,16 @@ extension SelectivePrivacySettings {
                     }
                 case .privacyValueAllowCloseFriends:
                     enableForCloseFriends = true
+                case .privacyValueAllowPremium:
+                    enableForPremium = true
+                case .privacyValueAllowBots:
+                    enableForBots = true
+                case .privacyValueDisallowBots:
+                    break
             }
         }
         
-        self = current.withEnabledPeers(enableFor).withDisabledPeers(disableFor).withEnableForCloseFriends(enableForCloseFriends)
+        self = current.withEnabledPeers(enableFor).withDisabledPeers(disableFor).withEnableForCloseFriends(enableForCloseFriends).withEnableForPremium(enableForPremium).withEnableForBots(enableForBots)
     }
 }
 
@@ -247,25 +292,111 @@ func updateGlobalMessageAutoremoveTimeoutSettings(transaction: Transaction, _ f:
     })
 }
 
+public struct TelegramDisallowedGifts: OptionSet, Codable {
+    public var rawValue: Int32
+    
+    public init() {
+        self.rawValue = 0
+    }
+    
+    public init(rawValue: Int32) {
+        self.rawValue = rawValue
+    }
+    
+    public static let unlimited = TelegramDisallowedGifts(rawValue: 1 << 0)
+    public static let limited = TelegramDisallowedGifts(rawValue: 1 << 1)
+    public static let unique = TelegramDisallowedGifts(rawValue: 1 << 2)
+    public static let premium = TelegramDisallowedGifts(rawValue: 1 << 3)
+    
+    public static let All: TelegramDisallowedGifts = [
+        .unlimited,
+        .limited,
+        .unique,
+        .premium
+    ]
+    
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: StringCodingKey.self)
+        let value = try? container.decode(Int32.self, forKey: "v")
+        self = TelegramDisallowedGifts(rawValue: value ?? 0)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: StringCodingKey.self)
+        try container.encode(self.rawValue, forKey: "v")
+    }
+}
+
 public struct GlobalPrivacySettings: Equatable, Codable {
+    public enum NonContactChatsPrivacy: Equatable, Codable {
+        case everybody
+        case requirePremium
+        case paidMessages(StarsAmount)
+        
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: StringCodingKey.self)
+
+            switch (try? container.decode(Int32.self, forKey: "t")) ?? 0 {
+            case 0:
+                self = .everybody
+            case 1:
+                self = .requirePremium
+            case 2:
+                self = .paidMessages(StarsAmount(value: try container.decodeIfPresent(Int64.self, forKey: "stars") ?? 0, nanos: 0))
+            default:
+                assertionFailure()
+                self = .everybody
+            }
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: StringCodingKey.self)
+            switch self {
+            case .everybody:
+                try container.encode(0 as Int32, forKey: "t")
+            case .requirePremium:
+                try container.encode(1 as Int32, forKey: "t")
+            case let .paidMessages(amount):
+                try container.encode(2 as Int32, forKey: "t")
+                try container.encode(amount.value, forKey: "stars")
+            }
+        }
+    }
+        
     public static var `default` = GlobalPrivacySettings(
         automaticallyArchiveAndMuteNonContacts: false,
         keepArchivedUnmuted: true,
-        keepArchivedFolders: true
+        keepArchivedFolders: true,
+        hideReadTime: false,
+        nonContactChatsPrivacy: .everybody,
+        disallowedGifts: [],
+        displayGiftButton: false
     )
 
     public var automaticallyArchiveAndMuteNonContacts: Bool
     public var keepArchivedUnmuted: Bool
     public var keepArchivedFolders: Bool
+    public var hideReadTime: Bool
+    public var nonContactChatsPrivacy: NonContactChatsPrivacy
+    public var disallowedGifts: TelegramDisallowedGifts
+    public var displayGiftButton: Bool
 
     public init(
         automaticallyArchiveAndMuteNonContacts: Bool,
         keepArchivedUnmuted: Bool,
-        keepArchivedFolders: Bool
+        keepArchivedFolders: Bool,
+        hideReadTime: Bool,
+        nonContactChatsPrivacy: NonContactChatsPrivacy,
+        disallowedGifts: TelegramDisallowedGifts,
+        displayGiftButton: Bool
     ) {
         self.automaticallyArchiveAndMuteNonContacts = automaticallyArchiveAndMuteNonContacts
         self.keepArchivedUnmuted = keepArchivedUnmuted
         self.keepArchivedFolders = keepArchivedFolders
+        self.hideReadTime = hideReadTime
+        self.nonContactChatsPrivacy = nonContactChatsPrivacy
+        self.disallowedGifts = disallowedGifts
+        self.displayGiftButton = displayGiftButton
     }
 }
 

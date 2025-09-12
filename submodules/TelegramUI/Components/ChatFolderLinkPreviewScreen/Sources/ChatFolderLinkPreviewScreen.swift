@@ -10,6 +10,7 @@ import TelegramPresentationData
 import AccountContext
 import TelegramCore
 import MultilineTextComponent
+import MultilineTextWithEntitiesComponent
 import SolidRoundedButtonComponent
 import PresentationDataUtils
 import Markdown
@@ -248,7 +249,7 @@ private final class ChatFolderLinkPreviewScreenComponent: Component {
             }
         }
         
-        private func updateScrolling(transition: Transition) {
+        private func updateScrolling(transition: ComponentTransition) {
             guard let environment = self.environment, let controller = environment.controller(), let itemLayout = self.itemLayout else {
                 return
             }
@@ -312,7 +313,7 @@ private final class ChatFolderLinkPreviewScreenComponent: Component {
             }
         }
         
-        func update(component: ChatFolderLinkPreviewScreenComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<ViewControllerComponentContainer.Environment>, transition: Transition) -> CGSize {
+        func update(component: ChatFolderLinkPreviewScreenComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<ViewControllerComponentContainer.Environment>, transition: ComponentTransition) -> CGSize {
             let animationHint = transition.userData(AnimationHint.self)
             
             var contentTransition = transition
@@ -437,9 +438,10 @@ private final class ChatFolderLinkPreviewScreenComponent: Component {
             let topIconSize = self.topIcon.update(
                 transition: contentTransition,
                 component: AnyComponent(ChatFolderLinkHeaderComponent(
+                    context: component.context,
                     theme: environment.theme,
                     strings: environment.strings,
-                    title: component.linkContents?.title ?? "Folder",
+                    title: component.linkContents?.title ?? ChatFolderTitle(text: "Folder", entities: [], enableAnimations: true),
                     badge: topBadge
                 )),
                 environment: {},
@@ -457,36 +459,53 @@ private final class ChatFolderLinkPreviewScreenComponent: Component {
             contentHeight += topIconSize.height
             contentHeight += 20.0
             
-            let text: String
+            let text: NSAttributedString
             if case .linkList = component.subject {
-                text = environment.strings.FolderLinkPreview_TextLinkList
+                text = NSAttributedString(string: environment.strings.FolderLinkPreview_TextLinkList)
             } else if let linkContents = component.linkContents {
                 if case .remove = component.subject {
-                    text = environment.strings.FolderLinkPreview_TextRemoveFolder
+                    text = NSAttributedString(string: environment.strings.FolderLinkPreview_TextRemoveFolder, font: Font.regular(15.0), textColor: environment.theme.list.freeTextColor)
                 } else if allChatsAdded {
-                    text = environment.strings.FolderLinkPreview_TextAllAdded
+                    text = NSAttributedString(string: environment.strings.FolderLinkPreview_TextAllAdded, font: Font.regular(15.0), textColor: environment.theme.list.freeTextColor)
                 } else if linkContents.localFilterId == nil {
-                    text = environment.strings.FolderLinkPreview_TextAddFolder
-                } else {
+                    text = NSAttributedString(string: environment.strings.FolderLinkPreview_TextAddFolder, font: Font.regular(15.0), textColor: environment.theme.list.freeTextColor)
+                } else if let title = linkContents.title {
                     let chatCountString: String = environment.strings.FolderLinkPreview_TextAddChatsCount(Int32(canAddChatCount))
-                    text = environment.strings.FolderLinkPreview_TextAddChats(chatCountString, linkContents.title ?? "").string
+                    
+                    let textValue = NSMutableAttributedString(string: environment.strings.FolderLinkPreview_TextAddChatsV2)
+                    textValue.addAttributes([
+                        .font: Font.regular(15.0),
+                        .foregroundColor: environment.theme.list.freeTextColor
+                    ], range: NSRange(location: 0, length: textValue.length))
+                    
+                    let folderRange = (textValue.string as NSString).range(of: "{folder}")
+                    if folderRange.location != NSNotFound {
+                        textValue.replaceCharacters(in: folderRange, with: "")
+                        textValue.insert(title.attributedString(font: Font.semibold(15.0), textColor: environment.theme.list.freeTextColor), at: folderRange.location)
+                    }
+                    
+                    let chatsRange = (textValue.string as NSString).range(of: "{chats}")
+                    if chatsRange.location != NSNotFound {
+                        textValue.replaceCharacters(in: chatsRange, with: "")
+                        textValue.insert(NSAttributedString(string: chatCountString, font: Font.semibold(15.0), textColor: environment.theme.list.freeTextColor), at: chatsRange.location)
+                    }
+                    
+                    text = textValue
+                } else {
+                    text = NSAttributedString(string: " ", font: Font.regular(15.0), textColor: environment.theme.list.freeTextColor)
                 }
             } else {
-                text = " "
+                text = NSAttributedString(string: " ")
             }
-            
-            let body = MarkdownAttributeSet(font: Font.regular(15.0), textColor: environment.theme.list.freeTextColor)
-            let bold = MarkdownAttributeSet(font: Font.semibold(15.0), textColor: environment.theme.list.freeTextColor)
             
             let descriptionTextSize = self.descriptionText.update(
                 transition: .immediate,
-                component: AnyComponent(MultilineTextComponent(
-                    text: .markdown(text: text, attributes: MarkdownAttributes(
-                        body: body,
-                        bold: bold,
-                        link: body,
-                        linkAttribute: { _ in nil }
-                    )),
+                component: AnyComponent(MultilineTextWithEntitiesComponent(
+                    context: component.context,
+                    animationCache: component.context.animationCache,
+                    animationRenderer: component.context.animationRenderer,
+                    placeholderColor: environment.theme.list.freeTextColor.withMultipliedAlpha(0.1),
+                    text: .plain(text),
                     horizontalAlignment: .center,
                     maximumNumberOfLines: 0
                 )),
@@ -602,7 +621,7 @@ private final class ChatFolderLinkPreviewScreenComponent: Component {
                                 
                                 if let self, let component = self.component, let controller = self.environment?.controller() {
                                     let presentationData = component.context.sharedContext.currentPresentationData.with { $0 }
-                                    controller.present(UndoOverlayController(presentationData: presentationData, content: .linkCopied(text: presentationData.strings.InviteLink_InviteLinkCopiedText), elevatedLayout: false, animateInAsReplacement: false, action: { _ in return false }), in: .window(.root))
+                                    controller.present(UndoOverlayController(presentationData: presentationData, content: .linkCopied(title: nil, text: presentationData.strings.InviteLink_InviteLinkCopiedText), elevatedLayout: false, animateInAsReplacement: false, action: { _ in return false }), in: .window(.root))
                                 }
                             })))
                             
@@ -623,7 +642,7 @@ private final class ChatFolderLinkPreviewScreenComponent: Component {
                                 
                                 if let self, let component = self.component {
                                     self.linkListItems.removeAll(where: { $0.link == link.link })
-                                    self.state?.updated(transition: Transition(animation: .curve(duration: 0.3, curve: .easeInOut)))
+                                    self.state?.updated(transition: ComponentTransition(animation: .curve(duration: 0.3, curve: .easeInOut)))
                                     
                                     let context = component.context
                                     let _ = (context.engine.peers.editChatFolderLink(filterId: folderId, link: link, title: nil, peerIds: nil, revoke: true)
@@ -728,7 +747,7 @@ private final class ChatFolderLinkPreviewScreenComponent: Component {
                                     } else {
                                         self.selectedItems.insert(peer.id)
                                     }
-                                    self.state?.updated(transition: Transition(animation: .curve(duration: 0.3, curve: .easeInOut)))
+                                    self.state?.updated(transition: ComponentTransition(animation: .curve(duration: 0.3, curve: .easeInOut)))
                                 } else if linkContents.alreadyMemberPeerIds.contains(peer.id) {
                                     let presentationData = component.context.sharedContext.currentPresentationData.with { $0 }
                                     let text: String
@@ -744,7 +763,7 @@ private final class ChatFolderLinkPreviewScreenComponent: Component {
                                     } else {
                                         self.selectedItems.insert(peer.id)
                                     }
-                                    self.state?.updated(transition: Transition(animation: .curve(duration: 0.3, curve: .easeInOut)))
+                                    self.state?.updated(transition: ComponentTransition(animation: .curve(duration: 0.3, curve: .easeInOut)))
                                 }
                             }
                         )),
@@ -886,7 +905,7 @@ private final class ChatFolderLinkPreviewScreenComponent: Component {
                                 self.selectedItems.insert(peerId)
                             }
                         }
-                        self.state?.updated(transition: Transition(animation: .curve(duration: 0.3, curve: .easeInOut)))
+                        self.state?.updated(transition: ComponentTransition(animation: .curve(duration: 0.3, curve: .easeInOut)))
                     }
                 )),
                 environment: {},
@@ -981,7 +1000,12 @@ private final class ChatFolderLinkPreviewScreenComponent: Component {
                             disposable.add(component.context.account.postbox.addHiddenChatIds(peerIds: Array(self.selectedItems)))
                             disposable.add(component.context.account.viewTracker.addHiddenChatListFilterIds([folderId]))
                             
-                            let folderTitle = linkContents.title ?? ""
+                            let folderTitle: ChatFolderTitle
+                            if let title = linkContents.title {
+                                folderTitle = title
+                            } else {
+                                folderTitle = ChatFolderTitle(text: "", entities: [], enableAnimations: true)
+                            }
                             
                             let presentationData = component.context.sharedContext.currentPresentationData.with({ $0 })
                             
@@ -1013,11 +1037,18 @@ private final class ChatFolderLinkPreviewScreenComponent: Component {
                                 }
                             }
                             
+                            let undoText = NSMutableAttributedString(string: presentationData.strings.FolderLinkPreview_ToastLeftTitleV2)
+                            let folderRange = (undoText.string as NSString).range(of: "{folder}")
+                            if folderRange.location != NSNotFound {
+                                undoText.replaceCharacters(in: folderRange, with: "")
+                                undoText.insert(folderTitle.rawAttributedString, at: folderRange.location)
+                            }
+                            
                             let context = component.context
                             let selectedItems = self.selectedItems
                             let undoOverlayController = UndoOverlayController(
                                 presentationData: presentationData,
-                                content: .removedChat(title: presentationData.strings.FolderLinkPreview_ToastLeftTitle(folderTitle).string, text: additionalText),
+                                content: .removedChat(context: component.context, title: undoText, text: additionalText),
                                 elevatedLayout: false,
                                 action: { value in
                                     if case .commit = value {
@@ -1110,7 +1141,14 @@ private final class ChatFolderLinkPreviewScreenComponent: Component {
                                                 }
                                                 
                                                 if isUpdates {
-                                                    chatListController.present(UndoOverlayController(presentationData: presentationData, content: .universal(animation: "anim_add_to_folder", scale: 0.1, colors: ["__allcolors__": UIColor.white], title: presentationData.strings.FolderLinkPreview_ToastChatsAddedTitle(result.title).string, text: presentationData.strings.FolderLinkPreview_ToastChatsAddedText(Int32(result.newChatCount)), customUndoText: nil, timeout: 5), elevatedLayout: false, action: { _ in true }), in: .current)
+                                                    let titleString = NSMutableAttributedString(string: presentationData.strings.FolderLinkPreview_ToastChatsAddedTitleV2)
+                                                    let folderRange = (titleString.string as NSString).range(of: "{folder}")
+                                                    if folderRange.location != NSNotFound {
+                                                        titleString.replaceCharacters(in: folderRange, with: "")
+                                                        titleString.insert(result.title.rawAttributedString, at: folderRange.location)
+                                                    }
+                                                    
+                                                    chatListController.present(UndoOverlayController(presentationData: presentationData, content: .universalWithEntities(context: component.context, animation: "anim_add_to_folder", scale: 0.1, colors: ["__allcolors__": UIColor.white], title: titleString, text: NSAttributedString(string: presentationData.strings.FolderLinkPreview_ToastChatsAddedText(Int32(result.newChatCount))), animateEntities: true, customUndoText: nil, timeout: 5), elevatedLayout: false, action: { _ in true }), in: .current)
                                                 } else if result.newChatCount != 0 {
                                                     let animationBackgroundColor: UIColor
                                                     if presentationData.theme.overallDarkAppearance {
@@ -1118,7 +1156,15 @@ private final class ChatFolderLinkPreviewScreenComponent: Component {
                                                     } else {
                                                         animationBackgroundColor = UIColor(rgb: 0x474747)
                                                     }
-                                                    chatListController.present(UndoOverlayController(presentationData: presentationData, content: .universal(animation: "anim_success", scale: 1.0, colors: ["info1.info1.stroke": animationBackgroundColor, "info2.info2.Fill": animationBackgroundColor], title: presentationData.strings.FolderLinkPreview_ToastFolderAddedTitle(result.title).string, text: presentationData.strings.FolderLinkPreview_ToastFolderAddedText(Int32(result.newChatCount)), customUndoText: nil, timeout: 5), elevatedLayout: false, action: { _ in true }), in: .current)
+                                                    
+                                                    let titleString = NSMutableAttributedString(string: presentationData.strings.FolderLinkPreview_ToastChatsAddedTitleV2)
+                                                    let folderRange = (titleString.string as NSString).range(of: "{folder}")
+                                                    if folderRange.location != NSNotFound {
+                                                        titleString.replaceCharacters(in: folderRange, with: "")
+                                                        titleString.insert(result.title.rawAttributedString, at: folderRange.location)
+                                                    }
+                                                    
+                                                    chatListController.present(UndoOverlayController(presentationData: presentationData, content: .universalWithEntities(context: component.context, animation: "anim_success", scale: 1.0, colors: ["info1.info1.stroke": animationBackgroundColor, "info2.info2.Fill": animationBackgroundColor], title: titleString, text: NSAttributedString(string: presentationData.strings.FolderLinkPreview_ToastFolderAddedText(Int32(result.newChatCount))), animateEntities: true, customUndoText: nil, timeout: 5), elevatedLayout: false, action: { _ in true }), in: .current)
                                                 } else {
                                                     let animationBackgroundColor: UIColor
                                                     if presentationData.theme.overallDarkAppearance {
@@ -1126,7 +1172,15 @@ private final class ChatFolderLinkPreviewScreenComponent: Component {
                                                     } else {
                                                         animationBackgroundColor = UIColor(rgb: 0x474747)
                                                     }
-                                                    chatListController.present(UndoOverlayController(presentationData: presentationData, content: .universal(animation: "anim_success", scale: 1.0, colors: ["info1.info1.stroke": animationBackgroundColor, "info2.info2.Fill": animationBackgroundColor], title: presentationData.strings.FolderLinkPreview_ToastFolderAddedTitle(result.title).string, text: "", customUndoText: nil, timeout: 5), elevatedLayout: false, action: { _ in true }), in: .current)
+                                                    
+                                                    let titleString = NSMutableAttributedString(string: presentationData.strings.FolderLinkPreview_ToastFolderAddedTitleV2)
+                                                    let folderRange = (titleString.string as NSString).range(of: "{folder}")
+                                                    if folderRange.location != NSNotFound {
+                                                        titleString.replaceCharacters(in: folderRange, with: "")
+                                                        titleString.insert(result.title.rawAttributedString, at: folderRange.location)
+                                                    }
+                                                    
+                                                    chatListController.present(UndoOverlayController(presentationData: presentationData, content: .universalWithEntities(context: component.context, animation: "anim_success", scale: 1.0, colors: ["info1.info1.stroke": animationBackgroundColor, "info2.info2.Fill": animationBackgroundColor], title: titleString, text: NSAttributedString(string: ""), animateEntities: true, customUndoText: nil, timeout: 5), elevatedLayout: false, action: { _ in true }), in: .current)
                                                 }
                                             })
                                         }
@@ -1371,7 +1425,7 @@ private final class ChatFolderLinkPreviewScreenComponent: Component {
                             }
                             
                             self.linkListItems.insert(link, at: 0)
-                            self.state?.updated(transition: Transition(animation: .curve(duration: 0.3, curve: .easeInOut)))
+                            self.state?.updated(transition: ComponentTransition(animation: .curve(duration: 0.3, curve: .easeInOut)))
                             
                             let navigationController = controller.navigationController
                             controller.push(folderInviteLinkListController(context: component.context, filterId: folderId, title: title, allPeerIds: peers.map(\.id), currentInvitation: link, linkUpdated: { [weak self] updatedLink in
@@ -1389,7 +1443,7 @@ private final class ChatFolderLinkPreviewScreenComponent: Component {
                                         self.linkListItems.insert(updatedLink, at: 0)
                                     }
                                 }
-                                self.state?.updated(transition: Transition(animation: .curve(duration: 0.3, curve: .easeInOut)))
+                                self.state?.updated(transition: ComponentTransition(animation: .curve(duration: 0.3, curve: .easeInOut)))
                             }, presentController: { [weak navigationController] c in
                                 (navigationController?.topViewController as? ViewController)?.present(c, in: .window(.root))
                             }))
@@ -1471,7 +1525,7 @@ private final class ChatFolderLinkPreviewScreenComponent: Component {
         return View(frame: CGRect())
     }
     
-    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<ViewControllerComponentContainer.Environment>, transition: Transition) -> CGSize {
+    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<ViewControllerComponentContainer.Environment>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
 }

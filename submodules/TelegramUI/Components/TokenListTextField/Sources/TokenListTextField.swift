@@ -88,6 +88,7 @@ public final class TokenListTextField: Component {
     public let tokens: [Token]
     public let sideInset: CGFloat
     public let deleteToken: (AnyHashable) -> Void
+    public let isFocusedUpdated: (Bool) -> Void
     
     public init(
         externalState: ExternalState,
@@ -96,7 +97,8 @@ public final class TokenListTextField: Component {
         placeholder: String,
         tokens: [Token],
         sideInset: CGFloat,
-        deleteToken: @escaping (AnyHashable) -> Void
+        deleteToken: @escaping (AnyHashable) -> Void,
+        isFocusedUpdated: @escaping (Bool) -> Void = { _ in }
     ) {
         self.externalState = externalState
         self.context = context
@@ -105,6 +107,7 @@ public final class TokenListTextField: Component {
         self.tokens = tokens
         self.sideInset = sideInset
         self.deleteToken = deleteToken
+        self.isFocusedUpdated = isFocusedUpdated
     }
 
     public static func ==(lhs: TokenListTextField, rhs: TokenListTextField) -> Bool {
@@ -160,7 +163,7 @@ public final class TokenListTextField: Component {
             }
         }
 
-        func update(component: TokenListTextField, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+        func update(component: TokenListTextField, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
             self.component = component
             self.componentState = state
             
@@ -191,7 +194,8 @@ public final class TokenListTextField: Component {
                     guard let self else {
                         return
                     }
-                    self.componentState?.updated(transition: Transition(animation: .curve(duration: 0.35, curve: .spring)))
+                    self.component?.isFocusedUpdated(self.tokenListNode?.isFocused ?? false)
+                    self.componentState?.updated(transition: ComponentTransition(animation: .curve(duration: 0.35, curve: .spring)))
                 }
                 
                 tokenListNode.textUpdated = { [weak self] text in
@@ -257,7 +261,7 @@ public final class TokenListTextField: Component {
         return View(frame: CGRect())
     }
 
-    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
 }

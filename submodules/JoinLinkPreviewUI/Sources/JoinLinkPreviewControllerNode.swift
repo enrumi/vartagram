@@ -34,7 +34,7 @@ struct JoinLinkPreviewData {
     let isJoined: Bool
 }
 
-final class JoinLinkPreviewControllerNode: ViewControllerTracingNode, UIScrollViewDelegate {
+final class JoinLinkPreviewControllerNode: ViewControllerTracingNode, ASScrollViewDelegate {
     private let context: AccountContext
     private var presentationData: PresentationData
     
@@ -110,7 +110,7 @@ final class JoinLinkPreviewControllerNode: ViewControllerTracingNode, UIScrollVi
         self.dimNode.view.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(self.dimTapGesture(_:))))
         self.addSubnode(self.dimNode)
         
-        self.wrappingScrollNode.view.delegate = self
+        self.wrappingScrollNode.view.delegate = self.wrappedScrollViewDelegate
         self.addSubnode(self.wrappingScrollNode)
                 
         self.cancelButton.addTarget(self, action: #selector(self.cancelButtonPressed), forControlEvents: .touchUpInside)
@@ -392,8 +392,8 @@ final class JoinLinkPreviewControllerNode: ViewControllerTracingNode, UIScrollVi
         self.setNeedsLayout()
     }
     
-    func setInvitePeer(image: TelegramMediaImageRepresentation?, title: String, memberCount: Int32, members: [EnginePeer], data: JoinLinkPreviewData) {
-        let contentNode = JoinLinkPreviewPeerContentNode(context: self.context, theme: self.presentationData.theme, strings: self.presentationData.strings, content: .invite(isGroup: data.isGroup, image: image, title: title, memberCount: memberCount, members: members))
+    func setInvitePeer(image: TelegramMediaImageRepresentation?, title: String, about: String?, memberCount: Int32, members: [EnginePeer], data: JoinLinkPreviewData) {
+        let contentNode = JoinLinkPreviewPeerContentNode(context: self.context, theme: self.presentationData.theme, strings: self.presentationData.strings, content: .invite(isGroup: data.isGroup, image: image, title: title, about: about, memberCount: memberCount, members: members))
         contentNode.join = { [weak self] in
             self?.join?()
         }

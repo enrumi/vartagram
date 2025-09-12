@@ -69,21 +69,16 @@ public final class EmojiSuggestionsComponent: Component {
             
             var existingIds = Set<EngineMedia.Id>()
             for entry in view.entries {
-                guard let item = entry.item as? StickerPackItem else {
+                guard let item = entry.item as? StickerPackItem, !item.file.isPremiumEmoji || hasPremium else {
                     continue
                 }
-                for attribute in item.file.attributes {
-                    switch attribute {
-                    case let .CustomEmoji(_, _, alt, _):
-                        if alt == query || (!normalizedQuery.isEmpty && alt == normalizedQuery) {
-                            if !item.file.isPremiumEmoji || hasPremium {
-                                if !existingIds.contains(item.file.fileId) {
-                                    existingIds.insert(item.file.fileId)
-                                    result.append(item.file)
-                                }
-                            }
+                let stringRepresentations = item.getStringRepresentationsOfIndexKeys()
+                for stringRepresentation in stringRepresentations {
+                    if stringRepresentation == query || (!normalizedQuery.isEmpty && stringRepresentation == normalizedQuery) {
+                        if !existingIds.contains(item.file.fileId) {
+                            existingIds.insert(item.file.fileId)
+                            result.append(item.file._parse())
                         }
-                    default:
                         break
                     }
                 }
@@ -91,25 +86,108 @@ public final class EmojiSuggestionsComponent: Component {
             
             for featuredPack in featuredEmojiPacks {
                 for item in featuredPack.topItems {
-                    for attribute in item.file.attributes {
-                        switch attribute {
-                        case let .CustomEmoji(_, _, alt, _):
-                            if alt == query || (!normalizedQuery.isEmpty && alt == normalizedQuery) {
-                                if !item.file.isPremiumEmoji || hasPremium {
-                                    if !existingIds.contains(item.file.fileId) {
-                                        existingIds.insert(item.file.fileId)
-                                        result.append(item.file)
-                                    }
+                    if let alt = item.file.customEmojiAlt {
+                        if alt == query || (!normalizedQuery.isEmpty && alt == normalizedQuery) {
+                            if !item.file.isPremiumEmoji || hasPremium {
+                                if !existingIds.contains(item.file.fileId) {
+                                    existingIds.insert(item.file.fileId)
+                                    result.append(item.file._parse())
                                 }
                             }
-                        default:
-                            break
                         }
                     }
                 }
             }
             
             return result
+        }
+    }
+    
+    public static func searchData(context: AccountContext, isSavedMessages: Bool, query: String) -> Signal<[TelegramMediaFile], NoError> {
+        let hasPremium: Signal<Bool, NoError>
+        if isSavedMessages {
+            hasPremium = .single(true)
+        } else {
+            hasPremium = context.engine.data.subscribe(TelegramEngine.EngineData.Item.Peer.Peer(id: context.account.peerId))
+            |> map { peer -> Bool in
+                guard case let .user(user) = peer else {
+                    return false
+                }
+                return user.isPremium
+            }
+            |> distinctUntilChanged
+        }
+    
+        if query.isSingleEmoji {
+            return combineLatest(
+                context.account.postbox.itemCollectionsView(orderedItemListCollectionIds: [], namespaces: [Namespaces.ItemCollection.CloudEmojiPacks], aroundIndex: nil, count: 10000000),
+                hasPremium
+            )
+            |> map { view, hasPremium -> [TelegramMediaFile] in
+                var result: [TelegramMediaFile] = []
+                
+                for entry in view.entries {
+                    guard let item = entry.item as? StickerPackItem, !item.file.isPremiumEmoji || hasPremium else {
+                        continue
+                    }
+                    let stringRepresentations = item.getStringRepresentationsOfIndexKeys()
+                    for stringRepresentation in stringRepresentations {
+                        if stringRepresentation == query {
+                            result.append(item.file._parse())
+                            break
+                        }
+                    }
+                }
+                return result
+            }
+        } else {
+            let languageCode = "en-US"
+            var signal = context.engine.stickers.searchEmojiKeywords(inputLanguageCode: languageCode, query: query, completeMatch: query.count < 2)
+            if !languageCode.lowercased().hasPrefix("en") {
+                signal = signal
+                |> mapToSignal { keywords in
+                    return .single(keywords)
+                    |> then(
+                        context.engine.stickers.searchEmojiKeywords(inputLanguageCode: "en-US", query: query, completeMatch: query.count < 3)
+                        |> map { englishKeywords in
+                            return keywords + englishKeywords
+                        }
+                    )
+                }
+            }
+            
+            return signal
+            |> mapToSignal { keywords -> Signal<[TelegramMediaFile], NoError> in
+                return combineLatest(
+                    context.account.postbox.itemCollectionsView(orderedItemListCollectionIds: [], namespaces: [Namespaces.ItemCollection.CloudEmojiPacks], aroundIndex: nil, count: 10000000),
+                    hasPremium
+                )
+                |> map { view, hasPremium -> [TelegramMediaFile] in
+                    var result: [TelegramMediaFile] = []
+                    
+                    var allEmoticons: [String: String] = [:]
+                    for keyword in keywords {
+                        for emoticon in keyword.emoticons {
+                            allEmoticons[emoticon] = keyword.keyword
+                        }
+                    }
+                    
+                    for entry in view.entries {
+                        guard let item = entry.item as? StickerPackItem, !item.file.isPremiumEmoji || hasPremium else {
+                            continue
+                        }
+                        let stringRepresentations = item.getStringRepresentationsOfIndexKeys()
+                        for stringRepresentation in stringRepresentations {
+                            if let _ = allEmoticons[stringRepresentation] {
+                                result.append(item.file._parse())
+                                break
+                            }
+                        }
+                    }
+                    
+                    return result
+                }
+            }
         }
     }
     
@@ -395,12 +473,11 @@ public final class EmojiSuggestionsComponent: Component {
             //self.blurView.shadowPath = path
         }
         
-        func update(component: EmojiSuggestionsComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: Transition) -> CGSize {
+        func update(component: EmojiSuggestionsComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: ComponentTransition) -> CGSize {
             let height: CGFloat = 54.0
             
             if self.component?.theme.backgroundColor != component.theme.backgroundColor {
-                //self.backgroundLayer.fillColor = component.theme.list.plainBackgroundColor.cgColor
-                self.backgroundLayer.fillColor = UIColor.black.cgColor
+                self.backgroundLayer.fillColor = component.theme.backgroundColor.cgColor
                 self.blurView.updateColor(color: component.theme.backgroundColor, transition: .immediate)
             }
             var resetScrollingPosition = false
@@ -439,14 +516,14 @@ public final class EmojiSuggestionsComponent: Component {
         return View(frame: CGRect())
     }
     
-    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: Transition) -> CGSize {
+    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
 }
 
 public extension EmojiSuggestionsComponent.Theme {
-    init(theme: PresentationTheme) {
-        self.backgroundColor = theme.list.plainBackgroundColor.withMultipliedAlpha(0.88)
+    init(theme: PresentationTheme, backgroundColor: UIColor? = nil) {
+        self.backgroundColor = backgroundColor ?? theme.list.plainBackgroundColor.withMultipliedAlpha(0.88)
         self.textColor = theme.list.itemPrimaryTextColor
         self.placeholderColor = theme.list.mediaPlaceholderColor
     }

@@ -19,12 +19,14 @@ import ChatMessageBubbleContentNode
 import ChatMessageItemCommon
 import ChatMessageAttachedContentButtonNode
 import ChatControllerInteraction
+import TextNodeWithEntities
+import TextFormat
 
 private let titleFont = Font.medium(15.0)
 private let textFont = Font.regular(13.0)
 private let boldTextFont = Font.semibold(13.0)
 
-public class ChatMessageGiveawayBubbleContentNode: ChatMessageBubbleContentNode, UIGestureRecognizerDelegate {
+public class ChatMessageGiveawayBubbleContentNode: ChatMessageBubbleContentNode, ASGestureRecognizerDelegate {
     private let dateAndStatusNode: ChatMessageDateAndStatusNode
     
     private let placeholderNode: StickerShimmerEffectNode
@@ -48,7 +50,7 @@ public class ChatMessageGiveawayBubbleContentNode: ChatMessageBubbleContentNode,
     private let dateTextNode: TextNode
     
     private let badgeBackgroundNode: ASImageNode
-    private let badgeTextNode: TextNode
+    private let badgeTextNode: TextNodeWithEntities
     
     private var giveaway: TelegramMediaGiveaway?
     
@@ -104,7 +106,7 @@ public class ChatMessageGiveawayBubbleContentNode: ChatMessageBubbleContentNode,
         self.badgeBackgroundNode = ASImageNode()
         self.badgeBackgroundNode.displaysAsynchronously = false
         
-        self.badgeTextNode = TextNode()
+        self.badgeTextNode = TextNodeWithEntities()
         
         self.buttonNode = ChatMessageAttachedContentButtonNode()
         self.channelButtons = PeerButtonsStackNode()
@@ -126,15 +128,15 @@ public class ChatMessageGiveawayBubbleContentNode: ChatMessageBubbleContentNode,
         self.addSubnode(self.channelButtons)
         self.addSubnode(self.animationNode)
         self.addSubnode(self.badgeBackgroundNode)
-        self.addSubnode(self.badgeTextNode)
+        self.addSubnode(self.badgeTextNode.textNode)
         
         self.buttonNode.addTarget(self, action: #selector(self.buttonPressed), forControlEvents: .touchUpInside)
         
-        self.dateAndStatusNode.reactionSelected = { [weak self] value in
+        self.dateAndStatusNode.reactionSelected = { [weak self] _, value, sourceView in
             guard let strongSelf = self, let item = strongSelf.item else {
                 return
             }
-            item.controllerInteraction.updateMessageReaction(item.message, .reaction(value))
+            item.controllerInteraction.updateMessageReaction(item.topMessage, .reaction(value), false, sourceView)
         }
         
         self.dateAndStatusNode.openReactionPreview = { [weak self] gesture, sourceView, value in
@@ -170,7 +172,7 @@ public class ChatMessageGiveawayBubbleContentNode: ChatMessageBubbleContentNode,
         super.didLoad()
         
         let tapRecognizer = UITapGestureRecognizer(target: self, action: #selector(self.bubbleTap(_:)))
-        tapRecognizer.delegate = self
+        tapRecognizer.delegate = self.wrappedGestureRecognizerDelegate
         self.view.addGestureRecognizer(tapRecognizer)
     }
 
@@ -221,7 +223,7 @@ public class ChatMessageGiveawayBubbleContentNode: ChatMessageBubbleContentNode,
         let makeDateTitleLayout = TextNode.asyncLayout(self.dateTitleNode)
         let makeDateTextLayout = TextNode.asyncLayout(self.dateTextNode)
 
-        let makeBadgeTextLayout = TextNode.asyncLayout(self.badgeTextNode)
+        let makeBadgeTextLayout = TextNodeWithEntities.asyncLayout(self.badgeTextNode)
 
         let makeButtonLayout = ChatMessageAttachedContentButtonNode.asyncLayout(self.buttonNode)
         
@@ -259,22 +261,40 @@ public class ChatMessageGiveawayBubbleContentNode: ChatMessageBubbleContentNode,
             if badgeTextColor.distance(to: accentColor) < 1 {
                 badgeTextColor = incoming ? item.presentationData.theme.theme.chat.message.incoming.bubble.withoutWallpaper.fill.first! : item.presentationData.theme.theme.chat.message.outgoing.bubble.withoutWallpaper.fill.first!
             }
-            
-            var updatedBadgeImage: UIImage?
-            if themeUpdated {
-                updatedBadgeImage = generateStretchableFilledCircleImage(diameter: 21.0, color: accentColor, strokeColor: backgroundColor, strokeWidth: 1.0 + UIScreenPixel, backgroundColor: nil)
-            }
-            
+                       
+            var isStars = false
             let badgeText: String
             if let giveaway {
-                badgeText = "X\(giveaway.quantity)"
+                switch giveaway.prize {
+                case .premium:
+                    badgeText = "X\(giveaway.quantity)"
+                case let .stars(amount):
+                    badgeText = "⭐️\(presentationStringsFormattedNumber(Int32(amount), item.presentationData.dateTimeFormat.groupingSeparator)) "
+                    isStars = true
+                }
             } else if let giveawayResults {
-                badgeText = "X\(giveawayResults.winnersCount)"
+                switch giveawayResults.prize {
+                case .premium:
+                    badgeText = "X\(giveawayResults.winnersCount)"
+                case let .stars(amount):
+                    badgeText = "⭐️\(presentationStringsFormattedNumber(Int32(amount), item.presentationData.dateTimeFormat.groupingSeparator)) "
+                    isStars = true
+                }
             } else {
                 badgeText = ""
             }
-            let badgeString = NSAttributedString(string: badgeText, font: Font.with(size: 10.0, design: .round , weight: .bold, traits: .monospacedNumbers), textColor: badgeTextColor)
-                        
+            let badgeString = NSMutableAttributedString(string: badgeText, font: Font.with(size: 10.0, design: .round , weight: .bold, traits: .monospacedNumbers), textColor: badgeTextColor)
+            if let range = badgeString.string.range(of: "⭐️") {
+                badgeString.addAttribute(.attachment, value: UIImage(bundleImageName: "Chat/Message/Stars")!, range: NSRange(range, in: badgeString.string))
+                badgeString.addAttribute(.baselineOffset, value: 1.5, range: NSRange(range, in: badgeString.string))
+            }
+            
+            let badgeBackgroundColor = !incoming || !isStars ? accentColor : UIColor(rgb: 0xffaf0a)
+            var updatedBadgeImage: UIImage?
+            if themeUpdated {
+                updatedBadgeImage = generateStretchableFilledCircleImage(diameter: 21.0, color: badgeBackgroundColor, strokeColor: backgroundColor, strokeWidth: 1.0 + UIScreenPixel, backgroundColor: nil)
+            }
+            
             let prizeTitleText: String
             if let giveawayResults {
                 if giveawayResults.winnersCount > 1 {
@@ -316,17 +336,33 @@ public class ChatMessageGiveawayBubbleContentNode: ChatMessageBubbleContentNode,
                     subscriptionsString = subscriptionsString.replacingOccurrences(of: "**\(giveaway.quantity)** ", with: "")
                 }
                 
-                prizeTextString = parseMarkdownIntoAttributedString(item.presentationData.strings.Chat_Giveaway_Message_PrizeText(
-                    subscriptionsString,
-                    item.presentationData.strings.Chat_Giveaway_Message_Months(giveaway.months)
-                ).string, attributes: MarkdownAttributes(
-                    body: MarkdownAttributeSet(font: textFont, textColor: textColor),
-                    bold: MarkdownAttributeSet(font: boldTextFont, textColor: textColor),
-                    link: MarkdownAttributeSet(font: textFont, textColor: textColor),
-                    linkAttribute: { url in
-                        return ("URL", url)
-                    }
-                ), textAlignment: .center)
+                switch giveaway.prize {
+                case let .premium(months):
+                    prizeTextString = parseMarkdownIntoAttributedString(item.presentationData.strings.Chat_Giveaway_Message_PrizeText(
+                        subscriptionsString,
+                        item.presentationData.strings.Chat_Giveaway_Message_Months(months)
+                    ).string, attributes: MarkdownAttributes(
+                        body: MarkdownAttributeSet(font: textFont, textColor: textColor),
+                        bold: MarkdownAttributeSet(font: boldTextFont, textColor: textColor),
+                        link: MarkdownAttributeSet(font: textFont, textColor: textColor),
+                        linkAttribute: { url in
+                            return ("URL", url)
+                        }
+                    ), textAlignment: .center)
+                case let .stars(amount):
+                    let starsString = item.presentationData.strings.Chat_Giveaway_Message_Stars_Stars(Int32(clamping: amount))
+                    prizeTextString = parseMarkdownIntoAttributedString(item.presentationData.strings.Chat_Giveaway_Message_Stars_PrizeText(
+                        starsString,
+                        item.presentationData.strings.Chat_Giveaway_Message_Stars_Winners(giveaway.quantity)
+                    ).string, attributes: MarkdownAttributes(
+                        body: MarkdownAttributeSet(font: textFont, textColor: textColor),
+                        bold: MarkdownAttributeSet(font: boldTextFont, textColor: textColor),
+                        link: MarkdownAttributeSet(font: textFont, textColor: textColor),
+                        linkAttribute: { url in
+                            return ("URL", url)
+                        }
+                    ), textAlignment: .center)
+                }
             } else if let giveawayResults {
                 prizeTextString = parseMarkdownIntoAttributedString(item.presentationData.strings.Chat_Giveaway_Message_WinnersSelectedText(giveawayResults.winnersCount), attributes: MarkdownAttributes(
                     body: MarkdownAttributeSet(font: textFont, textColor: textColor),
@@ -362,18 +398,24 @@ public class ChatMessageGiveawayBubbleContentNode: ChatMessageBubbleContentNode,
             let participantsText: String
             let countriesText: String
             
+            let author = item.message.forwardInfo?.author ?? item.message.author
+            var isGroup = false
+            if let channel = author as? TelegramChannel, case .group = channel.info {
+                isGroup = true
+            }
+            
             if let giveaway {
                 if giveaway.flags.contains(.onlyNewSubscribers) {
                     if giveaway.channelPeerIds.count > 1 {
-                        participantsText = item.presentationData.strings.Chat_Giveaway_Message_ParticipantsNewMany
+                        participantsText = isGroup ? item.presentationData.strings.Chat_Giveaway_Message_Group_ParticipantsNewMany : item.presentationData.strings.Chat_Giveaway_Message_ParticipantsNewMany
                     } else {
-                        participantsText = item.presentationData.strings.Chat_Giveaway_Message_ParticipantsNew
+                        participantsText = isGroup ? item.presentationData.strings.Chat_Giveaway_Message_Group_ParticipantsNew : item.presentationData.strings.Chat_Giveaway_Message_ParticipantsNew
                     }
                 } else {
                     if giveaway.channelPeerIds.count > 1 {
-                        participantsText = item.presentationData.strings.Chat_Giveaway_Message_ParticipantsMany
+                        participantsText = isGroup ? item.presentationData.strings.Chat_Giveaway_Message_Group_ParticipantsMany : item.presentationData.strings.Chat_Giveaway_Message_ParticipantsMany
                     } else {
-                        participantsText = item.presentationData.strings.Chat_Giveaway_Message_Participants
+                        participantsText = isGroup ? item.presentationData.strings.Chat_Giveaway_Message_Group_Participants : item.presentationData.strings.Chat_Giveaway_Message_Participants
                     }
                 }
                 if !giveaway.countries.isEmpty {
@@ -425,9 +467,22 @@ public class ChatMessageGiveawayBubbleContentNode: ChatMessageBubbleContentNode,
             if let giveaway {
                 dateTextString = NSAttributedString(string: stringForFullDate(timestamp: giveaway.untilDate, strings: item.presentationData.strings, dateTimeFormat: item.presentationData.dateTimeFormat), font: textFont, textColor: textColor)
             } else if let giveawayResults {
-                dateTextString = NSAttributedString(string: giveawayResults.winnersCount > 1 ? item.presentationData.strings.Chat_Giveaway_Message_WinnersInfo_Many : item.presentationData.strings.Chat_Giveaway_Message_WinnersInfo_One, font: textFont, textColor: textColor)
+                if case let .stars(stars) = giveawayResults.prize {
+                    let starsString = item.presentationData.strings.Chat_Giveaway_Message_WinnersInfo_Stars(Int32(clamping: stars))
+                    dateTextString = parseMarkdownIntoAttributedString(giveawayResults.winnersCount > 1 ? item.presentationData.strings.Chat_Giveaway_Message_WinnersInfo_Stars_Many(starsString).string : item.presentationData.strings.Chat_Giveaway_Message_WinnersInfo_Stars_One(starsString).string, attributes: MarkdownAttributes(
+                        body: MarkdownAttributeSet(font: textFont, textColor: textColor),
+                        bold: MarkdownAttributeSet(font: boldTextFont, textColor: textColor),
+                        link: MarkdownAttributeSet(font: textFont, textColor: accentColor),
+                        linkAttribute: { url in
+                            return ("URL", url)
+                        }
+                    ), textAlignment: .center)
+                } else {
+                    dateTextString = NSAttributedString(string: giveawayResults.winnersCount > 1 ? item.presentationData.strings.Chat_Giveaway_Message_WinnersInfo_Many : item.presentationData.strings.Chat_Giveaway_Message_WinnersInfo_One, font: textFont, textColor: textColor)
+                }
             }
-            let contentProperties = ChatMessageBubbleContentProperties(hidesSimpleAuthorHeader: true, headerSpacing: 0.0, hidesBackground: .never, forceFullCorners: false, forceAlignment: .none, hidesHeaders: true)
+            let hideHeaders = item.message.forwardInfo == nil
+            let contentProperties = ChatMessageBubbleContentProperties(hidesSimpleAuthorHeader: hideHeaders, headerSpacing: 0.0, hidesBackground: .never, forceFullCorners: false, forceAlignment: .none, hidesHeaders: hideHeaders)
             
             return (contentProperties, nil, CGFloat.greatestFiniteMagnitude, { constrainedSize, position in
                 let sideInsets = layoutConstants.text.bubbleInsets.right * 2.0
@@ -457,7 +512,7 @@ public class ChatMessageGiveawayBubbleContentNode: ChatMessageBubbleContentNode,
                 }
                 var viewCount: Int?
                 var dateReplies = 0
-                var dateReactionsAndPeers = mergedMessageReactionsAndPeers(accountPeer: item.associatedData.accountPeer, message: item.message)
+                var dateReactionsAndPeers = mergedMessageReactionsAndPeers(accountPeerId: item.context.account.peerId, accountPeer: item.associatedData.accountPeer, message: item.message)
                 if item.message.isRestricted(platform: "ios", contentSettings: item.context.currentContentSettings.with { $0 }) {
                     dateReactionsAndPeers = ([], [])
                 }
@@ -516,13 +571,18 @@ public class ChatMessageGiveawayBubbleContentNode: ChatMessageBubbleContentNode,
                         layoutInput: .trailingContent(contentWidth: 1000.0, reactionSettings: shouldDisplayInlineDateReactions(message: item.message, isPremium: item.associatedData.isPremium, forceInline: item.associatedData.forceInlineReactions) ? ChatMessageDateAndStatusNode.TrailingReactionSettings(displayInline: true, preferAdditionalInset: false) : nil),
                         constrainedSize: CGSize(width: constrainedSize.width - sideInsets, height: .greatestFiniteMagnitude),
                         availableReactions: item.associatedData.availableReactions,
+                        savedMessageTags: item.associatedData.savedMessageTags,
                         reactions: dateReactionsAndPeers.reactions,
                         reactionPeers: dateReactionsAndPeers.peers,
                         displayAllReactionPeers: item.message.id.peerId.namespace == Namespaces.Peer.CloudUser,
+                        areReactionsTags: item.topMessage.areReactionsTags(accountPeerId: item.context.account.peerId),
+                        areStarReactionsEnabled: item.associatedData.areStarReactionsEnabled,
+                        messageEffect: item.topMessage.messageEffect(availableMessageEffects: item.associatedData.availableMessageEffects),
                         replyCount: dateReplies,
+                        starsCount: nil,
                         isPinned: item.message.tags.contains(.pinned) && !item.associatedData.isInPinnedListMode && isReplyThread,
                         hasAutoremove: item.message.isSelfExpiring,
-                        canViewReactionList: canViewMessageReactionList(message: item.message),
+                        canViewReactionList: canViewMessageReactionList(message: item.topMessage),
                         animationCache: item.controllerInteraction.presentationContext.animationCache,
                         animationRenderer: item.controllerInteraction.presentationContext.animationRenderer
                     ))
@@ -535,10 +595,24 @@ public class ChatMessageGiveawayBubbleContentNode: ChatMessageBubbleContentNode,
                     titleColor = item.presentationData.theme.theme.chat.message.outgoing.accentTextColor
                 }
                 
-                let (buttonWidth, continueLayout) = makeButtonLayout(constrainedSize.width, nil, false, item.presentationData.strings.Chat_Giveaway_Message_LearnMore.uppercased(), titleColor, false, true)
+                let (buttonWidth, continueLayout) = makeButtonLayout(constrainedSize.width, nil, nil, false, item.presentationData.strings.Chat_Giveaway_Message_LearnMore.uppercased(), titleColor, false, true)
                 
                 let animationName: String
-                let months = giveaway?.months ?? 0
+                var months: Int32 = 0
+                if let giveaway {
+                    switch giveaway.prize {
+                    case let .premium(monthsValue):
+                        months = monthsValue
+                    case let .stars(amount):
+                        if amount <= 1000 {
+                            months = 3
+                        } else if amount < 2500 {
+                            months = 6
+                        } else {
+                            months = 12
+                        }
+                    }
+                }
                 if let _ = giveaway {
                     switch months {
                     case 12:
@@ -637,7 +711,7 @@ public class ChatMessageGiveawayBubbleContentNode: ChatMessageBubbleContentNode,
                             strongSelf.giveaway = giveaway
                             
                             let displaysAsynchronously = !item.presentationData.isPreview
-                            strongSelf.badgeTextNode.displaysAsynchronously = displaysAsynchronously
+                            strongSelf.badgeTextNode.textNode.displaysAsynchronously = displaysAsynchronously
                             strongSelf.prizeTitleNode.displaysAsynchronously = displaysAsynchronously
                             strongSelf.prizeTextNode.displaysAsynchronously = displaysAsynchronously
                             strongSelf.additionalPrizeTextNode.displaysAsynchronously = displaysAsynchronously
@@ -652,7 +726,7 @@ public class ChatMessageGiveawayBubbleContentNode: ChatMessageBubbleContentNode,
                             
                             strongSelf.updateVisibility()
                             
-                            let _ = badgeTextApply()
+                            let _ = badgeTextApply(TextNodeWithEntities.Arguments(context: item.context, cache: item.context.animationCache, renderer: item.context.animationRenderer, placeholderColor: .clear, attemptSynchronous: true))
                             let _ = prizeTitleApply()
                             let _ = prizeTextApply()
                             let _ = additionalPrizeSeparatorApply()
@@ -675,7 +749,7 @@ public class ChatMessageGiveawayBubbleContentNode: ChatMessageBubbleContentNode,
                             strongSelf.animationNode.updateLayout(size: iconSize)
                             
                             let badgeTextFrame = CGRect(origin: CGPoint(x: floorToScreenPixels((layoutSize.width - badgeTextLayout.size.width) / 2.0) + 1.0, y: originY + 88.0), size: badgeTextLayout.size)
-                            strongSelf.badgeTextNode.frame = badgeTextFrame
+                            strongSelf.badgeTextNode.textNode.frame = badgeTextFrame
                             strongSelf.badgeBackgroundNode.frame = badgeTextFrame.insetBy(dx: -6.0, dy: -5.0).offsetBy(dx: -1.0, dy: 0.0)
                             if let updatedBadgeImage {
                                 strongSelf.badgeBackgroundNode.image = updatedBadgeImage
@@ -850,6 +924,13 @@ public class ChatMessageGiveawayBubbleContentNode: ChatMessageBubbleContentNode,
     override public func reactionTargetView(value: MessageReaction.Reaction) -> UIView? {
         if !self.dateAndStatusNode.isHidden {
             return self.dateAndStatusNode.reactionView(value: value)
+        }
+        return nil
+    }
+    
+    override public func messageEffectTargetView() -> UIView? {
+        if !self.dateAndStatusNode.isHidden {
+            return self.dateAndStatusNode.messageEffectTargetView()
         }
         return nil
     }

@@ -159,7 +159,7 @@ private final class TitleFieldComponent: Component {
             return true
         }
         
-        func update(component: TitleFieldComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: Transition) -> CGSize {
+        func update(component: TitleFieldComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: ComponentTransition) -> CGSize {
             self.textField.textColor = component.textColor
             self.textField.text = component.text
             self.textField.font = Font.regular(17.0)
@@ -169,7 +169,7 @@ private final class TitleFieldComponent: Component {
             
             let iconContent: EmojiStatusComponent.Content
             if component.isGeneral {
-                iconContent = .image(image: generateTintedImage(image: UIImage(bundleImageName: "Chat List/GeneralTopicIcon"), color: component.placeholderColor))
+                iconContent = .image(image: generateTintedImage(image: UIImage(bundleImageName: "Chat List/GeneralTopicIcon"), color: component.placeholderColor), tintColor: nil)
                 self.iconButton.isUserInteractionEnabled = false
             } else if component.fileId == 0 {
                 iconContent = .topic(title: String(component.text.prefix(1)), color: component.iconColor, size: CGSize(width: 32.0, height: 32.0))
@@ -237,7 +237,7 @@ private final class TitleFieldComponent: Component {
         return View(frame: CGRect())
     }
     
-    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: Transition) -> CGSize {
+    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
 }
@@ -322,7 +322,7 @@ private final class TopicIconSelectionComponent: Component {
         deinit {
         }
         
-        func update(component: TopicIconSelectionComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: Transition) -> CGSize {
+        func update(component: TopicIconSelectionComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: ComponentTransition) -> CGSize {
             self.backgroundColor = component.backgroundColor
             let panelBackgroundColor = component.backgroundColor.withMultipliedAlpha(0.85)
             self.panelBackgroundView.updateColor(color: panelBackgroundColor, transition: .immediate)
@@ -402,7 +402,7 @@ private final class TopicIconSelectionComponent: Component {
         return View(frame: CGRect())
     }
     
-    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: Transition) -> CGSize {
+    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
 }
@@ -910,7 +910,7 @@ private final class ForumCreateTopicScreenComponent: CombinedComponent {
                                 }
                                 for featuredEmojiPack in view.items.lazy.map({ $0.contents.get(FeaturedStickerPackItem.self)! }) {
                                     if featuredEmojiPack.info.id == collectionId {
-                                        let _ = accountContext.engine.stickers.addStickerPackInteractively(info: featuredEmojiPack.info, items: featuredEmojiPack.topItems).start()
+                                        let _ = accountContext.engine.stickers.addStickerPackInteractively(info: featuredEmojiPack.info._parse(), items: featuredEmojiPack.topItems).start()
                                         
                                         break
                                     }
@@ -918,6 +918,8 @@ private final class ForumCreateTopicScreenComponent: CombinedComponent {
                             })
                         },
                         clearGroup: { _ in
+                        },
+                        editAction: { _ in
                         },
                         pushController: { c in
                         },

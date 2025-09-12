@@ -66,14 +66,23 @@ public final class CallKitIntegration {
     }
     
     func answerCall(uuid: UUID) {
+        #if DEBUG
+        print("CallKitIntegration: Answer call \(uuid)")
+        #endif
         sharedProviderDelegate?.answerCall(uuid: uuid)
     }
     
     public func dropCall(uuid: UUID) {
+        #if DEBUG
+        print("CallKitIntegration: Drop call \(uuid)")
+        #endif
         sharedProviderDelegate?.dropCall(uuid: uuid)
     }
     
     public func reportIncomingCall(uuid: UUID, stableId: Int64, handle: String, phoneNumber: String?, isVideo: Bool, displayTitle: String, completion: ((NSError?) -> Void)?) {
+        #if DEBUG
+        print("CallKitIntegration: Report incoming call \(uuid)")
+        #endif
         sharedProviderDelegate?.reportIncomingCall(uuid: uuid, stableId: stableId, handle: handle, phoneNumber: phoneNumber, isVideo: isVideo, displayTitle: displayTitle, completion: completion)
     }
     
@@ -85,7 +94,7 @@ public final class CallKitIntegration {
         let handle = INPersonHandle(value: "tg\(peerId.id._internalGetInt64Value())", type: .unknown)
         let contact = INPerson(personHandle: handle, nameComponents: nil, displayName: displayTitle, image: nil, contactIdentifier: localContactId, customIdentifier: "tg\(peerId.id._internalGetInt64Value())")
     
-        let intent = INStartAudioCallIntent(destinationType: .normal, contacts: [contact])
+        let intent = INStartCallIntent(audioRoute: .unknown, destinationType: .normal, contacts: [contact], recordTypeForRedialing: .unknown, callCapability: .audioCall)
         
         let interaction = INInteraction(intent: intent, response: nil)
         interaction.direction = .outgoing
@@ -95,6 +104,10 @@ public final class CallKitIntegration {
     
     public func applyVoiceChatOutputMode(outputMode: AudioSessionOutputMode) {
         sharedProviderDelegate?.applyVoiceChatOutputMode(outputMode: outputMode)
+    }
+    
+    public func updateCallIsConference(uuid: UUID, title: String) {
+        sharedProviderDelegate?.updateCallIsConference(uuid: uuid, title: title)
     }
 }
 
@@ -181,6 +194,8 @@ class CallKitProviderDelegate: NSObject, CXProviderDelegate {
     }
     
     func dropCall(uuid: UUID) {
+        self.alreadyReportedIncomingCalls.insert(uuid)
+        
         Logger.shared.log("CallKitIntegration", "report call ended \(uuid)")
         
         self.provider.reportCall(with: uuid, endedAt: nil, reason: CXCallEndedReason.remoteEnded)
@@ -278,6 +293,19 @@ class CallKitProviderDelegate: NSObject, CXProviderDelegate {
         self.provider.reportOutgoingCall(with: uuid, connectedAt: date)
     }
     
+    func updateCallIsConference(uuid: UUID, title: String) {
+        let update = CXCallUpdate()
+        let handle = CXHandle(type: .generic, value: "\(uuid)")
+        update.remoteHandle = handle
+        update.localizedCallerName = title
+        update.supportsHolding = false
+        update.supportsGrouping = false
+        update.supportsUngrouping = false
+        update.supportsDTMF = false
+        
+        self.provider.reportCall(with: uuid, updated: update)
+    }
+    
     func providerDidReset(_ provider: CXProvider) {
         Logger.shared.log("CallKitIntegration", "providerDidReset")
         
@@ -366,7 +394,7 @@ class CallKitProviderDelegate: NSObject, CXProviderDelegate {
         
         if let outputMode = self.pendingVoiceChatOutputMode {
             self.pendingVoiceChatOutputMode = nil
-            ManagedAudioSession.shared?.applyVoiceChatOutputModeInCurrentAudioSession(outputMode: outputMode)
+            sharedManagedAudioSession?.applyVoiceChatOutputModeInCurrentAudioSession(outputMode: outputMode)
         }
     }
     
@@ -379,7 +407,7 @@ class CallKitProviderDelegate: NSObject, CXProviderDelegate {
     
     func applyVoiceChatOutputMode(outputMode: AudioSessionOutputMode) {
         if self.isAudioSessionActive {
-            ManagedAudioSession.shared?.applyVoiceChatOutputModeInCurrentAudioSession(outputMode: outputMode)
+            sharedManagedAudioSession?.applyVoiceChatOutputModeInCurrentAudioSession(outputMode: outputMode)
         } else {
             self.pendingVoiceChatOutputMode = outputMode
         }

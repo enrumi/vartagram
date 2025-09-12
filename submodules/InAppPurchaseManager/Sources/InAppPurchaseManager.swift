@@ -26,7 +26,27 @@ private let productIdentifiers = [
     
     "org.telegram.telegramPremium.threeMonths.code_x10",
     "org.telegram.telegramPremium.sixMonths.code_x10",
-    "org.telegram.telegramPremium.twelveMonths.code_x10"
+    "org.telegram.telegramPremium.twelveMonths.code_x10",
+    
+    "org.telegram.telegramPremium.oneWeek.auth",
+    
+    "org.telegram.telegramStars.topup.x15",
+    "org.telegram.telegramStars.topup.x25",
+    "org.telegram.telegramStars.topup.x50",
+    "org.telegram.telegramStars.topup.x75",
+    "org.telegram.telegramStars.topup.x100",
+    "org.telegram.telegramStars.topup.x150",
+    "org.telegram.telegramStars.topup.x250",
+    "org.telegram.telegramStars.topup.x350",
+    "org.telegram.telegramStars.topup.x500",
+    "org.telegram.telegramStars.topup.x750",
+    "org.telegram.telegramStars.topup.x1000",
+    "org.telegram.telegramStars.topup.x1500",
+    "org.telegram.telegramStars.topup.x2500",
+    "org.telegram.telegramStars.topup.x5000",
+    "org.telegram.telegramStars.topup.x10000",
+    "org.telegram.telegramStars.topup.x25000",
+    "org.telegram.telegramStars.topup.x35000"
 ]
 
 private extension NSDecimalNumber {
@@ -170,6 +190,7 @@ public final class InAppPurchaseManager: NSObject {
         case notAllowed
         case cantMakePayments
         case assignFailed
+        case tryLater
     }
     
     public enum RestoreState {
@@ -197,7 +218,7 @@ public final class InAppPurchaseManager: NSObject {
         case deferred
     }
     
-    private let engine: TelegramEngine
+    private let engine: SomeTelegramEngine
     
     private var products: [Product] = []
     private var productsPromise = Promise<[Product]>([])
@@ -205,12 +226,16 @@ public final class InAppPurchaseManager: NSObject {
     
     private let stateQueue = Queue()
     private var paymentContexts: [String: PaymentTransactionContext] = [:]
+    
+    private var finishedSuccessfulTransactions = Set<String>()
         
     private var onRestoreCompletion: ((RestoreState) -> Void)?
     
     private let disposableSet = DisposableDict<String>()
     
-    public init(engine: TelegramEngine) {
+    private var lastRequestTimestamp: Double?
+
+    public init(engine: SomeTelegramEngine) {
         self.engine = engine
                 
         super.init()
@@ -234,11 +259,15 @@ public final class InAppPurchaseManager: NSObject {
         productRequest.start()
         
         self.productRequest = productRequest
+        self.lastRequestTimestamp = CFAbsoluteTimeGetCurrent()
     }
     
     public var availableProducts: Signal<[Product], NoError> {
-        if self.products.isEmpty && self.productRequest == nil {
-            self.requestProducts()
+        if self.products.isEmpty {
+            if let lastRequestTimestamp, CFAbsoluteTimeGetCurrent() - lastRequestTimestamp > 10.0 {
+                Logger.shared.log("InAppPurchaseManager", "No available products, rerequest")
+                self.requestProducts()
+            }
         }
         return self.productsPromise.get()
     }
@@ -266,7 +295,13 @@ public final class InAppPurchaseManager: NSObject {
             return .fail(.cantMakePayments)
         }
                 
-        let accountPeerId = "\(self.engine.account.peerId.toInt64())"
+        let accountPeerId: String
+        switch self.engine {
+        case let .authorized(engine):
+            accountPeerId = "\(engine.account.peerId.toInt64())"
+        case let .unauthorized(engine):
+            accountPeerId = "\(engine.account.id.int64)"
+        }
         
         Logger.shared.log("InAppPurchaseManager", "Buying: account \(accountPeerId), product \(product.skProduct.productIdentifier), price \(product.price)")
         
@@ -301,6 +336,12 @@ public final class InAppPurchaseManager: NSObject {
                                         mappedError = .network
                                     case .paymentNotAllowed, .clientInvalid:
                                         mappedError = .notAllowed
+                                    case .unknown:
+                                        if let _ = error.userInfo["tryLater"] {
+                                            mappedError = .tryLater
+                                        } else {
+                                            mappedError = .generic
+                                        }
                                     default:
                                         mappedError = .generic
                                 }
@@ -372,7 +413,13 @@ private func getReceiptData() -> Data? {
 extension InAppPurchaseManager: SKPaymentTransactionObserver {
     public func paymentQueue(_ queue: SKPaymentQueue, updatedTransactions transactions: [SKPaymentTransaction]) {
         self.stateQueue.async {
-            let accountPeerId = "\(self.engine.account.peerId.toInt64())"
+            let accountPeerId: String
+            switch self.engine {
+            case let .authorized(engine):
+                accountPeerId = "\(engine.account.peerId.toInt64())"
+            case let .unauthorized(engine):
+                accountPeerId = "\(engine.account.id.int64)"
+            }
             
             let paymentContexts = self.paymentContexts
             
@@ -386,9 +433,15 @@ extension InAppPurchaseManager: SKPaymentTransactionObserver {
                 let transactionState: TransactionState?
                 switch transaction.transactionState {
                     case .purchased:
-                        Logger.shared.log("InAppPurchaseManager", "Account \(accountPeerId), transaction \(transaction.transactionIdentifier ?? ""), original transaction \(transaction.original?.transactionIdentifier ?? "none") purchased")
-                        transactionState = .purchased(transactionId: transaction.transactionIdentifier)
-                        transactionsToAssign.append(transaction)
+                        if transaction.payment.productIdentifier.contains(".topup."), let transactionIdentifier = transaction.transactionIdentifier, self.finishedSuccessfulTransactions.contains(transactionIdentifier) {
+                            Logger.shared.log("InAppPurchaseManager", "Account \(accountPeerId), transaction \(transaction.transactionIdentifier ?? ""), original transaction \(transaction.original?.transactionIdentifier ?? "none") seems to be already reported, ask to try later")
+                            transactionState = .failed(error: SKError(SKError.Code.unknown, userInfo: ["tryLater": true]))
+                            queue.finishTransaction(transaction)
+                        } else {
+                            Logger.shared.log("InAppPurchaseManager", "Account \(accountPeerId), transaction \(transaction.transactionIdentifier ?? ""), original transaction \(transaction.original?.transactionIdentifier ?? "none") purchased")
+                            transactionState = .purchased(transactionId: transaction.transactionIdentifier)
+                            transactionsToAssign.append(transaction)
+                        }
                     case .restored:
                         Logger.shared.log("InAppPurchaseManager", "Account \(accountPeerId), transaction \(transaction.transactionIdentifier ?? ""), original transaction \(transaction.original?.transactionIdentifier ?? "") restroring")
                         let transactionIdentifier = transaction.transactionIdentifier
@@ -440,7 +493,6 @@ extension InAppPurchaseManager: SKPaymentTransactionObserver {
                 }
                 |> take(1)
                 
-
                 let product: Signal<InAppPurchaseManager.Product?, NoError> = products
                 |> map { products in
                     if let product = products.first(where: { $0.id == productIdentifier }) {
@@ -469,26 +521,30 @@ extension InAppPurchaseManager: SKPaymentTransactionObserver {
                         }
                     }
                 }
+                
                 completion = updatePendingInAppPurchaseState(engine: self.engine, productId: productIdentifier, content: nil)
                 
                 let receiptData = getReceiptData() ?? Data()
-                
 #if DEBUG
-                let id = Int64.random(in: Int64.min ... Int64.max)
-                let fileResource = LocalFileMediaResource(fileId: id, size: Int64(receiptData.count), isSecretRelated: false)
-                self.engine.account.postbox.mediaBox.storeResourceData(fileResource.id, data: receiptData)
-
-                let file = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: id), partialReference: nil, resource: fileResource, previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: nil, mimeType: "application/text", size: Int64(receiptData.count), attributes: [.FileName(fileName: "Receipt.dat")])
-                let message: EnqueueMessage = .message(text: "", attributes: [], inlineStickers: [:], mediaReference: .standalone(media: file), threadId: nil, replyToMessageId: nil, replyToStoryId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])
-
-                let _ = enqueueMessages(account: self.engine.account, peerId: self.engine.account.peerId, messages: [message]).start()
+                self.debugSaveReceipt(receiptData: receiptData)
 #endif
+                
+                for transaction in transactionsToAssign {
+                    if let transactionIdentifier = transaction.transactionIdentifier {
+                        self.finishedSuccessfulTransactions.insert(transactionIdentifier)
+                    }
+                }
                 
                 self.disposableSet.set(
                     (purpose
                     |> castError(AssignAppStoreTransactionError.self)
                     |> mapToSignal { purpose -> Signal<Never, AssignAppStoreTransactionError> in
-                        return self.engine.payments.sendAppStoreReceipt(receipt: receiptData, purpose: purpose)
+                        switch self.engine {
+                        case let .authorized(engine):
+                            return engine.payments.sendAppStoreReceipt(receipt: receiptData, purpose: purpose)
+                        case let .unauthorized(engine):
+                            return engine.payments.sendAppStoreReceipt(receipt: receiptData, purpose: purpose)
+                        }
                     }).start(error: { [weak self] _ in
                         Logger.shared.log("InAppPurchaseManager", "Account \(accountPeerId), transactions [\(transactionIds)] failed to assign")
                         for transaction in transactions {
@@ -520,8 +576,15 @@ extension InAppPurchaseManager: SKPaymentTransactionObserver {
                 self.onRestoreCompletion = nil
                 
                 if let receiptData = getReceiptData() {
+                    let signal: Signal<Never, AssignAppStoreTransactionError>
+                    switch self.engine {
+                    case let .authorized(engine):
+                        signal = engine.payments.sendAppStoreReceipt(receipt: receiptData, purpose: .restore)
+                    case let .unauthorized(engine):
+                        signal = engine.payments.sendAppStoreReceipt(receipt: receiptData, purpose: .restore)
+                    }
                     self.disposableSet.set(
-                        self.engine.payments.sendAppStoreReceipt(receipt: receiptData, purpose: .restore).start(error: { error in
+                        signal.start(error: { error in
                             Queue.mainQueue().async {
                                 if case .serverProvided = error {
                                     onRestoreCompletion(.succeed(true))
@@ -553,6 +616,20 @@ extension InAppPurchaseManager: SKPaymentTransactionObserver {
             }
         }
     }
+    
+    private func debugSaveReceipt(receiptData: Data) {
+        guard case let .authorized(engine) = self.engine else {
+            return
+        }
+        let id = Int64.random(in: Int64.min ... Int64.max)
+        let fileResource = LocalFileMediaResource(fileId: id, size: Int64(receiptData.count), isSecretRelated: false)
+        engine.account.postbox.mediaBox.storeResourceData(fileResource.id, data: receiptData)
+
+        let file = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: id), partialReference: nil, resource: fileResource, previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: nil, mimeType: "application/text", size: Int64(receiptData.count), attributes: [.FileName(fileName: "Receipt.dat")], alternativeRepresentations: [])
+        let message: EnqueueMessage = .message(text: "", attributes: [], inlineStickers: [:], mediaReference: .standalone(media: file), threadId: nil, replyToMessageId: nil, replyToStoryId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])
+
+        let _ = enqueueMessages(account: engine.account, peerId: engine.account.peerId, messages: [message]).start()
+    }
 }
 
 private final class PendingInAppPurchaseState: Codable {
@@ -579,6 +656,13 @@ private final class PendingInAppPurchaseState: Codable {
             case prizeDescription
             case randomId
             case untilDate
+            case stars
+            case users
+            case text
+            case entities
+            case restore
+            case phoneNumber
+            case phoneCodeHash
         }
         
         enum PurposeType: Int32 {
@@ -588,14 +672,22 @@ private final class PendingInAppPurchaseState: Codable {
             case gift
             case giftCode
             case giveaway
+            case stars
+            case starsGift
+            case starsGiveaway
+            case authCode
         }
         
         case subscription
         case upgrade
         case restore
         case gift(peerId: EnginePeer.Id)
-        case giftCode(peerIds: [EnginePeer.Id], boostPeer: EnginePeer.Id?)
+        case giftCode(peerIds: [EnginePeer.Id], boostPeer: EnginePeer.Id?, text: String?, entities: [MessageTextEntity]?)
         case giveaway(boostPeer: EnginePeer.Id, additionalPeerIds: [EnginePeer.Id], countries: [String], onlyNewSubscribers: Bool, showWinners: Bool, prizeDescription: String?, randomId: Int64, untilDate: Int32)
+        case stars(count: Int64, peerId: EnginePeer.Id?)
+        case starsGift(peerId: EnginePeer.Id, count: Int64)
+        case starsGiveaway(stars: Int64, boostPeer: EnginePeer.Id, additionalPeerIds: [EnginePeer.Id], countries: [String], onlyNewSubscribers: Bool, showWinners: Bool, prizeDescription: String?, randomId: Int64, untilDate: Int32, users: Int32)
+        case authCode(restore: Bool, phoneNumber: String, phoneCodeHash: String)
         
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -615,7 +707,9 @@ private final class PendingInAppPurchaseState: Codable {
             case .giftCode:
                 self = .giftCode(
                     peerIds: try container.decode([Int64].self, forKey: .peers).map { EnginePeer.Id($0) },
-                    boostPeer: try container.decodeIfPresent(Int64.self, forKey: .boostPeer).flatMap({ EnginePeer.Id($0) })
+                    boostPeer: try container.decodeIfPresent(Int64.self, forKey: .boostPeer).flatMap({ EnginePeer.Id($0) }),
+                    text: try container.decodeIfPresent(String.self, forKey: .text),
+                    entities: try container.decodeIfPresent([MessageTextEntity].self, forKey: .entities)
                 )
             case .giveaway:
                 self = .giveaway(
@@ -627,6 +721,35 @@ private final class PendingInAppPurchaseState: Codable {
                     prizeDescription: try container.decodeIfPresent(String.self, forKey: .prizeDescription),
                     randomId: try container.decode(Int64.self, forKey: .randomId),
                     untilDate: try container.decode(Int32.self, forKey: .untilDate)
+                )
+            case .stars:
+                self = .stars(
+                    count: try container.decode(Int64.self, forKey: .stars),
+                    peerId: try container.decodeIfPresent(Int64.self, forKey: .peer).flatMap { EnginePeer.Id($0) }
+                )
+            case .starsGift:
+                self = .starsGift(
+                    peerId: EnginePeer.Id(try container.decode(Int64.self, forKey: .peer)),
+                    count: try container.decode(Int64.self, forKey: .stars)
+                )
+            case .starsGiveaway:
+                self = .starsGiveaway(
+                    stars: try container.decode(Int64.self, forKey: .stars),
+                    boostPeer: EnginePeer.Id(try container.decode(Int64.self, forKey: .boostPeer)),
+                    additionalPeerIds: try container.decode([Int64].self, forKey: .randomId).map { EnginePeer.Id($0) },
+                    countries: try container.decodeIfPresent([String].self, forKey: .countries) ?? [],
+                    onlyNewSubscribers: try container.decode(Bool.self, forKey: .onlyNewSubscribers),
+                    showWinners: try container.decodeIfPresent(Bool.self, forKey: .showWinners) ?? false,
+                    prizeDescription: try container.decodeIfPresent(String.self, forKey: .prizeDescription),
+                    randomId: try container.decode(Int64.self, forKey: .randomId),
+                    untilDate: try container.decode(Int32.self, forKey: .untilDate),
+                    users: try container.decode(Int32.self, forKey: .users)
+                )
+            case .authCode:
+                self = .authCode(
+                    restore: try container.decode(Bool.self, forKey: .restore),
+                    phoneNumber: try container.decode(String.self, forKey: .phoneNumber),
+                    phoneCodeHash: try container.decode(String.self, forKey: .phoneCodeHash)
                 )
             default:
                 throw DecodingError.generic
@@ -646,10 +769,12 @@ private final class PendingInAppPurchaseState: Codable {
             case let .gift(peerId):
                 try container.encode(PurposeType.gift.rawValue, forKey: .type)
                 try container.encode(peerId.toInt64(), forKey: .peer)
-            case let .giftCode(peerIds, boostPeer):
+            case let .giftCode(peerIds, boostPeer, text, entities):
                 try container.encode(PurposeType.giftCode.rawValue, forKey: .type)
                 try container.encode(peerIds.map { $0.toInt64() }, forKey: .peers)
                 try container.encodeIfPresent(boostPeer?.toInt64(), forKey: .boostPeer)
+                try container.encodeIfPresent(text, forKey: .text)
+                try container.encodeIfPresent(entities, forKey: .entities)
             case let .giveaway(boostPeer, additionalPeerIds, countries, onlyNewSubscribers, showWinners, prizeDescription, randomId, untilDate):
                 try container.encode(PurposeType.giveaway.rawValue, forKey: .type)
                 try container.encode(boostPeer.toInt64(), forKey: .boostPeer)
@@ -660,6 +785,31 @@ private final class PendingInAppPurchaseState: Codable {
                 try container.encodeIfPresent(prizeDescription, forKey: .prizeDescription)
                 try container.encode(randomId, forKey: .randomId)
                 try container.encode(untilDate, forKey: .untilDate)
+            case let .stars(count, peerId):
+                try container.encode(PurposeType.stars.rawValue, forKey: .type)
+                try container.encode(count, forKey: .stars)
+                try container.encodeIfPresent(peerId?.toInt64(), forKey: .peer)
+            case let .starsGift(peerId, count):
+                try container.encode(PurposeType.starsGift.rawValue, forKey: .type)
+                try container.encode(peerId.toInt64(), forKey: .peer)
+                try container.encode(count, forKey: .stars)
+            case let .starsGiveaway(stars, boostPeer, additionalPeerIds, countries, onlyNewSubscribers, showWinners, prizeDescription, randomId, untilDate, users):
+                try container.encode(PurposeType.starsGiveaway.rawValue, forKey: .type)
+                try container.encode(stars, forKey: .stars)
+                try container.encode(boostPeer.toInt64(), forKey: .boostPeer)
+                try container.encode(additionalPeerIds.map { $0.toInt64() }, forKey: .additionalPeerIds)
+                try container.encode(countries, forKey: .countries)
+                try container.encode(onlyNewSubscribers, forKey: .onlyNewSubscribers)
+                try container.encode(showWinners, forKey: .showWinners)
+                try container.encodeIfPresent(prizeDescription, forKey: .prizeDescription)
+                try container.encode(randomId, forKey: .randomId)
+                try container.encode(untilDate, forKey: .untilDate)
+                try container.encode(users, forKey: .users)
+            case let .authCode(restore, phoneNumber, phoneCodeHash):
+                try container.encode(PurposeType.authCode.rawValue, forKey: .type)
+                try container.encode(restore, forKey: .restore)
+                try container.encode(phoneNumber, forKey: .phoneNumber)
+                try container.encode(phoneCodeHash, forKey: .phoneCodeHash)
             }
         }
         
@@ -673,10 +823,18 @@ private final class PendingInAppPurchaseState: Codable {
                 self = .restore
             case let .gift(peerId, _, _):
                 self = .gift(peerId: peerId)
-            case let .giftCode(peerIds, boostPeer, _, _):
-                self = .giftCode(peerIds: peerIds, boostPeer: boostPeer)
+            case let .giftCode(peerIds, boostPeer, _, _, text, entities):
+                self = .giftCode(peerIds: peerIds, boostPeer: boostPeer, text: text, entities: entities)
             case let .giveaway(boostPeer, additionalPeerIds, countries, onlyNewSubscribers, showWinners, prizeDescription, randomId, untilDate, _, _):
                 self = .giveaway(boostPeer: boostPeer, additionalPeerIds: additionalPeerIds, countries: countries, onlyNewSubscribers: onlyNewSubscribers, showWinners: showWinners, prizeDescription: prizeDescription, randomId: randomId, untilDate: untilDate)
+            case let .stars(count, _, _, peerId):
+                self = .stars(count: count, peerId: peerId)
+            case let .starsGift(peerId, count, _, _):
+                self = .starsGift(peerId: peerId, count: count)
+            case let .starsGiveaway(stars, boostPeer, additionalPeerIds, countries, onlyNewSubscribers, showWinners, prizeDescription, randomId, untilDate, _, _, users):
+                self = .starsGiveaway(stars: stars, boostPeer: boostPeer, additionalPeerIds: additionalPeerIds, countries: countries, onlyNewSubscribers: onlyNewSubscribers, showWinners: showWinners, prizeDescription: prizeDescription, randomId: randomId, untilDate: untilDate, users: users)
+            case let .authCode(restore, phoneNumber, phoneCodeHash, _, _):
+                self = .authCode(restore: restore, phoneNumber: phoneNumber, phoneCodeHash: phoneCodeHash)
             }
         }
         
@@ -691,10 +849,18 @@ private final class PendingInAppPurchaseState: Codable {
                 return .restore
             case let .gift(peerId):
                 return .gift(peerId: peerId, currency: currency, amount: amount)
-            case let .giftCode(peerIds, boostPeer):
-                return .giftCode(peerIds: peerIds, boostPeer: boostPeer, currency: currency, amount: amount)
+            case let .giftCode(peerIds, boostPeer, text, entities):
+                return .giftCode(peerIds: peerIds, boostPeer: boostPeer, currency: currency, amount: amount, text: text, entities: entities)
             case let .giveaway(boostPeer, additionalPeerIds, countries, onlyNewSubscribers, showWinners, prizeDescription, randomId, untilDate):
                 return .giveaway(boostPeer: boostPeer, additionalPeerIds: additionalPeerIds, countries: countries, onlyNewSubscribers: onlyNewSubscribers, showWinners: showWinners, prizeDescription: prizeDescription, randomId: randomId, untilDate: untilDate, currency: currency, amount: amount)
+            case let .stars(count, peerId):
+                return .stars(count: count, currency: currency, amount: amount, peerId: peerId)
+            case let .starsGift(peerId, count):
+                return .starsGift(peerId: peerId, count: count, currency: currency, amount: amount)
+            case let .starsGiveaway(stars, boostPeer, additionalPeerIds, countries, onlyNewSubscribers, showWinners, prizeDescription, randomId, untilDate, users):
+                return .starsGiveaway(stars: stars, boostPeer: boostPeer, additionalPeerIds: additionalPeerIds, countries: countries, onlyNewSubscribers: onlyNewSubscribers, showWinners: showWinners, prizeDescription: prizeDescription, randomId: randomId, untilDate: untilDate, currency: currency, amount: amount, users: users)
+            case let .authCode(restore, phoneNumber, phoneCodeHash):
+                return .authCode(restore: restore, phoneNumber: phoneNumber, phoneCodeHash: phoneCodeHash, currency: currency, amount: amount)
             }
         }
     }
@@ -722,23 +888,41 @@ private final class PendingInAppPurchaseState: Codable {
     }
 }
 
-private func pendingInAppPurchaseState(engine: TelegramEngine, productId: String) -> Signal<PendingInAppPurchaseState?, NoError> {
+private func pendingInAppPurchaseState(engine: SomeTelegramEngine, productId: String) -> Signal<PendingInAppPurchaseState?, NoError> {
     let key = EngineDataBuffer(length: 8)
     key.setInt64(0, value: Int64(bitPattern: productId.persistentHashValue))
     
-    return engine.data.get(TelegramEngine.EngineData.Item.ItemCache.Item(collectionId: ApplicationSpecificItemCacheCollectionId.pendingInAppPurchaseState, id: key))
-    |> map { entry -> PendingInAppPurchaseState? in
-        return entry?.get(PendingInAppPurchaseState.self)
+    switch engine {
+    case let .authorized(engine):
+        return engine.data.get(TelegramEngine.EngineData.Item.ItemCache.Item(collectionId: ApplicationSpecificItemCacheCollectionId.pendingInAppPurchaseState, id: key))
+        |> map { entry -> PendingInAppPurchaseState? in
+            return entry?.get(PendingInAppPurchaseState.self)
+        }
+    case let .unauthorized(engine):
+        return engine.itemCache.get(collectionId: ApplicationSpecificItemCacheCollectionId.pendingInAppPurchaseState, id: key)
+        |> map { entry -> PendingInAppPurchaseState? in
+            return entry?.get(PendingInAppPurchaseState.self)
+        }
     }
 }
 
-private func updatePendingInAppPurchaseState(engine: TelegramEngine, productId: String, content: PendingInAppPurchaseState?) -> Signal<Never, NoError> {
+private func updatePendingInAppPurchaseState(engine: SomeTelegramEngine, productId: String, content: PendingInAppPurchaseState?) -> Signal<Never, NoError> {
     let key = EngineDataBuffer(length: 8)
     key.setInt64(0, value: Int64(bitPattern: productId.persistentHashValue))
     
-    if let content = content {
-        return engine.itemCache.put(collectionId: ApplicationSpecificItemCacheCollectionId.pendingInAppPurchaseState, id: key, item: content)
-    } else {
-        return engine.itemCache.remove(collectionId: ApplicationSpecificItemCacheCollectionId.pendingInAppPurchaseState, id: key)
+    
+    switch engine {
+    case let .authorized(engine):
+        if let content = content {
+            return engine.itemCache.put(collectionId: ApplicationSpecificItemCacheCollectionId.pendingInAppPurchaseState, id: key, item: content)
+        } else {
+            return engine.itemCache.remove(collectionId: ApplicationSpecificItemCacheCollectionId.pendingInAppPurchaseState, id: key)
+        }
+    case let .unauthorized(engine):
+        if let content = content {
+            return engine.itemCache.put(collectionId: ApplicationSpecificItemCacheCollectionId.pendingInAppPurchaseState, id: key, item: content)
+        } else {
+            return engine.itemCache.remove(collectionId: ApplicationSpecificItemCacheCollectionId.pendingInAppPurchaseState, id: key)
+        }
     }
 }

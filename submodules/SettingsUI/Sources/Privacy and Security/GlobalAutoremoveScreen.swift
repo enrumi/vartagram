@@ -315,7 +315,6 @@ public func globalAutoremoveScreen(context: AccountContext, initialValue: Int32,
                     chatListFilters: nil,
                     displayAutoremoveTimeout: true
                 )),
-                options: [],
                 filters: [.excludeSelf],
                 isPeerEnabled: { peer in
                     var canManage = false
@@ -335,7 +334,7 @@ public func globalAutoremoveScreen(context: AccountContext, initialValue: Int32,
                     }
                     return canManage
                 },
-                attemptDisabledItemSelection: { peer in
+                attemptDisabledItemSelection: { peer, _ in
                     let presentationData = context.sharedContext.currentPresentationData.with { $0 }
                     
                     let text: String

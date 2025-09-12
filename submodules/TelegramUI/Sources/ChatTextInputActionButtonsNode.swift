@@ -12,8 +12,122 @@ import ChatControllerInteraction
 import AccountContext
 import ChatTextInputMediaRecordingButton
 import ChatSendButtonRadialStatusNode
+import ChatSendMessageActionUI
+import ComponentFlow
+import AnimatedCountLabelNode
 
-final class ChatTextInputActionButtonsNode: ASDisplayNode {
+private final class EffectBadgeView: UIView {
+    private let context: AccountContext
+    private var currentEffectId: Int64?
+    
+    private let backgroundView: UIImageView
+    
+    private var theme: PresentationTheme?
+    
+    private var effect: AvailableMessageEffects.MessageEffect?
+    private var effectIcon: ComponentView<Empty>?
+    
+    private let effectDisposable = MetaDisposable()
+    
+    init(context: AccountContext) {
+        self.context = context
+        self.backgroundView = UIImageView()
+        
+        super.init(frame: CGRect())
+        
+        self.isUserInteractionEnabled = false
+        
+        self.addSubview(self.backgroundView)
+    }
+    
+    required init(coder: NSCoder) {
+        preconditionFailure()
+    }
+    
+    deinit {
+        self.effectDisposable.dispose()
+    }
+    
+    func update(size: CGSize, theme: PresentationTheme, effectId: Int64) {
+        if self.theme !== theme {
+            self.theme = theme
+            self.backgroundView.image = generateFilledCircleImage(diameter: size.width, color: theme.list.plainBackgroundColor, strokeColor: nil, strokeWidth: nil, backgroundColor: nil)
+            self.backgroundView.layer.shadowPath = UIBezierPath(ovalIn: CGRect(origin: CGPoint(), size: size)).cgPath
+            self.backgroundView.layer.shadowColor = UIColor(white: 0.0, alpha: 1.0).cgColor
+            self.backgroundView.layer.shadowOpacity = 0.14
+            self.backgroundView.layer.shadowOffset = CGSize(width: 0.0, height: 1.0)
+            self.backgroundView.layer.shadowRadius = 1.0
+        }
+        
+        self.backgroundView.frame = CGRect(origin: CGPoint(), size: size)
+        
+        if self.currentEffectId != effectId {
+            self.currentEffectId = effectId
+            
+            let messageEffect = self.context.engine.stickers.availableMessageEffects()
+            |> take(1)
+            |> map { availableMessageEffects -> AvailableMessageEffects.MessageEffect? in
+                guard let availableMessageEffects else {
+                    return nil
+                }
+                for messageEffect in availableMessageEffects.messageEffects {
+                    if messageEffect.id == effectId || messageEffect.effectSticker.fileId.id == effectId {
+                        return messageEffect
+                    }
+                }
+                return nil
+            }
+            
+            self.effectDisposable.set((messageEffect |> deliverOnMainQueue).start(next: { [weak self] effect in
+                guard let self, let effect else {
+                    return
+                }
+                self.effect = effect
+                self.updateIcon()
+            }))
+        }
+    }
+    
+    private func updateIcon() {
+        guard let effect else {
+            return
+        }
+        
+        let effectIcon: ComponentView<Empty>
+        if let current = self.effectIcon {
+            effectIcon = current
+        } else {
+            effectIcon = ComponentView()
+            self.effectIcon = effectIcon
+        }
+        let effectIconContent: ChatSendMessageScreenEffectIcon.Content
+        if let staticIcon = effect.staticIcon {
+            effectIconContent = .file(staticIcon._parse())
+        } else {
+            effectIconContent = .text(effect.emoticon)
+        }
+        let effectIconSize = effectIcon.update(
+            transition: .immediate,
+            component: AnyComponent(ChatSendMessageScreenEffectIcon(
+                context: self.context,
+                content: effectIconContent
+            )),
+            environment: {},
+            containerSize: CGSize(width: 8.0, height: 8.0)
+        )
+        
+        let size = CGSize(width: 16.0, height: 16.0)
+        if let effectIconView = effectIcon.view {
+            if effectIconView.superview == nil {
+                self.addSubview(effectIconView)
+            }
+            effectIconView.frame = CGRect(origin: CGPoint(x: floor((size.width - effectIconSize.width) * 0.5), y: floor((size.height - effectIconSize.height) * 0.5)), size: effectIconSize)
+        }
+    }
+}
+
+final class ChatTextInputActionButtonsNode: ASDisplayNode, ChatSendMessageActionSheetControllerSourceSendButtonNode {
+    private let context: AccountContext
     private let presentationContext: ChatPresentationContext?
     private let strings: PresentationStrings
     
@@ -25,7 +139,11 @@ final class ChatTextInputActionButtonsNode: ASDisplayNode {
     var sendButtonRadialStatusNode: ChatSendButtonRadialStatusNode?
     var sendButtonHasApplyIcon = false
     var animatingSendButton = false
+    
+    let textNode: ImmediateAnimatedCountLabelNode
+    
     let expandMediaInputButton: HighlightableButtonNode
+    private var effectBadgeView: EffectBadgeView?
     
     var sendButtonLongPressed: ((ASDisplayNode, ContextGesture) -> Void)?
     
@@ -42,12 +160,13 @@ final class ChatTextInputActionButtonsNode: ASDisplayNode {
     private var validLayout: CGSize?
     
     init(context: AccountContext, presentationInterfaceState: ChatPresentationInterfaceState, presentationContext: ChatPresentationContext?, presentController: @escaping (ViewController) -> Void) {
+        self.context = context
         self.presentationContext = presentationContext
         let theme = presentationInterfaceState.theme
         let strings = presentationInterfaceState.strings
         self.strings = strings
          
-        self.micButton = ChatTextInputMediaRecordingButton(context: context, theme: theme, strings: strings, presentController: presentController)
+        self.micButton = ChatTextInputMediaRecordingButton(context: context, theme: theme, pause: true, strings: strings, presentController: presentController)
         
         self.sendContainerNode = ASDisplayNode()
         self.sendContainerNode.layer.allowsGroupOpacity = true
@@ -58,6 +177,9 @@ final class ChatTextInputActionButtonsNode: ASDisplayNode {
         self.backdropNode = ChatMessageBubbleBackdrop()
         self.sendButton = HighlightTrackingButtonNode(pointerStyle: nil)
         
+        self.textNode = ImmediateAnimatedCountLabelNode()
+        self.textNode.isUserInteractionEnabled = false
+        
         self.expandMediaInputButton = HighlightableButtonNode(pointerStyle: .circle(36.0))
         
         super.init()
@@ -67,7 +189,7 @@ final class ChatTextInputActionButtonsNode: ASDisplayNode {
         
         self.sendButton.highligthedChanged = { [weak self] highlighted in
             if let strongSelf = self {
-                if strongSelf.sendButtonHasApplyIcon || !strongSelf.sendButtonLongPressEnabled {
+                if !strongSelf.sendButtonLongPressEnabled {
                     if highlighted {
                         strongSelf.sendContainerNode.layer.removeAnimation(forKey: "opacity")
                         strongSelf.sendContainerNode.alpha = 0.4
@@ -96,6 +218,7 @@ final class ChatTextInputActionButtonsNode: ASDisplayNode {
             self.backgroundNode.addSubnode(self.backdropNode)
         }
         self.sendContainerNode.addSubnode(self.sendButton)
+        self.sendContainerNode.addSubnode(self.textNode)
         self.addSubnode(self.expandMediaInputButton)
     }
     
@@ -109,9 +232,7 @@ final class ChatTextInputActionButtonsNode: ASDisplayNode {
             guard let strongSelf = self else {
                 return
             }
-            if !strongSelf.sendButtonHasApplyIcon {
-                strongSelf.sendButtonLongPressed?(strongSelf.sendContainerNode, recognizer)
-            }
+            strongSelf.sendButtonLongPressed?(strongSelf, recognizer)
         }
         
         self.micButtonPointerInteraction = PointerInteraction(view: self.micButton, style: .circle(36.0))
@@ -147,59 +268,103 @@ final class ChatTextInputActionButtonsNode: ASDisplayNode {
         }
     }
     
-    func updateLayout(size: CGSize, isMediaInputExpanded: Bool, transition: ContainedViewLayoutTransition, interfaceState: ChatPresentationInterfaceState) {
+    func updateLayout(size: CGSize, isMediaInputExpanded: Bool, showTitle: Bool, currentMessageEffectId: Int64?, transition: ContainedViewLayoutTransition, interfaceState: ChatPresentationInterfaceState) -> CGSize {
         self.validLayout = size
+        
+        var innerSize = size
+        
+        var starsAmount: Int64?
+        if let sendPaidMessageStars = interfaceState.sendPaidMessageStars, interfaceState.interfaceState.editMessage == nil {
+            var amount: Int64
+            if let forwardedCount = interfaceState.interfaceState.forwardMessageIds?.count, forwardedCount > 0 {
+                amount = sendPaidMessageStars.value * Int64(forwardedCount)
+                if interfaceState.interfaceState.effectiveInputState.inputText.length > 0 {
+                    amount += sendPaidMessageStars.value
+                }
+            } else {
+                if interfaceState.interfaceState.effectiveInputState.inputText.length > 4096 {
+                    let messageCount = Int32(ceil(CGFloat(interfaceState.interfaceState.effectiveInputState.inputText.length) / 4096.0))
+                    amount = sendPaidMessageStars.value * Int64(messageCount)
+                } else {
+                    amount = sendPaidMessageStars.value
+                }
+            }
+            starsAmount = amount
+        }
+        
+        if let amount = starsAmount {
+            self.sendButton.imageNode.alpha = 0.0
+            self.textNode.isHidden = false
+            let text = "\(amount)"
+            let font = Font.with(size: 17.0, design: .round, weight: .semibold, traits: .monospacedNumbers)
+            let badgeString = NSMutableAttributedString(string: "⭐️ ", font: font, textColor: interfaceState.theme.chat.inputPanel.actionControlForegroundColor)
+            if let range = badgeString.string.range(of: "⭐️") {
+                badgeString.addAttribute(.attachment, value: PresentationResourcesChat.chatPlaceholderStarIcon(interfaceState.theme)!, range: NSRange(range, in: badgeString.string))
+                badgeString.addAttribute(.baselineOffset, value: 1.0, range: NSRange(range, in: badgeString.string))
+            }
+            var segments: [AnimatedCountLabelNode.Segment] = []
+            segments.append(.text(0, badgeString))
+            for char in text {
+                if let intValue = Int(String(char)) {
+                    segments.append(.number(intValue, NSAttributedString(string: String(char), font: font, textColor: interfaceState.theme.chat.inputPanel.actionControlForegroundColor)))
+                }
+            }
+            self.textNode.segments = segments
+            
+            let textSize = self.textNode.updateLayout(size: CGSize(width: 100.0, height: 100.0), animated: transition.isAnimated)
+            let buttonInset: CGFloat = 14.0
+            if showTitle {
+                innerSize.width = textSize.width + buttonInset * 2.0
+            }
+            transition.updateFrame(node: self.textNode, frame: CGRect(origin: CGPoint(x: showTitle ? 5.0 + 7.0 : floorToScreenPixels((innerSize.width - textSize.width) / 2.0), y: floorToScreenPixels((size.height - textSize.height) / 2.0)), size: textSize))
+        } else {
+            self.sendButton.imageNode.alpha = 1.0
+            self.textNode.isHidden = true
+        }
+    
         transition.updateFrame(layer: self.micButton.layer, frame: CGRect(origin: CGPoint(), size: size))
         self.micButton.layoutItems()
         
-        transition.updateFrame(layer: self.sendButton.layer, frame: CGRect(origin: CGPoint(), size: size))
-        transition.updateFrame(node: self.sendContainerNode, frame: CGRect(origin: CGPoint(), size: size))
+        transition.updateFrame(layer: self.sendButton.layer, frame: CGRect(origin: CGPoint(), size: innerSize))
+        transition.updateFrame(node: self.sendContainerNode, frame: CGRect(origin: CGPoint(), size: innerSize))
         
-        let backgroundSize = CGSize(width: 33.0, height: 33.0)
-        transition.updateFrame(node: self.backgroundNode, frame: CGRect(origin: CGPoint(x: floorToScreenPixels((size.width - backgroundSize.width) / 2.0), y: floorToScreenPixels((size.height - backgroundSize.height) / 2.0)), size: backgroundSize))
-        self.backgroundNode.cornerRadius = backgroundSize.width / 2.0
+        let backgroundSize = CGSize(width: innerSize.width - 11.0, height: 33.0)
+        let backgroundFrame = CGRect(origin: CGPoint(x: showTitle ? 5.0 + UIScreenPixel : floorToScreenPixels((size.width - backgroundSize.width) / 2.0), y: floorToScreenPixels((size.height - backgroundSize.height) / 2.0)), size: backgroundSize)
+        transition.updateFrame(node: self.backgroundNode, frame: backgroundFrame)
+        self.backgroundNode.cornerRadius = backgroundSize.height / 2.0
         
-        transition.updateFrame(node: self.backdropNode, frame: CGRect(origin: CGPoint(x: -2.0, y: -2.0), size: CGSize(width: size.width + 12.0, height: size.height + 2.0)))
+        transition.updateFrame(node: self.backdropNode, frame: CGRect(origin: CGPoint(x: -2.0, y: -2.0), size: CGSize(width: innerSize.width + 12.0, height: size.height + 2.0)))
         if let (rect, containerSize) = self.absoluteRect {
             self.backdropNode.update(rect: rect, within: containerSize)
-        }
-        
-        var isScheduledMessages = false
-        if case .scheduledMessages = interfaceState.subject {
-            isScheduledMessages = true
-        }
-        
-        if let slowmodeState = interfaceState.slowmodeState, !isScheduledMessages && interfaceState.editMessageState == nil {
-            let sendButtonRadialStatusNode: ChatSendButtonRadialStatusNode
-            if let current = self.sendButtonRadialStatusNode {
-                sendButtonRadialStatusNode = current
-            } else {
-                sendButtonRadialStatusNode = ChatSendButtonRadialStatusNode(color: interfaceState.theme.chat.inputPanel.panelControlAccentColor)
-                sendButtonRadialStatusNode.alpha = self.sendContainerNode.alpha
-                self.sendButtonRadialStatusNode = sendButtonRadialStatusNode
-                self.addSubnode(sendButtonRadialStatusNode)
-            }
-            
-            transition.updateSublayerTransformScale(layer: self.sendContainerNode.layer, scale: CGPoint(x: 0.7575, y: 0.7575))
-            
-            let defaultSendButtonSize: CGFloat = 25.0
-            let defaultOriginX = floorToScreenPixels((self.sendButton.bounds.width - defaultSendButtonSize) / 2.0)
-            let defaultOriginY = floorToScreenPixels((self.sendButton.bounds.height - defaultSendButtonSize) / 2.0)
-            
-            let radialStatusFrame = CGRect(origin: CGPoint(x: defaultOriginX - 4.0, y: defaultOriginY - 4.0), size: CGSize(width: 33.0, height: 33.0))
-            sendButtonRadialStatusNode.frame = radialStatusFrame
-            sendButtonRadialStatusNode.slowmodeState = slowmodeState
-        } else {
-            if let sendButtonRadialStatusNode = self.sendButtonRadialStatusNode {
-                self.sendButtonRadialStatusNode = nil
-                sendButtonRadialStatusNode.removeFromSupernode()
-            }
-            transition.updateSublayerTransformScale(layer: self.sendContainerNode.layer, scale: CGPoint(x: 1.0, y: 1.0))
         }
         
         transition.updateFrame(node: self.expandMediaInputButton, frame: CGRect(origin: CGPoint(), size: size))
         let expanded = isMediaInputExpanded
         transition.updateSublayerTransformScale(node: self.expandMediaInputButton, scale: CGPoint(x: 1.0, y: expanded ? 1.0 : -1.0))
+        
+        if let currentMessageEffectId {
+            let effectBadgeView: EffectBadgeView
+            if let current = self.effectBadgeView {
+                effectBadgeView = current
+            } else {
+                effectBadgeView = EffectBadgeView(context: self.context)
+                self.effectBadgeView = effectBadgeView
+                self.sendContainerNode.view.addSubview(effectBadgeView)
+                
+                effectBadgeView.alpha = 0.0
+                transition.updateAlpha(layer: effectBadgeView.layer, alpha: 1.0)
+            }
+            let badgeSize = CGSize(width: 16.0, height: 16.0)
+            effectBadgeView.frame = CGRect(origin: CGPoint(x: backgroundFrame.minX + backgroundSize.width + 3.0 - badgeSize.width, y: backgroundFrame.minY + backgroundSize.height + 3.0 - badgeSize.height), size: badgeSize)
+            effectBadgeView.update(size: badgeSize, theme: interfaceState.theme, effectId: currentMessageEffectId)
+        } else if let effectBadgeView = self.effectBadgeView {
+            self.effectBadgeView = nil
+            transition.updateAlpha(layer: effectBadgeView.layer, alpha: 0.0, completion: { [weak effectBadgeView] _ in
+                effectBadgeView?.removeFromSuperview()
+            })
+        }
+        
+        return innerSize
     }
     
     func updateAccessibility() {
@@ -217,5 +382,18 @@ final class ChatTextInputActionButtonsNode: ASDisplayNode {
             self.accessibilityLabel = self.strings.MediaPicker_Send
             self.accessibilityHint = nil
         }
+    }
+    
+    func makeCustomContents() -> UIView? {
+        if self.sendButtonHasApplyIcon || self.effectBadgeView != nil {
+            let result = UIView()
+            result.frame = self.bounds
+            if let copyView = self.sendContainerNode.view.snapshotView(afterScreenUpdates: false) {
+                copyView.frame = self.sendContainerNode.frame
+                result.addSubview(copyView)
+            }
+            return result
+        }
+        return nil
     }
 }

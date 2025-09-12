@@ -5,8 +5,17 @@ import Display
 import Postbox
 import SwipeToDismissGesture
 import AccountContext
+import UndoUI
 
-open class GalleryControllerNode: ASDisplayNode, UIScrollViewDelegate, UIGestureRecognizerDelegate {
+open class GalleryControllerNode: ASDisplayNode, ASScrollViewDelegate, ASGestureRecognizerDelegate {
+    public enum CustomDismissType {
+        case `default`
+        case simpleAnimation
+        case pip
+    }
+    
+    private let context: AccountContext
+    
     public var statusBar: StatusBar?
     public var navigationBar: NavigationBar? {
         didSet {
@@ -24,8 +33,8 @@ open class GalleryControllerNode: ASDisplayNode, UIScrollViewDelegate, UIGesture
     public var scrollView: UIScrollView
     public var pager: GalleryPagerNode
     
-    public var beginCustomDismiss: (Bool) -> Void = { _ in }
-    public var completeCustomDismiss: () -> Void = { }
+    public var beginCustomDismiss: (GalleryControllerNode.CustomDismissType) -> Void = { _ in }
+    public var completeCustomDismiss: (Bool) -> Void = { _ in }
     public var baseNavigationController: () -> NavigationController? = { return nil }
     public var galleryController: () -> ViewController? = { return nil }
     
@@ -48,7 +57,8 @@ open class GalleryControllerNode: ASDisplayNode, UIScrollViewDelegate, UIGesture
         }
     }
     
-    public init(controllerInteraction: GalleryControllerInteraction, pageGap: CGFloat = 20.0, disableTapNavigation: Bool = false) {
+    public init(context: AccountContext, controllerInteraction: GalleryControllerInteraction, pageGap: CGFloat = 20.0, disableTapNavigation: Bool = false) {
+        self.context = context
         self.backgroundNode = ASDisplayNode()
         self.backgroundNode.backgroundColor = UIColor.black
         self.scrollView = UIScrollView()
@@ -77,6 +87,13 @@ open class GalleryControllerNode: ASDisplayNode, UIScrollViewDelegate, UIGesture
             if let strongSelf = self {
                 strongSelf.setControlsHidden(!visible, animated: true)
             }
+        }
+        
+        self.pager.controlsVisibility = { [weak self] in
+            guard let self else {
+                return true
+            }
+            return !self.areControlsHidden && self.footerNode.alpha != 0.0
         }
         
         self.pager.updateOrientation = { [weak self] orientation in
@@ -117,15 +134,15 @@ open class GalleryControllerNode: ASDisplayNode, UIScrollViewDelegate, UIGesture
             }
         }
                 
-        self.pager.beginCustomDismiss = { [weak self] simpleAnimation in
+        self.pager.beginCustomDismiss = { [weak self] animationType in
             if let strongSelf = self {
-                strongSelf.beginCustomDismiss(simpleAnimation)
+                strongSelf.beginCustomDismiss(animationType)
             }
         }
         
-        self.pager.completeCustomDismiss = { [weak self] in
+        self.pager.completeCustomDismiss = { [weak self] isPictureInPicture in
             if let strongSelf = self {
-                strongSelf.completeCustomDismiss()
+                strongSelf.completeCustomDismiss(isPictureInPicture)
             }
         }
         
@@ -143,7 +160,7 @@ open class GalleryControllerNode: ASDisplayNode, UIScrollViewDelegate, UIGesture
         self.scrollView.alwaysBounceHorizontal = false
         self.scrollView.alwaysBounceVertical = false
         self.scrollView.clipsToBounds = false
-        self.scrollView.delegate = self
+        self.scrollView.delegate = self.wrappedScrollViewDelegate
         self.scrollView.scrollsToTop = false
         self.view.addSubview(self.scrollView)
         
@@ -228,15 +245,19 @@ open class GalleryControllerNode: ASDisplayNode, UIScrollViewDelegate, UIGesture
                         fromLeft = true
                     }
                     if let current = strongSelf.currentThumbnailContainerNode {
+                        strongSelf.currentThumbnailContainerNode = nil
                         if thumbnailContainerVisible {
                             current.animateOut(toRight: fromLeft)
                             current.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.2, removeOnCompletion: false, completion: { [weak current] _ in
                                 current?.removeFromSupernode()
                             })
+                            if let (navigationHeight, layout) = strongSelf.containerLayout, node == nil {
+                                strongSelf.containerLayoutUpdated(layout, navigationBarHeight: navigationHeight, transition: .immediate)
+                            }
                         }
                     }
-                    strongSelf.currentThumbnailContainerNode = node
                     if let node = node {
+                        strongSelf.currentThumbnailContainerNode = node
                         strongSelf.insertSubnode(node, aboveSubnode: strongSelf.footerNode)
                         if let (navigationHeight, layout) = strongSelf.containerLayout, thumbnailContainerVisible {
                             strongSelf.containerLayoutUpdated(layout, navigationBarHeight: navigationHeight, transition: .immediate)
@@ -255,6 +276,8 @@ open class GalleryControllerNode: ASDisplayNode, UIScrollViewDelegate, UIGesture
         if #available(iOSApplicationExtension 11.0, iOS 11.0, *), !self.isLayerBacked {
             self.view.accessibilityIgnoresInvertColors = true
         }
+        
+        self.view.disablesInteractiveTransitionGestureRecognizer = true
     }
     
     open func containerLayoutUpdated(_ layout: ContainerViewLayout, navigationBarHeight: CGFloat, transition: ContainedViewLayoutTransition) {
@@ -299,7 +322,7 @@ open class GalleryControllerNode: ASDisplayNode, UIScrollViewDelegate, UIGesture
         
         self.pager.frame = CGRect(origin: CGPoint(x: 0.0, y: layout.size.height), size: layout.size)
 
-        self.pager.containerLayoutUpdated(layout, navigationBarHeight: navigationBarHeight, transition: transition)
+        self.pager.containerLayoutUpdated(layout, navigationBarHeight: self.areControlsHidden ? 0.0 : navigationBarHeight, transition: transition)
     }
     
     open func setControlsHidden(_ hidden: Bool, animated: Bool) {
@@ -356,10 +379,14 @@ open class GalleryControllerNode: ASDisplayNode, UIScrollViewDelegate, UIGesture
             if !self.areControlsHidden {
                 self.statusBar?.alpha = 1.0
                 self.navigationBar?.alpha = 1.0
-                self.footerNode.alpha = 1.0
                 self.updateThumbnailContainerNodeAlpha(.immediate)
             }
         })
+        
+        if !self.areControlsHidden {
+            self.footerNode.alpha = 1.0
+            self.footerNode.animateIn(transition: .animated(duration: 0.15, curve: .linear))
+        }
         
         if animateContent {
             self.scrollView.layer.animateBounds(from: self.scrollView.layer.bounds.offsetBy(dx: 0.0, dy: -self.scrollView.layer.bounds.size.height), to: self.scrollView.layer.bounds, duration: 0.4, timingFunction: kCAMediaTimingFunctionSpring)
@@ -394,12 +421,13 @@ open class GalleryControllerNode: ASDisplayNode, UIScrollViewDelegate, UIGesture
         UIView.animate(withDuration: 0.1, animations: {
             self.statusBar?.alpha = 0.0
             self.navigationBar?.alpha = 0.0
-            self.footerNode.alpha = 0.0
             self.currentThumbnailContainerNode?.alpha = 0.0
         }, completion: { _ in
             interfaceAnimationCompleted = true
             intermediateCompletion()
         })
+        
+        self.footerNode.animateOut(transition: .animated(duration: 0.1, curve: .easeInOut))
         
         if animateContent {
             contentAnimationCompleted = false
@@ -466,6 +494,22 @@ open class GalleryControllerNode: ASDisplayNode, UIScrollViewDelegate, UIGesture
         let distanceFromEquilibrium = scrollView.contentOffset.y - scrollView.contentSize.height / 3.0
         let minimalDismissDistance = scrollView.contentSize.height / 12.0
         if abs(velocity.y) > 1.0 || abs(distanceFromEquilibrium) > minimalDismissDistance {
+            if distanceFromEquilibrium > 1.0, let centralItemNode = self.pager.centralItemNode(), centralItemNode.maybePerformActionForSwipeDismiss() {
+                if let chatController = self.baseNavigationController()?.topViewController as? ChatController {
+                    let presentationData = self.context.sharedContext.currentPresentationData.with({ $0 })
+                    chatController.present(UndoOverlayController(
+                        presentationData: presentationData,
+                        content: .hidArchive(title: presentationData.strings.MediaGallery_ToastVideoPip_Title, text: presentationData.strings.MediaGallery_ToastVideoPip_Text, undo: false),
+                        elevatedLayout: false, action: { _ in true }
+                    ), in: .current)
+                }
+                
+                return
+            }
+            
+            if distanceFromEquilibrium < -1.0, let centralItemNode = self.pager.centralItemNode(), centralItemNode.maybePerformActionForSwipeDownDismiss() {
+            }
+            
             if let backgroundColor = self.backgroundNode.backgroundColor {
                 self.backgroundNode.layer.animate(from: backgroundColor, to: UIColor(white: 0.0, alpha: 0.0).cgColor, keyPath: "backgroundColor", timingFunction: CAMediaTimingFunctionName.linear.rawValue, duration: 0.2, removeOnCompletion: false)
             }
@@ -508,6 +552,10 @@ open class GalleryControllerNode: ASDisplayNode, UIScrollViewDelegate, UIGesture
             }
         } else {
             self.scrollView.setContentOffset(CGPoint(x: 0.0, y: self.scrollView.contentSize.height / 3.0), animated: true)
+            
+            if let chatController = self.baseNavigationController()?.topViewController as? ChatController {
+                chatController.updatePushedTransition(1.0, transition: .animated(duration: 0.45, curve: .customSpring(damping: 180.0, initialVelocity: 0.0)))
+            }
         }
     }
     

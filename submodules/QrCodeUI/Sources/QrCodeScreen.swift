@@ -35,9 +35,15 @@ private func shareQrCode(context: AccountContext, link: String, ecl: String, vie
 }
 
 public final class QrCodeScreen: ViewController {
+    public enum SubjectType {
+        case group
+        case channel
+        case groupCall
+    }
+
     public enum Subject {
         case peer(peer: EnginePeer)
-        case invite(invite: ExportedInvitation, isGroup: Bool)
+        case invite(invite: ExportedInvitation, type: SubjectType)
         case chatFolder(slug: String)
         
         var link: String {
@@ -182,7 +188,7 @@ public final class QrCodeScreen: ViewController {
         self.controllerNode.containerLayoutUpdated(layout, navigationBarHeight: self.navigationLayout(layout: layout).navigationFrame.maxY, transition: transition)
     }
 
-    class Node: ViewControllerTracingNode, UIScrollViewDelegate {
+    class Node: ViewControllerTracingNode, ASScrollViewDelegate {
         private let context: AccountContext
         private let subject: QrCodeScreen.Subject
         private var presentationData: PresentationData
@@ -239,9 +245,16 @@ public final class QrCodeScreen: ViewController {
             let title: String
             let text: String
             switch subject {
-                case let .invite(_, isGroup):
+                case let .invite(_, type):
                     title = self.presentationData.strings.InviteLink_QRCode_Title
-                    text = isGroup ? self.presentationData.strings.InviteLink_QRCode_Info : self.presentationData.strings.InviteLink_QRCode_InfoChannel
+                    switch type {
+                        case .group:
+                            text = self.presentationData.strings.InviteLink_QRCode_Info
+                        case .channel:
+                            text = self.presentationData.strings.InviteLink_QRCode_InfoChannel
+                        case .groupCall:
+                            text = self.presentationData.strings.InviteLink_QRCode_InfoGroupCall
+                    }
                 case .chatFolder:
                     title = self.presentationData.strings.InviteLink_QRCodeFolder_Title
                     text = self.presentationData.strings.InviteLink_QRCodeFolder_Text
@@ -279,7 +292,7 @@ public final class QrCodeScreen: ViewController {
             self.dimNode.view.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(self.dimTapGesture(_:))))
             self.addSubnode(self.dimNode)
             
-            self.wrappingScrollNode.view.delegate = self
+            self.wrappingScrollNode.view.delegate = self.wrappedScrollViewDelegate
             self.addSubnode(self.wrappingScrollNode)
             
             self.wrappingScrollNode.addSubnode(self.backgroundNode)

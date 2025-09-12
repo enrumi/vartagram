@@ -31,6 +31,8 @@ import Pasteboard
 import Speak
 import TranslateUI
 import TelegramNotices
+import SolidRoundedButtonNode
+import UrlHandling
 
 private let deleteImage = generateTintedImage(image: UIImage(bundleImageName: "Chat/Input/Accessory Panels/MessageSelectionTrash"), color: .white)
 private let actionImage = generateTintedImage(image: UIImage(bundleImageName: "Chat/Input/Accessory Panels/MessageSelectionForward"), color: .white)
@@ -123,9 +125,7 @@ class CaptionScrollWrapperNode: ASDisplayNode {
     }
 }
 
-
-
-final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScrollViewDelegate {
+final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, ASScrollViewDelegate {
     private let context: AccountContext
     private var presentationData: PresentationData
     private var theme: PresentationTheme
@@ -147,7 +147,9 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
     private let textNode: ImmediateTextNodeWithEntities
     private var spoilerTextNode: ImmediateTextNodeWithEntities?
     private var dustNode: InvisibleInkDustNode?
-    
+    private var buttonNode: SolidRoundedButtonNode?
+    private var buttonIconNode: ASImageNode?
+
     private var textSelectionNode: TextSelectionNode?
     
     private let animationCache: AnimationCache
@@ -166,7 +168,7 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
     private var currentMessageText: NSAttributedString?
     private var currentAuthorNameText: String?
     private var currentDateText: String?
-        
+
     private var currentMessage: Message?
     private var currentWebPageAndMedia: (TelegramMediaWebpage, Media)?
     private let messageContextDisposable = MetaDisposable()
@@ -186,6 +188,8 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
     
     var interacting: ((Bool) -> Void)?
     
+    var shareMediaParameters: (() -> ShareControllerSubject.MediaParameters?)?
+
     private var seekTimer: SwiftSignalKit.Timer?
     private var currentIsPaused: Bool = true
     private var seekRate: Double = 1.0
@@ -195,6 +199,13 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
     var performAction: ((GalleryControllerInteractionTapAction) -> Void)?
     var openActionOptions: ((GalleryControllerInteractionTapAction, Message) -> Void)?
     
+    private var isAd: Bool {
+        if self.currentMessage?.adAttribute != nil {
+            return true
+        }
+        return false
+    }
+
     var content: ChatItemGalleryFooterContent = .info {
         didSet {
             if self.content != oldValue {
@@ -210,8 +221,9 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
                         self.currentIsPaused = true
                         self.authorNameNode.isHidden = true
                         self.dateNode.isHidden = true
-                        self.hasSeekControls = seekable
-                        if status == .Local {
+                        self.hasSeekControls = seekable && !self.isAd
+
+                        if status == .Local && !self.isAd {
                             self.playbackControlButton.isHidden = false
                             self.playPauseIconNode.enqueueState(.play, animated: true)
                         } else {
@@ -228,8 +240,21 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
                             case .Local:
                                 break
                             case .Remote, .Paused:
-                                if let image = cloudFetchIcon {
-                                    statusState = .customIcon(image)
+                                var isHLS = false
+                                if let message = self.currentMessage {
+                                    for media in message.media {
+                                        if let file = media as? TelegramMediaFile {
+                                            isHLS = NativeVideoContent.isHLSVideo(file: file)
+                                            break
+                                        }
+                                    }
+                                }
+                                if isHLS {
+                                    statusState = .none
+                                } else {
+                                    if let image = cloudFetchIcon {
+                                        statusState = .customIcon(image)
+                                    }
                                 }
                         }
                         self.statusNode.transitionToState(statusState, completion: {})
@@ -238,16 +263,20 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
                         self.currentIsPaused = paused
                         self.authorNameNode.isHidden = true
                         self.dateNode.isHidden = true
-                        self.hasSeekControls = seekable
-                        self.playbackControlButton.isHidden = false
-                        
-                        let icon: PlayPauseIconNodeState
-                        if let wasPlaying = self.wasPlaying {
-                            icon = wasPlaying ? .pause : .play
+
+                        if !self.isAd {
+                            self.playbackControlButton.isHidden = false
+                            let icon: PlayPauseIconNodeState
+                            if let wasPlaying = self.wasPlaying {
+                                icon = wasPlaying ? .pause : .play
+                            } else {
+                                icon = paused ? .play : .pause
+                            }
+                            self.playPauseIconNode.enqueueState(icon, animated: true)
+                            self.hasSeekControls = seekable
                         } else {
-                            icon = paused ? .play : .pause
+                            self.hasSeekControls = false
                         }
-                        self.playPauseIconNode.enqueueState(icon, animated: true)
                         self.statusButtonNode.isHidden = true
                         self.statusNode.isHidden = true
                 }
@@ -452,7 +481,7 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
                 storeAttributedTextInPasteboard(text)
                 
                 let presentationData = self.context.sharedContext.currentPresentationData.with { $0 }
-                let undoController = UndoOverlayController(presentationData: presentationData, content: .copy(text: presentationData.strings.Conversation_TextCopied), elevatedLayout: false, animateInAsReplacement: false, blurred: true, action: { _ in true })
+                let undoController = UndoOverlayController(presentationData: presentationData, content: .copy(text: presentationData.strings.Conversation_TextCopied), elevatedLayout: false, animateInAsReplacement: false, appearance: UndoOverlayController.Appearance(isBlurred: true), action: { _ in true })
                 
                 self.controllerInteraction?.presentController(undoController, nil)
             case .share:
@@ -640,7 +669,7 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
     
     override func didLoad() {
         super.didLoad()
-        self.scrollNode.view.delegate = self
+        self.scrollNode.view.delegate = self.wrappedScrollViewDelegate
         self.scrollNode.view.showsVerticalScrollIndicator = false
         
         let backwardLongPressGestureRecognizer = UILongPressGestureRecognizer(target: self, action: #selector(self.seekBackwardLongPress(_:)))
@@ -756,7 +785,7 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
             if let (attributeText, fullText) = self.textNode.attributeSubstring(name: TelegramTextAttributes.URL, index: index) {
                 concealed = !doesUrlMatchText(url: url, text: attributeText, fullText: fullText)
             }
-            return .url(url: url, concealed: concealed)
+            return .url(url: url, concealed: concealed, forceExternal: false, dismiss: true)
         } else if let peerMention = attributes[NSAttributedString.Key(rawValue: TelegramTextAttributes.PeerMention)] as? TelegramPeerMention {
             return .peerMention(peerMention.peerId, peerMention.mention)
         } else if let peerName = attributes[NSAttributedString.Key(rawValue: TelegramTextAttributes.PeerTextMention)] as? String {
@@ -772,9 +801,18 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
         }
     }
     
-    func setup(origin: GalleryItemOriginData?, caption: NSAttributedString) {
-        let titleText = origin?.title
-        let dateText = origin?.timestamp.flatMap { humanReadableStringForTimestamp(strings: self.strings, dateTimeFormat: self.dateTimeFormat, timestamp: $0).string }
+    func setup(origin: GalleryItemOriginData?, caption: NSAttributedString, isAd: Bool = false) {
+        var titleText = origin?.title
+        var dateText = origin?.timestamp.flatMap { humanReadableStringForTimestamp(strings: self.strings, dateTimeFormat: self.dateTimeFormat, timestamp: $0).string }
+
+        let caption = caption.mutableCopy() as! NSMutableAttributedString
+        if isAd {
+            if let titleText, !titleText.isEmpty {
+                caption.insert(NSAttributedString(string: titleText + "\n", font: Font.semibold(17.0), textColor: .white), at: 0)
+            }
+            titleText = nil
+            dateText = nil
+        }
         
         if self.currentMessageText != caption || self.currentAuthorNameText != titleText || self.currentDateText != dateText {
             self.currentMessageText = caption
@@ -818,11 +856,14 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
     func setMessage(_ message: Message, displayInfo: Bool = true, translateToLanguage: String? = nil, peerIsCopyProtected: Bool = false) {
         self.currentMessage = message
         
-        var canDelete: Bool
-        var canShare = !message.containsSecretMedia
-
+        var displayInfo = displayInfo
+        if Namespaces.Message.allNonRegular.contains(message.id.namespace) || message.timestamp == 0 {
+            displayInfo = false
+        }
         var canFullscreen = false
-        
+        var canDelete: Bool
+        var canShare = !message.containsSecretMedia && !Namespaces.Message.allNonRegular.contains(message.id.namespace) && message.adAttribute == nil
+
         var canEdit = false
         var isImage = false
         var isVideo = false
@@ -833,7 +874,7 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
             } else if let media = media as? TelegramMediaFile, !media.isAnimated {
                 for attribute in media.attributes {
                     switch attribute {
-                    case let .Video(_, dimensions, _, _):
+                    case let .Video(_, dimensions, _, _, _, _):
                         isVideo = true
                         if dimensions.height > 0 {
                             if CGFloat(dimensions.width) / CGFloat(dimensions.height) > 1.33 {
@@ -847,6 +888,7 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
                 
                 if !isVideo {
                     canEdit = true
+                    isImage = true
                 }
             } else if let media = media as? TelegramMediaWebpage, case let .Loaded(content) = media.content {
                 let type = webEmbedType(content: content)
@@ -858,6 +900,9 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
                 }
                 if let file = content.file, !file.isAnimated, file.isVideo {
                     canFullscreen = true
+                }
+                if content.type == "photo", let _ = content.image {
+                    canEdit = true
                 }
             }
         }
@@ -897,7 +942,7 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
             canEdit = false
         }
         
-        if message.isCopyProtected() || peerIsCopyProtected {
+        if message.isCopyProtected() || peerIsCopyProtected || message.paidContent != nil {
             canShare = false
             canEdit = false
         }
@@ -906,6 +951,11 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
             canDelete = false
         }
         
+        if let _ = message.adAttribute {
+            displayInfo = false
+            canFullscreen = false
+        }
+
         var authorNameText: String?
         if let forwardInfo = message.forwardInfo, forwardInfo.flags.contains(.isImported), let authorSignature = forwardInfo.authorSignature {
             authorNameText = authorSignature
@@ -916,19 +966,18 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
         }
         
         var dateText = humanReadableStringForTimestamp(strings: self.strings, dateTimeFormat: self.dateTimeFormat, timestamp: message.timestamp).string
-        if !displayInfo {
-            authorNameText = ""
-            dateText = ""
-            canEdit = false
-        }
-        
-        var messageText = NSAttributedString(string: "")
+
+        var messageText = NSMutableAttributedString(string: "")
         var hasCaption = false
+        var mediaDuration: Double?
         for media in message.media {
-            if media is TelegramMediaImage {
+            if media is TelegramMediaPaidContent {
+                hasCaption = true
+            } else if media is TelegramMediaImage {
                 hasCaption = true
             } else if let file = media as? TelegramMediaFile {
-                hasCaption = file.mimeType.hasPrefix("image/")
+                hasCaption = file.mimeType.hasPrefix("image/") || file.mimeType.hasPrefix("video/")
+                mediaDuration = file.duration
             } else if media is TelegramMediaInvoice {
                 hasCaption = true
             }
@@ -947,6 +996,9 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
             }
             var text = text_
             entities = entities_
+            //if let result = addLocallyGeneratedEntities(text, enabledTypes: [.timecode], entities: entities, mediaDuration: mediaDuration) {
+            //    entities = result
+            //}
             if let translateToLanguage, !text.isEmpty {
                 for attribute in message.attributes {
                     if let attribute = attribute as? TranslationMessageAttribute, !attribute.text.isEmpty, attribute.toLang == translateToLanguage {
@@ -988,7 +1040,16 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
                 codeHighlightState.disposable.dispose()
             }
             
-            messageText = galleryCaptionStringWithAppliedEntities(context: self.context, text: text, entities: entities, message: message, cachedMessageSyntaxHighlight: cachedMessageSyntaxHighlight)
+            messageText = galleryCaptionStringWithAppliedEntities(context: self.context, text: text, entities: entities, message: message, cachedMessageSyntaxHighlight: cachedMessageSyntaxHighlight).mutableCopy() as! NSMutableAttributedString
+            if let _ = message.adAttribute {
+                messageText.insert(NSAttributedString(string: (authorNameText ?? "") + "\n", font: Font.semibold(17.0), textColor: .white), at: 0)
+            }
+        }
+
+        if !displayInfo {
+            authorNameText = ""
+            dateText = ""
+            canEdit = false
         }
                         
         if self.currentMessageText != messageText || canDelete != !self.deleteButton.isHidden || canFullscreen != !self.fullscreenButton.isHidden || canShare != !self.actionButton.isHidden || canEdit != !self.editButton.isHidden || self.currentAuthorNameText != authorNameText || self.currentDateText != dateText {
@@ -1025,6 +1086,30 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
             self.actionButton.isHidden = !canShare
             self.editButton.isHidden = !canEdit
             
+            if let adAttribute = message.adAttribute {
+                if self.buttonNode == nil {
+                    let buttonNode = SolidRoundedButtonNode(title: adAttribute.buttonText, theme: SolidRoundedButtonTheme(backgroundColor: UIColor(rgb: 0xffffff, alpha: 0.15), foregroundColor: UIColor(rgb: 0xffffff)), height: 50.0, cornerRadius: 11.0)
+                    buttonNode.pressed = { [weak self] in
+                        guard let self else {
+                            return
+                        }
+                        self.performAction?(.ad(message.id))
+                    }
+                    self.contentNode.addSubnode(buttonNode)
+                    self.buttonNode = buttonNode
+
+                    if !isTelegramMeLink(adAttribute.url) {
+                        let buttonIconNode = ASImageNode()
+                        buttonIconNode.displaysAsynchronously = false
+                        buttonIconNode.image = generateTintedImage(image: UIImage(bundleImageName: "Chat/Message/BotLink"), color: .white)
+                        buttonNode.addSubnode(buttonIconNode)
+                        self.buttonIconNode = buttonIconNode
+                    }
+                }
+            } else if let buttonNode = self.buttonNode {
+                buttonNode.removeFromSupernode()
+            }
+
             self.requestLayout?(.immediate)
         }
     }
@@ -1047,8 +1132,11 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
                 
                 let dustNode = InvisibleInkDustNode(textNode: spoilerTextNode, enableAnimations: self.context.sharedContext.energyUsageSettings.fullTranslucency)
                 self.dustNode = dustNode
-                spoilerTextNode.supernode?.insertSubnode(dustNode, aboveSubnode: spoilerTextNode)
-                
+                if let textSelectionNode = self.textSelectionNode {
+                    spoilerTextNode.supernode?.insertSubnode(dustNode, aboveSubnode: textSelectionNode)
+                } else {
+                    spoilerTextNode.supernode?.insertSubnode(dustNode, aboveSubnode: spoilerTextNode)
+                }
             }
             if let dustNode = self.dustNode {
                 dustNode.update(size: textFrame.size, color: .white, textColor: .white, rects: textLayout.spoilers.map { $0.1.offsetBy(dx: 3.0, dy: 3.0).insetBy(dx: 0.0, dy: 1.0) }, wordRects: textLayout.spoilerWords.map { $0.1.offsetBy(dx: 3.0, dy: 3.0).insetBy(dx: 0.0, dy: 1.0) })
@@ -1173,6 +1261,21 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
                     self.scrollWrapperNode.layer.mask?.frame = self.scrollWrapperNode.bounds
                     self.scrollWrapperNode.layer.mask?.removeAllAnimations()
                 }
+
+                if let buttonNode = self.buttonNode {
+                    let buttonHeight = buttonNode.updateLayout(width: constrainSize.width, transition: transition)
+                    transition.updateFrame(node: buttonNode, frame: CGRect(origin: CGPoint(x: sideInset, y: scrollWrapperNodeFrame.maxY + 8.0), size: CGSize(width: constrainSize.width, height: buttonHeight)))
+
+                    if let buttonIconNode = self.buttonIconNode, let icon = buttonIconNode.image {
+                        transition.updateFrame(node: buttonIconNode, frame: CGRect(origin: CGPoint(x: constrainSize.width - icon.size.width - 9.0, y: 9.0), size: icon.size))
+                    }
+
+                    if let _ = self.scrubberView {
+                        panelHeight += 68.0
+                    } else {
+                        panelHeight += 22.0
+                    }
+                }
             }
             textFrame = CGRect(origin: CGPoint(x: sideInset, y: topInset + textOffset), size: textSize)
             
@@ -1208,6 +1311,10 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
                 }
             }
             
+            if let _ = self.buttonNode {
+                panelHeight -= 44.0
+            }
+
             let scrubberFrame = CGRect(origin: CGPoint(x: leftInset, y: scrubberY), size: CGSize(width: width - leftInset - rightInset, height: 34.0))
             scrubberView.updateLayout(size: size, leftInset: leftInset, rightInset: rightInset, transition: .immediate)
             transition.updateBounds(layer: scrubberView.layer, bounds: CGRect(origin: CGPoint(), size: scrubberFrame.size))
@@ -1285,6 +1392,11 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
         return panelHeight
     }
     
+    override func animateIn(transition: ContainedViewLayoutTransition) {
+        self.contentNode.alpha = 0.0
+        transition.updateAlpha(node: self.contentNode, alpha: self.visibilityAlpha)
+    }
+
     override func animateIn(fromHeight: CGFloat, previousContentNode: GalleryFooterContentNode, transition: ContainedViewLayoutTransition) {
         if let scrubberView = self.scrubberView, scrubberView.superview == self.view {
             if let previousContentNode = previousContentNode as? ChatItemGalleryFooterContentNode, previousContentNode.scrubberView != nil {
@@ -1306,9 +1418,14 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
         self.forwardButton.alpha = self.hasSeekControls ? 1.0 : 0.0
         self.statusNode.alpha = 1.0
         self.playbackControlButton.alpha = 1.0
+        self.buttonNode?.alpha = 1.0
         self.scrollWrapperNode.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.15)
     }
     
+    override func animateOut(transition: ContainedViewLayoutTransition) {
+        transition.updateAlpha(node: self.contentNode, alpha: 0.0)
+    }
+
     override func animateOut(toHeight: CGFloat, nextContentNode: GalleryFooterContentNode, transition: ContainedViewLayoutTransition, completion: @escaping () -> Void) {
         if let scrubberView = self.scrubberView, scrubberView.superview == self.view {
             if let nextContentNode = nextContentNode as? ChatItemGalleryFooterContentNode, nextContentNode.scrubberView != nil {
@@ -1330,6 +1447,7 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
         self.forwardButton.alpha = 0.0
         self.statusNode.alpha = 0.0
         self.playbackControlButton.alpha = 0.0
+        self.buttonNode?.alpha = 0.0
         self.scrollWrapperNode.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.15, completion: { _ in
             completion()
         })
@@ -1418,7 +1536,7 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
     }
 
     private func commitDeleteMessages(_ messages: [EngineMessage], ask: Bool) {
-        self.messageContextDisposable.set((self.context.sharedContext.chatAvailableMessageActions(engine: self.context.engine, accountPeerId: self.context.account.peerId, messageIds: Set(messages.map { $0.id })) |> deliverOnMainQueue).start(next: { [weak self] actions in
+        self.messageContextDisposable.set((self.context.sharedContext.chatAvailableMessageActions(engine: self.context.engine, accountPeerId: self.context.account.peerId, messageIds: Set(messages.map { $0.id }), keepUpdated: false) |> deliverOnMainQueue).start(next: { [weak self] actions in
             if let strongSelf = self, let controllerInteration = strongSelf.controllerInteraction, !actions.options.isEmpty {
                 var presentationData = strongSelf.presentationData
                 if !presentationData.theme.overallDarkAppearance {
@@ -1522,7 +1640,10 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
                                 preferredAction = .saveToCameraRoll
                                 actionCompletionText = strongSelf.presentationData.strings.Gallery_ImageSaved
                             case .video:
-                                preferredAction = .saveToCameraRoll
+                                if let message = messages.first, let channel = message.peers[message.id.peerId] as? TelegramChannel, channel.addressName != nil {
+                                } else {
+                                    preferredAction = .saveToCameraRoll
+                                }
                                 actionCompletionText = strongSelf.presentationData.strings.Gallery_VideoSaved
                             case .file:
                                 preferredAction = .saveToCameraRoll
@@ -1562,16 +1683,16 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
                                     }
                                 } else {
                                     if let file = content.file {
-                                        subject = .media(.webPage(webPage: WebpageReference(webpage), media: file))
+                                        subject = .media(.webPage(webPage: WebpageReference(webpage), media: file), nil)
                                         preferredAction = .saveToCameraRoll
                                     } else if let image = content.image {
-                                        subject = .media(.webPage(webPage: WebpageReference(webpage), media: image))
+                                        subject = .media(.webPage(webPage: WebpageReference(webpage), media: image), nil)
                                         preferredAction = .saveToCameraRoll
                                         actionCompletionText = strongSelf.presentationData.strings.Gallery_ImageSaved
                                     }
                                 }
                             } else if let file = m as? TelegramMediaFile {
-                                subject = .media(.message(message: MessageReference(messages[0]._asMessage()), media: file))
+                                subject = .media(.message(message: MessageReference(messages[0]._asMessage()), media: file), strongSelf.shareMediaParameters?())
                                 if file.isAnimated {
                                     if messages[0].id.peerId.namespace == Namespaces.Peer.SecretChat {
                                         preferredAction = .default
@@ -1584,7 +1705,7 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
                                                 let presentationData = context.sharedContext.currentPresentationData.with { $0 }
                                                 let controllerInteraction = strongSelf.controllerInteraction
                                                 let _ = (toggleGifSaved(account: context.account, fileReference: .message(message: MessageReference(message._asMessage()), media: file), saved: true)
-                                                         |> deliverOnMainQueue).start(next: { result in
+                                                |> deliverOnMainQueue).start(next: { result in
                                                     switch result {
                                                     case .generic:
                                                         controllerInteraction?.presentController(UndoOverlayController(presentationData: presentationData, content: .universal(animation: "anim_gif", scale: 0.075, colors: [:], title: nil, text: presentationData.strings.Gallery_GifSaved, customUndoText: nil, timeout: nil), elevatedLayout: true, animateInAsReplacement: false, action: { _ in return false }), nil)
@@ -1621,7 +1742,10 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
                         
                         var hasExternalShare = true
                         for media in currentMessage.media {
-                            if let invoice = media as? TelegramMediaInvoice, let _ = invoice.extendedMedia {
+                            if let _ = media as? TelegramMediaPaidContent {
+                                hasExternalShare = false
+                                break
+                            } else if let invoice = media as? TelegramMediaInvoice, let _ = invoice.extendedMedia {
                                 hasExternalShare = false
                                 break
                             }
@@ -1631,6 +1755,30 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
                         shareController.dismissed = { [weak self] _ in
                             self?.interacting?(false)
                         }
+                        shareController.onMediaTimestampLinkCopied = { [weak self] timestamp in
+                            guard let self else {
+                                return
+                            }
+                            let presentationData = self.context.sharedContext.currentPresentationData.with { $0 }
+                            let text: String
+                            if let timestamp {
+                                let startTimeString: String
+                                let hours = timestamp / (60 * 60)
+                                let minutes = timestamp % (60 * 60) / 60
+                                let seconds = timestamp % 60
+                                if hours != 0 {
+                                    startTimeString = String(format: "%d:%02d:%02d", hours, minutes, seconds)
+                                } else {
+                                    startTimeString = String(format: "%d:%02d", minutes, seconds)
+                                }
+                                text = presentationData.strings.Conversation_VideoTimeLinkCopied(startTimeString).string
+                            } else {
+                                text = presentationData.strings.Conversation_LinkCopied
+                            }
+
+                            self.controllerInteraction?.presentController(UndoOverlayController(presentationData: presentationData, content: .linkCopied(title: nil, text: text), elevatedLayout: true, animateInAsReplacement: false, action: { _ in return true }), nil)
+                        }
+
                         shareController.actionCompleted = { [weak self] in
                             if let strongSelf = self, let actionCompletionText = actionCompletionText {
                                 let presentationData = strongSelf.context.sharedContext.currentPresentationData.with { $0 }
@@ -1787,7 +1935,7 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
             }
             
             var preferredAction = ShareControllerPreferredAction.default
-            var subject = ShareControllerSubject.media(.webPage(webPage: WebpageReference(webPage), media: media))
+            var subject = ShareControllerSubject.media(.webPage(webPage: WebpageReference(webPage), media: media), self.shareMediaParameters?())
             
             if let file = media as? TelegramMediaFile {
                 if file.isAnimated {
@@ -1849,10 +1997,10 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, UIScroll
                     }
                 } else {
                     if let file = content.file {
-                        subject = .media(.webPage(webPage: WebpageReference(webpage), media: file))
+                        subject = .media(.webPage(webPage: WebpageReference(webpage), media: file), self.shareMediaParameters?())
                         preferredAction = .saveToCameraRoll
                     } else if let image = content.image {
-                        subject = .media(.webPage(webPage: WebpageReference(webpage), media: image))
+                        subject = .media(.webPage(webPage: WebpageReference(webpage), media: image), self.shareMediaParameters?())
                         preferredAction = .saveToCameraRoll
                     }
                 }

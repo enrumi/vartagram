@@ -23,10 +23,12 @@ public struct UserLimitsConfiguration: Equatable {
     public var maxStoriesWeeklyCount: Int32
     public var maxStoriesMonthlyCount: Int32
     public var maxStoriesSuggestedReactions: Int32
+    public var maxStoriesLinksCount: Int32
     public var maxGiveawayChannelsCount: Int32
     public var maxGiveawayCountriesCount: Int32
     public var maxGiveawayPeriodSeconds: Int32
     public var maxChannelRecommendationsCount: Int32
+    public var maxConferenceParticipantCount: Int32
     
     public static var defaultValue: UserLimitsConfiguration {
         return UserLimitsConfiguration(
@@ -51,10 +53,12 @@ public struct UserLimitsConfiguration: Equatable {
             maxStoriesWeeklyCount: 7,
             maxStoriesMonthlyCount: 30,
             maxStoriesSuggestedReactions: 1,
+            maxStoriesLinksCount: 3,
             maxGiveawayChannelsCount: 10,
             maxGiveawayCountriesCount: 10,
             maxGiveawayPeriodSeconds: 86400 * 31,
-            maxChannelRecommendationsCount: 10
+            maxChannelRecommendationsCount: 10,
+            maxConferenceParticipantCount: 100
         )
     }
 
@@ -80,10 +84,12 @@ public struct UserLimitsConfiguration: Equatable {
         maxStoriesWeeklyCount: Int32,
         maxStoriesMonthlyCount: Int32,
         maxStoriesSuggestedReactions: Int32,
+        maxStoriesLinksCount: Int32,
         maxGiveawayChannelsCount: Int32,
         maxGiveawayCountriesCount: Int32,
         maxGiveawayPeriodSeconds: Int32,
-        maxChannelRecommendationsCount: Int32
+        maxChannelRecommendationsCount: Int32,
+        maxConferenceParticipantCount: Int32
     ) {
         self.maxPinnedChatCount = maxPinnedChatCount
         self.maxPinnedSavedChatCount = maxPinnedSavedChatCount
@@ -106,10 +112,12 @@ public struct UserLimitsConfiguration: Equatable {
         self.maxStoriesWeeklyCount = maxStoriesWeeklyCount
         self.maxStoriesMonthlyCount = maxStoriesMonthlyCount
         self.maxStoriesSuggestedReactions = maxStoriesSuggestedReactions
+        self.maxStoriesLinksCount = maxStoriesLinksCount
         self.maxGiveawayChannelsCount = maxGiveawayChannelsCount
         self.maxGiveawayCountriesCount = maxGiveawayCountriesCount
         self.maxGiveawayPeriodSeconds = maxGiveawayPeriodSeconds
         self.maxChannelRecommendationsCount = maxChannelRecommendationsCount
+        self.maxConferenceParticipantCount = maxConferenceParticipantCount
     }
 }
 
@@ -138,7 +146,7 @@ extension UserLimitsConfiguration {
         }
         
         self.maxPinnedChatCount = getValue("dialogs_pinned_limit", orElse: defaultValue.maxPinnedChatCount)
-        self.maxPinnedSavedChatCount = getValue("saved_pinned_limit", orElse: defaultValue.maxPinnedSavedChatCount)
+        self.maxPinnedSavedChatCount = getValue("saved_dialogs_pinned_limit", orElse: defaultValue.maxPinnedSavedChatCount)
         self.maxArchivedPinnedChatCount = getValue("dialogs_folder_pinned_limit", orElse: defaultValue.maxArchivedPinnedChatCount)
         self.maxChannelsCount = getValue("channels_limit", orElse: defaultValue.maxChannelsCount)
         self.maxPublicLinksCount = getValue("channels_public_limit", orElse: defaultValue.maxPublicLinksCount)
@@ -158,9 +166,11 @@ extension UserLimitsConfiguration {
         self.maxStoriesWeeklyCount = getValue("stories_sent_weekly_limit", orElse: defaultValue.maxStoriesWeeklyCount)
         self.maxStoriesMonthlyCount = getValue("stories_sent_monthly_limit", orElse: defaultValue.maxStoriesMonthlyCount)
         self.maxStoriesSuggestedReactions = getValue("stories_suggested_reactions_limit", orElse: defaultValue.maxStoriesMonthlyCount)
+        self.maxStoriesLinksCount = getGeneralValue("stories_area_url_max", orElse: defaultValue.maxStoriesLinksCount)
         self.maxGiveawayChannelsCount = getGeneralValue("giveaway_add_peers_max", orElse: defaultValue.maxGiveawayChannelsCount)
         self.maxGiveawayCountriesCount = getGeneralValue("giveaway_countries_max", orElse: defaultValue.maxGiveawayCountriesCount)
         self.maxGiveawayPeriodSeconds = getGeneralValue("giveaway_period_max", orElse: defaultValue.maxGiveawayPeriodSeconds)
         self.maxChannelRecommendationsCount = getValue("recommended_channels_limit", orElse: defaultValue.maxChannelRecommendationsCount)
+        self.maxConferenceParticipantCount = getGeneralValue("conference_call_size_limit", orElse: defaultValue.maxConferenceParticipantCount)
     }
 }

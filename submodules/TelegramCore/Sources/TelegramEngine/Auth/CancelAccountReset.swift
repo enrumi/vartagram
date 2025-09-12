@@ -34,14 +34,14 @@ func _internal_requestCancelAccountResetData(network: Network, hash: String) -> 
                 parsedNextType = AuthorizationCodeNextType(apiType: nextType)
             }
             return .single(CancelAccountResetData(type: SentAuthorizationCodeType(apiType: type), hash: phoneCodeHash, timeout: timeout, nextType: parsedNextType))
-        case .sentCodeSuccess:
+        case .sentCodeSuccess, .sentCodePaymentRequired:
             return .never()
         }
     }
 }
 
 func _internal_requestNextCancelAccountResetOption(network: Network, phoneNumber: String, phoneCodeHash: String) -> Signal<CancelAccountResetData, RequestCancelAccountResetDataError> {
-    return network.request(Api.functions.auth.resendCode(phoneNumber: phoneNumber, phoneCodeHash: phoneCodeHash), automaticFloodWait: false)
+    return network.request(Api.functions.auth.resendCode(flags: 0, phoneNumber: phoneNumber, phoneCodeHash: phoneCodeHash, reason: nil), automaticFloodWait: false)
     |> mapError { error -> RequestCancelAccountResetDataError in
         if error.errorDescription.hasPrefix("FLOOD_WAIT") {
             return .limitExceeded
@@ -57,7 +57,7 @@ func _internal_requestNextCancelAccountResetOption(network: Network, phoneNumber
                 parsedNextType = AuthorizationCodeNextType(apiType: nextType)
             }
             return .single(CancelAccountResetData(type: SentAuthorizationCodeType(apiType: type), hash: phoneCodeHash, timeout: timeout, nextType: parsedNextType))
-        case .sentCodeSuccess:
+        case .sentCodeSuccess, .sentCodePaymentRequired:
             return .never()
         }
     }

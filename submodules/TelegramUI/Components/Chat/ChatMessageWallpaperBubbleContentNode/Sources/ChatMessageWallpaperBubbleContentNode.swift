@@ -265,7 +265,12 @@ public class ChatMessageWallpaperBubbleContentNode: ChatMessageBubbleContentNode
                 }
                 
                 let fromYou = item.message.author?.id == item.context.account.peerId
-                let isChannel = item.message.id.peerId.isGroupOrChannel
+                let isGroupOrChannel = item.message.id.peerId.isGroupOrChannel
+                var isGroup = false
+                let messagePeer = item.message.peers[item.message.id.peerId]
+                if let channel = messagePeer as? TelegramChannel, case .group = channel.info {
+                    isGroup = true
+                }
                 
                 let peerName = item.message.peers[item.message.id.peerId].flatMap { EnginePeer($0).compactDisplayTitle } ?? ""
                 let text: String
@@ -278,15 +283,15 @@ public class ChatMessageWallpaperBubbleContentNode: ChatMessageBubbleContentNode
                         if forBoth {
                             text = item.presentationData.strings.Notification_YouChangedWallpaperBoth(peerName).string
                         } else {
-                            text = item.presentationData.strings.Notification_YouChangedWallpaper
+                            text = isGroup ? item.presentationData.strings.Notification_YouChangedGroupWallpaper : item.presentationData.strings.Notification_YouChangedWallpaper
                         }
                     }
                 } else {
                     if item.associatedData.isRecentActions {
                         let authorName = item.message.author.flatMap { EnginePeer($0).compactDisplayTitle } ?? ""
                         text = item.presentationData.strings.Channel_AdminLog_ChannelChangedWallpaper(authorName).string
-                    } else if item.message.id.peerId.isGroupOrChannel {
-                        text = item.presentationData.strings.Notification_ChannelChangedWallpaper
+                    } else if isGroupOrChannel {
+                        text = isGroup ? item.presentationData.strings.Notification_GroupChangedWallpaper : item.presentationData.strings.Notification_ChannelChangedWallpaper
                     } else {
                         text = item.presentationData.strings.Notification_ChangedWallpaper(peerName).string
                     }
@@ -319,18 +324,18 @@ public class ChatMessageWallpaperBubbleContentNode: ChatMessageBubbleContentNode
                 if displayTrailingAnimatedDots {
                     textHeight += subtitleLayout.size.height
                 }
-                let backgroundSize = CGSize(width: width, height: textHeight + 140.0 + (fromYou || isChannel ? 0.0 : 42.0))
+                let backgroundSize = CGSize(width: width, height: textHeight + 140.0 + (fromYou || isGroupOrChannel ? 0.0 : 42.0))
                 
                 return (backgroundSize.width, { boundingWidth in
                     return (backgroundSize, { [weak self] animation, synchronousLoads, _ in
                         if let strongSelf = self {
                             strongSelf.item = item
                             
-                            strongSelf.buttonNode.isHidden = fromYou || isChannel
-                            strongSelf.buttonTitleNode.isHidden = fromYou || isChannel
+                            strongSelf.buttonNode.isHidden = fromYou || isGroupOrChannel
+                            strongSelf.buttonTitleNode.isHidden = fromYou || isGroupOrChannel
                             
-                            let imageFrame = CGRect(origin: CGPoint(x: floorToScreenPixels((backgroundSize.width - imageSize.width) / 2.0), y: 13.0), size: imageSize)
-                            if let media, mediaUpdated {     
+                            let imageFrame = CGRect(origin: CGPoint(x: floorToScreenPixels((boundingWidth - imageSize.width) / 2.0), y: 13.0), size: imageSize)
+                            if let media, mediaUpdated {
                                 let boundingSize = imageSize
                                 var imageSize = boundingSize
                                 let updateImageSignal: Signal<(TransformImageArguments) -> DrawingContext?, NoError>
@@ -382,7 +387,7 @@ public class ChatMessageWallpaperBubbleContentNode: ChatMessageBubbleContentNode
                                         updateImageSignal = patternWallpaperImage(account: item.context.account, accountManager: item.context.sharedContext.accountManager, representations: representations, mode: .thumbnail)
                                         |> mapToSignal { value -> Signal<(TransformImageArguments) -> DrawingContext?, NoError> in
                                             if let value {
-                                                return .single(value)
+                                                return .single(value.generator)
                                             } else {
                                                 return .complete()
                                             }
@@ -435,7 +440,7 @@ public class ChatMessageWallpaperBubbleContentNode: ChatMessageBubbleContentNode
                                 }
                             }
                             
-                            let mediaBackgroundFrame = CGRect(origin: CGPoint(x: floorToScreenPixels((backgroundSize.width - width) / 2.0), y: 0.0), size: backgroundSize)
+                            let mediaBackgroundFrame = CGRect(origin: CGPoint(x: floorToScreenPixels((boundingWidth - width) / 2.0), y: 0.0), size: backgroundSize)
                             strongSelf.mediaBackgroundNode.frame = mediaBackgroundFrame
                                                         
                             strongSelf.mediaBackgroundNode.updateColor(color: selectDateFillStaticColor(theme: item.presentationData.theme.theme, wallpaper: item.presentationData.theme.wallpaper), enableBlur: item.controllerInteraction.enableFullTranslucency && dateFillNeedsBlur(theme: item.presentationData.theme.theme, wallpaper: item.presentationData.theme.wallpaper), transition: .immediate)

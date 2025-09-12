@@ -25,7 +25,7 @@ public class ChatReplyCountItem: ListViewItem {
         self.isComments = isComments
         self.count = count
         self.presentationData = presentationData
-        self.header = ChatMessageDateHeader(timestamp: index.timestamp, scheduled: false, presentationData: presentationData, controllerInteraction: controllerInteraction, context: context)
+        self.header = ChatMessageDateHeader(timestamp: index.timestamp, separableThreadId: nil, scheduled: false, displayHeader: nil, presentationData: presentationData, controllerInteraction: controllerInteraction, context: context)
         self.controllerInteraction = controllerInteraction
     }
     
@@ -91,8 +91,8 @@ public class ChatReplyCountItemNode: ListViewItemNode {
         self.canBeUsedAsScrollToItemAnchor = false
     }
     
-    override public func animateInsertion(_ currentTimestamp: Double, duration: Double, short: Bool) {
-        super.animateInsertion(currentTimestamp, duration: duration, short: short)
+    override public func animateInsertion(_ currentTimestamp: Double, duration: Double, options: ListViewItemAnimationOptions) {
+        super.animateInsertion(currentTimestamp, duration: duration, options: options)
         
         self.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.2)
     }

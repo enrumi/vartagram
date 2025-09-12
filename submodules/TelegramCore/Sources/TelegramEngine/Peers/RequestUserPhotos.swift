@@ -68,7 +68,7 @@ func _internal_requestPeerPhotos(accountPeerId: PeerId, postbox: Postbox, networ
                 }
             }
         } else if let peer = peer, let inputPeer = apiInputPeer(peer) {
-            return network.request(Api.functions.messages.search(flags: 0, peer: inputPeer, q: "", fromId: nil, savedPeerId: nil, topMsgId: nil, filter: .inputMessagesFilterChatPhotos, minDate: 0, maxDate: 0, offsetId: 0, addOffset: 0, limit: 1000, maxId: 0, minId: 0, hash: 0))
+            return network.request(Api.functions.messages.search(flags: 0, peer: inputPeer, q: "", fromId: nil, savedPeerId: nil, savedReaction: nil, topMsgId: nil, filter: .inputMessagesFilterChatPhotos, minDate: 0, maxDate: 0, offsetId: 0, addOffset: 0, limit: 1000, maxId: 0, minId: 0, hash: 0))
             |> map(Optional.init)
             |> `catch` { _ -> Signal<Api.messages.Messages?, NoError> in
                 return .single(nil)
@@ -87,7 +87,7 @@ func _internal_requestPeerPhotos(accountPeerId: PeerId, postbox: Postbox, networ
                             messages = apiMessages
                             chats = apiChats
                             users = apiUsers
-                        case let .messagesSlice(_, _, _, _, apiMessages, apiChats, apiUsers):
+                        case let .messagesSlice(_, _, _, _, _, apiMessages, apiChats, apiUsers):
                             messages = apiMessages
                             chats = apiChats
                             users = apiUsers
@@ -114,7 +114,7 @@ func _internal_requestPeerPhotos(accountPeerId: PeerId, postbox: Postbox, networ
                         
                         var renderedMessages: [Message] = []
                         for message in messages {
-                            if let message = StoreMessage(apiMessage: message, accountPeerId: accountPeerId, peerIsForum: peer.isForum), let renderedMessage = locallyRenderedMessage(message: message, peers: peers) {
+                            if let message = StoreMessage(apiMessage: message, accountPeerId: accountPeerId, peerIsForum: peer.isForumOrMonoForum), let renderedMessage = locallyRenderedMessage(message: message, peers: peers) {
                                 renderedMessages.append(renderedMessage)
                             }
                         }

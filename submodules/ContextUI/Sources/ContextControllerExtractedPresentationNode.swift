@@ -8,6 +8,7 @@ import TelegramCore
 import SwiftSignalKit
 import ReactionSelectionNode
 import UndoUI
+import AccountContext
 
 private extension ContextControllerTakeViewInfo.ContainingItem {
     var contentRect: CGRect {
@@ -91,6 +92,15 @@ private extension ContextControllerTakeViewInfo.ContainingItem {
         }
     }
     
+    var onDismiss: (() -> Void)? {
+        switch self {
+        case let .node(containingNode):
+            return containingNode.onDismiss
+        case let .view(containingView):
+            return containingView.onDismiss
+        }
+    }
+
     var layoutUpdated: ((CGSize, ListViewItemUpdateAnimation) -> Void)? {
         get {
             switch self {
@@ -110,7 +120,7 @@ private extension ContextControllerTakeViewInfo.ContainingItem {
     }
 }
 
-final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextControllerPresentationNode, UIScrollViewDelegate {
+final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextControllerPresentationNode, ASScrollViewDelegate {
     enum ContentSource {
         case location(ContextLocationContentSource)
         case reference(ContextReferenceContentSource)
@@ -124,7 +134,8 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
         
         var animateClippingFromContentAreaInScreenSpace: CGRect?
         var storedGlobalFrame: CGRect?
-        
+        var storedGlobalBoundsFrame: CGRect?
+
         init(containingItem: ContextControllerTakeViewInfo.ContainingItem) {
             self.offsetContainerNode = ASDisplayNode()
             self.containingItem = containingItem
@@ -180,6 +191,9 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
         
         func update(presentationData: PresentationData, parentLayout: ContainerViewLayout, size: CGSize, transition: ContainedViewLayoutTransition) {
             transition.updateFrame(node: self.controller.displayNode, frame: CGRect(origin: CGPoint(), size: size))
+            guard self.controller.navigationController == nil else {
+                return
+            }
             self.controller.containerLayoutUpdated(
                 ContainerViewLayout(
                     size: size,
@@ -227,6 +241,7 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
         return self._ready.get()
     }
     
+    private let context: AccountContext?
     private let getController: () -> ContextControllerProtocol?
     private let requestUpdate: (ContainedViewLayoutTransition) -> Void
     private let requestUpdateOverlayWantsToBeBelowKeyboard: (ContainedViewLayoutTransition) -> Void
@@ -241,6 +256,7 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
     private let scrollNode: ASDisplayNode
     
     private var reactionContextNode: ReactionContextNode?
+    private var reactionPreviewView: ReactionPreviewView?
     private var reactionContextNodeIsAnimatingOut: Bool = false
     
     private var itemContentNode: ItemContentNode?
@@ -267,6 +283,7 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
     private weak var currentUndoController: ViewController?
     
     init(
+        context: AccountContext?,
         getController: @escaping () -> ContextControllerProtocol?,
         requestUpdate: @escaping (ContainedViewLayoutTransition) -> Void,
         requestUpdateOverlayWantsToBeBelowKeyboard: @escaping (ContainedViewLayoutTransition) -> Void,
@@ -274,6 +291,7 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
         requestAnimateOut: @escaping (ContextMenuActionResult, @escaping () -> Void) -> Void,
         source: ContentSource
     ) {
+        self.context = context
         self.getController = getController
         self.requestUpdate = requestUpdate
         self.requestUpdateOverlayWantsToBeBelowKeyboard = requestUpdateOverlayWantsToBeBelowKeyboard
@@ -307,6 +325,7 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
         
         self.actionsContainerNode = ASDisplayNode()
         self.actionsStackNode = ContextControllerActionsStackNode(
+            context: self.context,
             getController: getController,
             requestDismiss: { result in
                 requestDismiss(result)
@@ -315,6 +334,7 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
         )
         
         self.additionalActionsStackNode = ContextControllerActionsStackNode(
+            context: self.context,
             getController: getController,
             requestDismiss: { result in
                 requestDismiss(result)
@@ -339,7 +359,7 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
         //self.addSubnode(self.contentRectDebugNode)
         #endif
 
-        self.scroller.delegate = self
+        self.scroller.delegate = self.wrappedScrollViewDelegate
         
         self.dismissTapNode.view.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(self.dismissTapGesture(_:))))
         
@@ -369,7 +389,9 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
                 if let result = contentNode.containingItem.customHitTest?(contentPoint) {
                     return result
                 } else if let result = contentNode.containingItem.contentHitTest(contentPoint, with: event) {
-                    if result is TextSelectionNodeView {
+                    if source.keepDefaultContentTouches {
+                        return result
+                    } else if result is TextSelectionNodeView {
                         return result
                     } else if contentNode.containingItem.contentRect.contains(contentPoint) {
                         return contentNode.containingItem.contentView
@@ -381,7 +403,16 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
                 //TODO:
             }
             
-            return self.scrollNode.hitTest(self.view.convert(point, to: self.scrollNode.view), with: event)
+            if let result = self.scrollNode.hitTest(self.view.convert(point, to: self.scrollNode.view), with: event) {
+                if let reactionContextNode = self.reactionContextNode, reactionContextNode.isExpanded {
+                    if result === self.actionsContainerNode.view {
+                        return self.dismissTapNode.view
+                    }
+                }
+                return result
+            }
+
+            return nil
         } else {
             return nil
         }
@@ -442,7 +473,7 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
             reactionContextNode.updateIsIntersectingContent(isIntersectingContent: isIntersectingContent, transition: .animated(duration: 0.25, curve: .easeInOut))
             
             if !reactionContextNode.isExpanded && reactionContextNode.canBeExpanded {
-                if topOverscroll > 30.0 && self.scroller.isDragging {
+                if topOverscroll > 30.0 && self.scroller.isTracking {
                     self.scroller.panGestureRecognizer.state = .cancelled
                     reactionContextNode.expand()
                 } else {
@@ -479,6 +510,8 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
     func wantsDisplayBelowKeyboard() -> Bool {
         if let reactionContextNode = self.reactionContextNode {
             return reactionContextNode.wantsDisplayBelowKeyboard()
+        } else if case let .reference(source) = self.source {
+            return source.forceDisplayBelowKeyboard
         } else {
             return false
         }
@@ -553,7 +586,7 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
         let actionsEdgeInset: CGFloat
         let actionsSideInset: CGFloat
         let topInset: CGFloat = layout.insets(options: .statusBar).top + 8.0
-        let bottomInset: CGFloat = 10.0
+        var bottomInset: CGFloat = 10.0
         
         let itemContentNode: ItemContentNode?
         let controllerContentNode: ControllerContentNode?
@@ -628,7 +661,8 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
         var animateReactionsIn = false
         var contentTopInset: CGFloat = topInset
         var removedReactionContextNode: ReactionContextNode?
-        if let reactionItems = self.actionsStackNode.topReactionItems, !reactionItems.reactionItems.isEmpty {
+
+        if let reactionItems = self.actionsStackNode.topReactionItems, !reactionItems.reactionItems.isEmpty, let controller = self.getController() as? ContextController {
             let reactionContextNode: ReactionContextNode
             if let current = self.reactionContextNode {
                 reactionContextNode = current
@@ -639,7 +673,10 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
                     presentationData: presentationData,
                     items: reactionItems.reactionItems,
                     selectedItems: reactionItems.selectedReactionItems,
+                    title: reactionItems.reactionsTitle,
+                    reactionsLocked: reactionItems.reactionsLocked,
                     alwaysAllowPremiumReactions: reactionItems.alwaysAllowPremiumReactions,
+                    allPresetReactionsAreAvailable: reactionItems.allPresetReactionsAreAvailable,
                     getEmojiContent: reactionItems.getEmojiContent,
                     isExpandedUpdated: { [weak self] transition in
                         guard let strongSelf = self else {
@@ -661,6 +698,7 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
                         strongSelf.requestUpdateOverlayWantsToBeBelowKeyboard(transition)
                     }
                 )
+                reactionContextNode.displayTail = !controller.hideReactionPanelTail
                 self.reactionContextNode = reactionContextNode
                 self.addSubnode(reactionContextNode)
                 
@@ -680,6 +718,13 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
                         return
                     }
                     
+                    if let reactionItems = strongSelf.actionsStackNode.topReactionItems, !reactionItems.reactionItems.isEmpty {
+                        if reactionItems.allPresetReactionsAreAvailable {
+                            controller.premiumReactionsSelected?()
+                            return
+                        }
+                    }
+
                     if let file = file, let reactionContextNode = strongSelf.reactionContextNode {
                         let position: UndoOverlayController.Position
                         let insets = validLayout.insets(options: .statusBar)
@@ -705,6 +750,8 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
                         controller.premiumReactionsSelected?()
                     }
                 }
+
+                reactionContextNode.updateLayout(size: layout.size, insets: UIEdgeInsets(top: topInset, left: layout.safeInsets.left, bottom: 0.0, right: layout.safeInsets.right), anchorRect: CGRect(origin: CGPoint(x: 0.0, y: layout.size.height), size: CGSize(width: 1.0, height: 1.0)), isCoveredByInput: false, isAnimatingOut: false, transition: .immediate)
             }
             contentTopInset += reactionContextNode.contentHeight + 18.0
         } else if let reactionContextNode = self.reactionContextNode {
@@ -712,10 +759,35 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
             removedReactionContextNode = reactionContextNode
         }
         
+        let reactionPreviewSize = CGSize(width: 100.0, height: 100.0)
+        let reactionPreviewInset: CGFloat = 7.0
+        var removedReactionPreviewView: ReactionPreviewView?
+        if self.reactionContextNode == nil, let previewReaction = self.actionsStackNode.topPreviewReaction {
+            let reactionPreviewView: ReactionPreviewView
+            if let current = self.reactionPreviewView {
+                reactionPreviewView = current
+            } else {
+                reactionPreviewView = ReactionPreviewView(context: previewReaction.context, file: previewReaction.file)
+                self.reactionPreviewView = reactionPreviewView
+                self.view.addSubview(reactionPreviewView)
+            }
+
+            contentTopInset += reactionPreviewSize.height + reactionPreviewInset
+        } else {
+            removedReactionPreviewView = self.reactionPreviewView
+            self.reactionPreviewView = nil
+        }
+
         if let contentNode = itemContentNode {
             switch stateTransition {
             case .animateIn, .animateOut:
                 contentNode.storedGlobalFrame = convertFrame(contentNode.containingItem.contentRect, from: contentNode.containingItem.view, to: self.view)
+
+                var rect = convertFrame(contentNode.containingItem.view.bounds, from: contentNode.containingItem.view, to: self.view)
+                if rect.origin.x < 0.0 {
+                    rect.origin.x += layout.size.width
+                }
+                contentNode.storedGlobalBoundsFrame = rect
             case .none:
                 if contentNode.storedGlobalFrame == nil {
                     contentNode.storedGlobalFrame = convertFrame(contentNode.containingItem.contentRect, from: contentNode.containingItem.view, to: self.view)
@@ -723,7 +795,7 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
             }
         }
         
-        let contentParentGlobalFrame: CGRect
+        var contentParentGlobalFrame: CGRect
         var contentRect: CGRect
         var isContentResizeableVertically: Bool = false
         let _ = isContentResizeableVertically
@@ -732,7 +804,7 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
         case let .location(location):
             if let transitionInfo = location.transitionInfo() {
                 contentRect = CGRect(origin: transitionInfo.location, size: CGSize(width: 1.0, height: 1.0))
-                contentParentGlobalFrame = CGRect(origin: CGPoint(x: 0.0, y: contentRect.minX), size: CGSize(width: layout.size.width, height: contentRect.height))
+                contentParentGlobalFrame = CGRect(origin: CGPoint(x: 0.0, y: contentRect.minY), size: CGSize(width: layout.size.width, height: contentRect.height))
             } else {
                 return
             }
@@ -740,14 +812,16 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
             if let transitionInfo = reference.transitionInfo() {
                 contentRect = convertFrame(transitionInfo.referenceView.bounds.inset(by: transitionInfo.insets), from: transitionInfo.referenceView, to: self.view).insetBy(dx: -2.0, dy: 0.0)
                 contentRect.size.width += 5.0
-                contentParentGlobalFrame = CGRect(origin: CGPoint(x: 0.0, y: contentRect.minX), size: CGSize(width: layout.size.width, height: contentRect.height))
+                contentParentGlobalFrame = CGRect(origin: CGPoint(x: 0.0, y: contentRect.minY), size: CGSize(width: layout.size.width, height: contentRect.height))
             } else {
                 return
             }
         case .extracted:
             if let contentNode = itemContentNode {
                 contentParentGlobalFrame = convertFrame(contentNode.containingItem.view.bounds, from: contentNode.containingItem.view, to: self.view)
-                
+                if let frame = contentNode.storedGlobalBoundsFrame {
+                    contentParentGlobalFrame.origin.x = frame.minX
+                }
                 let contentRectGlobalFrame = CGRect(origin: CGPoint(x: contentNode.containingItem.contentRect.minX, y: (contentNode.storedGlobalFrame?.maxY ?? 0.0) - contentNode.containingItem.contentRect.height), size: contentNode.containingItem.contentRect.size)
                 contentRect = CGRect(origin: CGPoint(x: contentRectGlobalFrame.minX, y: contentRectGlobalFrame.maxY - contentNode.containingItem.contentRect.size.height), size: contentNode.containingItem.contentRect.size)
                 if case .animateOut = stateTransition {
@@ -804,6 +878,22 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
             }
         }
         
+        var contentParentGlobalFrameOffsetX: CGFloat = 0.0
+        if case let .extracted(extracted) = self.source, extracted.adjustContentForSideInset {
+            let contentSideInset: CGFloat = actionsSideInset + 6.0
+
+            var updatedFrame = contentParentGlobalFrame
+            if updatedFrame.origin.x + updatedFrame.width > layout.size.width - contentSideInset {
+                updatedFrame.origin.x = layout.size.width - contentSideInset - updatedFrame.width
+            }
+            if updatedFrame.origin.x < contentSideInset {
+                updatedFrame.origin.x = contentSideInset
+            }
+
+            contentParentGlobalFrameOffsetX = updatedFrame.minX - contentParentGlobalFrame.minX
+            contentParentGlobalFrame = updatedFrame
+        }
+
         let keepInPlace: Bool
         let actionsHorizontalAlignment: ContextActionsHorizontalAlignment
         switch self.source {
@@ -813,6 +903,7 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
         case let .extracted(source):
             keepInPlace = source.keepInPlace
             actionsHorizontalAlignment = source.actionsHorizontalAlignment
+            bottomInset += source.additionalInsets.bottom
         case .controller:
             //TODO:
             keepInPlace = false
@@ -926,6 +1017,14 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
                 self.proposedReactionsPositionLock = nil
             }
             
+            if let reactionPreviewView = self.reactionPreviewView {
+                let anchorRect = contentRect.offsetBy(dx: contentParentGlobalFrame.minX, dy: 0.0)
+
+                let reactionPreviewFrame = CGRect(origin: CGPoint(x: floor((anchorRect.midX - reactionPreviewSize.width * 0.5)), y: anchorRect.minY - reactionPreviewInset - reactionPreviewSize.height), size: reactionPreviewSize)
+                transition.updateFrame(view: reactionPreviewView, frame: reactionPreviewFrame)
+                reactionPreviewView.update(size: reactionPreviewFrame.size)
+            }
+
             if let _ = self.currentReactionsPositionLock {
                 transition.updateAlpha(node: self.actionsStackNode, alpha: 0.0)
             } else {
@@ -939,6 +1038,12 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
                 })
             }
             
+            if let removedReactionPreviewView {
+                transition.updateAlpha(layer: removedReactionPreviewView.layer, alpha: 0.0, completion: { [weak removedReactionPreviewView] _ in
+                    removedReactionPreviewView?.removeFromSuperview()
+                })
+            }
+
             transition.updateFrame(node: self.contentRectDebugNode, frame: contentRect, beginWithCurrentState: true)
             
             var actionsFrame: CGRect
@@ -1027,6 +1132,12 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
             if let contentNode = itemContentNode {
                 var contentFrame = CGRect(origin: CGPoint(x: contentParentGlobalFrame.minX + contentRect.minX - contentNode.containingItem.contentRect.minX, y: contentRect.minY - contentNode.containingItem.contentRect.minY + contentVerticalOffset + additionalVisibleOffsetY), size: contentNode.containingItem.view.bounds.size)
                 if case let .extracted(extracted) = self.source {
+                    if extracted.adjustContentHorizontally {
+                        contentFrame.origin.x = combinedActionsFrame.minX
+                        if contentFrame.maxX > layout.size.width {
+                            contentFrame.origin.x = layout.size.width - contentFrame.width - actionsEdgeInset
+                        }
+                    }
                     if extracted.centerVertically {
                         if combinedActionsFrame.height.isZero {
                             contentFrame.origin.y = floorToScreenPixels((layout.size.height -  contentFrame.height) / 2.0)
@@ -1123,24 +1234,34 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
                 let contentX = contentParentGlobalFrame.minX + contentRect.minX - contentNode.containingItem.contentRect.minX
                 let contentWidth = contentNode.containingItem.view.bounds.size.width
                 let contentHeight = contentNode.containingItem.view.bounds.size.height
-                if case let .extracted(extracted) = self.source, extracted.centerVertically {
+                if case let .extracted(extracted) = self.source, extracted.adjustContentHorizontally {
+                    let fixedContentX = self.actionsContainerNode.frame.minX
+                    animationInContentXDistance = fixedContentX - contentX
+                } else if case let .extracted(extracted) = self.source, extracted.centerVertically {
                     if actionsSize.height.isZero {
+                        var initialContentRect = contentRect
+                        initialContentRect.origin.y += extracted.initialAppearanceOffset.y
+
                         let fixedContentY = floorToScreenPixels((layout.size.height - contentHeight) / 2.0)
-                        animationInContentYDistance = fixedContentY - contentRect.minY
+                        animationInContentYDistance = fixedContentY - initialContentRect.minY
                     } else if contentX + contentWidth > layout.size.width / 2.0, actionsSize.height > 0.0 {
                         let fixedContentX = layout.size.width - (contentX + contentWidth)
                         animationInContentXDistance = fixedContentX - contentX
-                        
-                        contentNode.layer.animateSpring(
-                            from: -animationInContentXDistance as NSNumber, to: 0.0 as NSNumber,
-                            keyPath: "position.x",
-                            duration: duration,
-                            delay: 0.0,
-                            initialVelocity: 0.0,
-                            damping: springDamping,
-                            additive: true
-                        )
                     }
+                } else {
+                    animationInContentXDistance = contentParentGlobalFrameOffsetX
+                }
+
+                if animationInContentXDistance != 0.0 {
+                    contentNode.layer.animateSpring(
+                        from: -animationInContentXDistance as NSNumber, to: 0.0 as NSNumber,
+                        keyPath: "position.x",
+                        duration: duration,
+                        delay: 0.0,
+                        initialVelocity: 0.0,
+                        damping: springDamping,
+                        additive: true
+                    )
                 }
                 
                 contentNode.layer.animateSpring(
@@ -1152,6 +1273,29 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
                     damping: springDamping,
                     additive: true
                 )
+
+                if let reactionPreviewView = self.reactionPreviewView {
+                    reactionPreviewView.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.2)
+                    reactionPreviewView.layer.animateSpring(
+                        from: -animationInContentYDistance as NSNumber, to: 0.0 as NSNumber,
+                        keyPath: "position.y",
+                        duration: duration,
+                        delay: 0.0,
+                        initialVelocity: 0.0,
+                        damping: springDamping,
+                        additive: true
+                    )
+                    reactionPreviewView.layer.animateSpring(
+                        from: 0.01 as NSNumber,
+                        to: 1.0 as NSNumber,
+                        keyPath: "transform.scale",
+                        duration: duration,
+                        delay: 0.0,
+                        initialVelocity: 0.0,
+                        damping: springDamping,
+                        additive: false
+                    )
+                }
             } else if let contentNode = controllerContentNode {
                 if case let .controller(source) = self.source, let transitionInfo = source.transitionInfo(), let (sourceView, sourceRect) = transitionInfo.sourceNode() {
                     let sourcePoint = sourceView.convert(sourceRect.center, to: self.view)
@@ -1298,7 +1442,7 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
             }
             
             let currentContentScreenFrame: CGRect
-            
+
             switch self.source {
             case let .location(location):
                 if let putBackInfo = location.transitionInfo() {
@@ -1328,6 +1472,9 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
                 
                 if let contentNode = itemContentNode {
                     currentContentScreenFrame = convertFrame(contentNode.containingItem.contentRect, from: contentNode.containingItem.view, to: self.view)
+                    if currentContentScreenFrame.origin.x < 0.0 {
+                        contentParentGlobalFrameOffsetX = layout.size.width
+                    }
                 } else {
                     return
                 }
@@ -1377,32 +1524,63 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
                 }
             }
             
+            var restoreOverlayViews: [() -> Void] = []
+            if let overlayViews = self.getController()?.getOverlayViews?(), !overlayViews.isEmpty, let itemContentNode, let contentNodeSupernode = itemContentNode.supernode {
+                for view in overlayViews {
+                    let originalFrame = view.frame
+                    let originalSuperview = view.superview
+                    let originalIndex = view.superview?.subviews.firstIndex(of: view)
+                    let originalGroupOpacity = view.layer.allowsGroupOpacity
+
+                    contentNodeSupernode.view.insertSubview(view, aboveSubview: itemContentNode.view)
+                    view.frame = view.convert(view.bounds, to: contentNodeSupernode.view)
+                    view.layer.allowsGroupOpacity = true
+                    view.layer.animateAlpha(from: 0.0, to: view.alpha, duration: 0.2)
+
+                    restoreOverlayViews.append({
+                        view.frame = originalFrame
+                        view.layer.allowsGroupOpacity = originalGroupOpacity
+                        if let originalIndex {
+                            originalSuperview?.insertSubview(view, at: originalIndex)
+                        } else {
+                            originalSuperview?.addSubview(view)
+                        }
+                    })
+                }
+            }
+
             let completeWithActionStack = itemContentNode == nil && controllerContentNode == nil
-            
             if let contentNode = itemContentNode {
                 contentNode.containingItem.willUpdateIsExtractedToContextPreview?(false, transition)
                 
                 var animationInContentXDistance: CGFloat = 0.0
                 let contentX = contentParentGlobalFrame.minX + contentRect.minX - contentNode.containingItem.contentRect.minX
                 let contentWidth = contentNode.containingItem.view.bounds.size.width
-                if case let .extracted(extracted) = self.source, extracted.centerVertically {
+                if case let .extracted(extracted) = self.source, extracted.adjustContentHorizontally {
+                    let fixedContentX = self.actionsContainerNode.frame.minX
+                    animationInContentXDistance = contentX - fixedContentX
+                } else if case let .extracted(extracted) = self.source, extracted.centerVertically {
                     if actionsSize.height.isZero {
 //                        let fixedContentY = floorToScreenPixels((layout.size.height - contentHeight) / 2.0)
                         animationInContentYDistance = 0.0 //contentY - fixedContentY
                     } else if contentX + contentWidth > layout.size.width / 2.0{
                         let fixedContentX = layout.size.width - (contentX + contentWidth)
                         animationInContentXDistance = contentX - fixedContentX
-                        
-                        contentNode.offsetContainerNode.layer.animate(
-                            from: -animationInContentXDistance as NSNumber,
-                            to: 0.0 as NSNumber,
-                            keyPath: "position.x",
-                            timingFunction: timingFunction,
-                            duration: duration,
-                            delay: 0.0,
-                            additive: true
-                        )
                     }
+                } else {
+                    animationInContentXDistance = -contentParentGlobalFrameOffsetX
+                }
+
+                if animationInContentXDistance != 0.0 {
+                    contentNode.offsetContainerNode.layer.animate(
+                        from: -animationInContentXDistance as NSNumber,
+                        to: 0.0 as NSNumber,
+                        keyPath: "position.x",
+                        timingFunction: timingFunction,
+                        duration: duration,
+                        delay: 0.0,
+                        additive: true
+                    )
                 }
                 
                 contentNode.offsetContainerNode.position = contentNode.offsetContainerNode.position.offsetBy(dx: animationInContentXDistance, dy: -animationInContentYDistance)
@@ -1417,9 +1595,6 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
                     additive: true,
                     completion: { [weak self] _ in
                         Queue.mainQueue().after(reactionContextNodeIsAnimatingOut ? 0.2 * UIView.animationDurationFactor() : 0.0, {
-                            contentNode.containingItem.isExtractedToContextPreview = false
-                            contentNode.containingItem.isExtractedToContextPreviewUpdated?(false)
-                            
                             if let strongSelf = self, let contentNode = strongSelf.itemContentNode {
                                 switch contentNode.containingItem {
                                 case let .node(containingNode):
@@ -1429,10 +1604,41 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
                                 }
                             }
                             
+                            contentNode.containingItem.isExtractedToContextPreview = false
+                            contentNode.containingItem.isExtractedToContextPreviewUpdated?(false)
+                            contentNode.containingItem.onDismiss?()
+
+                            restoreOverlayViews.forEach({ $0() })
                             completion()
                         })
                     }
                 )
+
+                if let reactionPreviewView = self.reactionPreviewView {
+                    reactionPreviewView.layer.animate(
+                        from: 0.0 as NSNumber,
+                        to: -animationInContentYDistance as NSNumber,
+                        keyPath: "position.y",
+                        timingFunction: timingFunction,
+                        duration: duration,
+                        delay: 0.0,
+                        removeOnCompletion: true,
+                        additive: true,
+                        completion: { _ in
+                        }
+                    )
+                    reactionPreviewView.layer.animate(
+                        from: 1.0 as NSNumber,
+                        to: 0.01 as NSNumber,
+                        keyPath: "transform.scale",
+                        timingFunction: timingFunction,
+                        duration: duration,
+                        delay: 0.0,
+                        removeOnCompletion: false,
+                        additive: false
+                    )
+                    reactionPreviewView.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.2, removeOnCompletion: false, completion: { _ in })
+                }
             }
             if let contentNode = controllerContentNode {
                 if case let .controller(source) = self.source, let transitionInfo = source.transitionInfo(), let (sourceView, sourceRect) = transitionInfo.sourceNode() {
@@ -1443,6 +1649,7 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
                 }
                 
                 contentNode.layer.animateAlpha(from: 1.0, to: 0.0, duration: duration * 0.8, removeOnCompletion: false, completion: { _ in
+                    restoreOverlayViews.forEach({ $0() })
                     completion()
                 })
                 contentNode.layer.animate(
@@ -1478,6 +1685,7 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
                 removeOnCompletion: false,
                 completion: { _ in
                     if completeWithActionStack {
+                        restoreOverlayViews.forEach({ $0() })
                         completion()
                     }
                 }
@@ -1505,18 +1713,6 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
             if let reactionContextNode = self.reactionContextNode {
                 reactionContextNode.animateOut(to: currentContentScreenFrame, animatingOutToReaction: self.reactionContextNodeIsAnimatingOut)
             }
-            
-            if let overlayViews = self.getController()?.getOverlayViews?(), !overlayViews.isEmpty {
-                for view in overlayViews {
-                    if let snapshotView = view.snapshotView(afterScreenUpdates: false) {
-                        snapshotView.frame = view.convert(view.bounds, to: nil)
-                        self.view.addSubview(snapshotView)
-                        snapshotView.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.2, removeOnCompletion: false, completion: { [weak snapshotView] _ in
-                            snapshotView?.removeFromSuperview()
-                        })
-                    }
-                }
-            }
         case .none:
             if animateReactionsIn, let reactionContextNode = self.reactionContextNode {
                 reactionContextNode.animateIn(from: contentRect)
@@ -1529,7 +1725,7 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
             contentNode.containingItem.willUpdateIsExtractedToContextPreview?(false, .immediate)
             contentNode.containingItem.isExtractedToContextPreview = false
             contentNode.containingItem.isExtractedToContextPreviewUpdated?(false)
-            
+
             switch contentNode.containingItem {
             case let .node(containingNode):
                 containingNode.addSubnode(containingNode.contentNode)
@@ -1538,8 +1734,8 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
             }
         }
     }
-    
-    func animateOutToReaction(value: MessageReaction.Reaction, targetView: UIView, hideNode: Bool, animateTargetContainer: UIView?, addStandaloneReactionAnimation: ((StandaloneReactionAnimation) -> Void)?, reducedCurve: Bool, completion: @escaping () -> Void) {
+
+    func animateOutToReaction(value: MessageReaction.Reaction, targetView: UIView, hideNode: Bool, animateTargetContainer: UIView?, addStandaloneReactionAnimation: ((StandaloneReactionAnimation) -> Void)?, reducedCurve: Bool, onHit: (() -> Void)?, completion: @escaping () -> Void) {
         guard let reactionContextNode = self.reactionContextNode else {
             self.requestAnimateOut(.default, completion)
             return
@@ -1568,7 +1764,7 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
             intermediateCompletion()
         })
         
-        reactionContextNode.animateOutToReaction(value: value, targetView: targetView, hideNode: hideNode, animateTargetContainer: animateTargetContainer, addStandaloneReactionAnimation: addStandaloneReactionAnimation, completion: { [weak self] in
+        reactionContextNode.animateOutToReaction(value: value, targetView: targetView, hideNode: hideNode, animateTargetContainer: animateTargetContainer, addStandaloneReactionAnimation: addStandaloneReactionAnimation, onHit: onHit, completion: { [weak self] in
             guard let strongSelf = self else {
                 return
             }
@@ -1587,6 +1783,13 @@ final class ContextControllerExtractedPresentationNode: ASDisplayNode, ContextCo
         if self.reactionContextNodeIsAnimatingOut, let reactionContextNode = self.reactionContextNode {
             reactionContextNode.bounds = reactionContextNode.bounds.offsetBy(dx: 0.0, dy: offset.y)
             transition.animateOffsetAdditive(node: reactionContextNode, offset: -offset.y)
+
+            if let itemContentNode = self.itemContentNode {
+                itemContentNode.bounds = itemContentNode.bounds.offsetBy(dx: 0.0, dy: offset.y)
+                transition.animateOffsetAdditive(node: itemContentNode, offset: -offset.y)
+            }
         }
     }
 }
+
+

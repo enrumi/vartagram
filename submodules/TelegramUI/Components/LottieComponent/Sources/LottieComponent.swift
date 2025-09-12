@@ -91,6 +91,7 @@ public final class LottieComponent: Component {
     public let size: CGSize?
     public let renderingScale: CGFloat?
     public let loop: Bool
+    public let playOnce: ActionSlot<Void>?
     
     public init(
         content: Content,
@@ -99,7 +100,8 @@ public final class LottieComponent: Component {
         startingPosition: StartingPosition = .end,
         size: CGSize? = nil,
         renderingScale: CGFloat? = nil,
-        loop: Bool = false
+        loop: Bool = false,
+        playOnce: ActionSlot<Void>? = nil
     ) {
         self.content = content
         self.color = color
@@ -108,6 +110,7 @@ public final class LottieComponent: Component {
         self.size = size
         self.renderingScale = renderingScale
         self.loop = loop
+        self.playOnce = playOnce
     }
     
     public static func ==(lhs: LottieComponent, rhs: LottieComponent) -> Bool {
@@ -284,6 +287,20 @@ public final class LottieComponent: Component {
             }
         }
         
+        public func setFrameIndex(index: Int) {
+            guard let _ = self.animationInstance, let animationFrameRange = self.animationFrameRange else {
+                self.scheduledPlayOnce = true
+                return
+            }
+            
+            let currentFrame = max(animationFrameRange.lowerBound, min(animationFrameRange.upperBound, index))
+            
+            if self.currentFrame != currentFrame {
+                self.currentFrame = currentFrame
+                self.updateImage()
+            }
+        }
+        
         private func loadPlaceholder(data: Data) {
             guard let component = self.component, let placeholderColor = component.placeholderColor else {
                 return
@@ -405,11 +422,18 @@ public final class LottieComponent: Component {
             }
         }
         
-        func update(component: LottieComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: Transition) -> CGSize {
+        func update(component: LottieComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: ComponentTransition) -> CGSize {
             let previousComponent = self.component
             
             self.component = component
             self.state = state
+            
+            component.playOnce?.connect { [weak self] in
+                guard let self else {
+                    return
+                }
+                self.playOnce()
+            }
             
             let size = component.size ?? availableSize
             
@@ -460,7 +484,7 @@ public final class LottieComponent: Component {
         return View(frame: CGRect())
     }
     
-    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: Transition) -> CGSize {
+    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<EnvironmentType>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
 }

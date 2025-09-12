@@ -9,7 +9,7 @@ private let shadowImage: UIImage? = {
     UIImage(named: "Call/VideoGradient")?.precomposed()
 }()
 
-func resolveVideoRotationAngle(angle: Float, followsDeviceOrientation: Bool, interfaceOrientation: UIInterfaceOrientation) -> Float {
+public func resolveCallVideoRotationAngle(angle: Float, followsDeviceOrientation: Bool, interfaceOrientation: UIInterfaceOrientation) -> Float {
     if !followsDeviceOrientation {
         return angle
     }
@@ -29,7 +29,7 @@ func resolveVideoRotationAngle(angle: Float, followsDeviceOrientation: Bool, int
     return (angle + interfaceAngle).truncatingRemainder(dividingBy: Float.pi * 2.0)
 }
 
-private final class VideoContainerLayer: SimpleLayer {
+final class VideoContainerLayer: SimpleLayer {
     let contentsLayer: SimpleLayer
     
     override init() {
@@ -50,7 +50,7 @@ private final class VideoContainerLayer: SimpleLayer {
         fatalError("init(coder:) has not been implemented")
     }
     
-    func update(size: CGSize, transition: Transition) {
+    func update(size: CGSize, transition: ComponentTransition) {
         transition.setFrame(layer: self.contentsLayer, frame: CGRect(origin: CGPoint(), size: size))
     }
 }
@@ -128,11 +128,17 @@ final class VideoContainerView: HighlightTrackingButton {
     }
     
     let key: Key
+    let enableSharpening: Bool
     
-    private let videoContainerLayer: VideoContainerLayer
+    let videoContainerLayer: VideoContainerLayer
+    var videoContainerLayerTaken: Bool = false
     
     private var videoLayer: PrivateCallVideoLayer
     private var disappearingVideoLayer: DisappearingVideo?
+    
+    var currentVideoOutput: VideoSource.Output? {
+        return self.videoLayer.video
+    }
     
     let blurredContainerLayer: SimpleLayer
     
@@ -206,8 +212,9 @@ final class VideoContainerView: HighlightTrackingButton {
     
     var pressAction: (() -> Void)?
     
-    init(key: Key) {
+    init(key: Key, enableSharpening: Bool) {
         self.key = key
+        self.enableSharpening = enableSharpening
         
         self.videoContainerLayer = VideoContainerLayer()
         self.videoContainerLayer.backgroundColor = nil
@@ -218,7 +225,7 @@ final class VideoContainerView: HighlightTrackingButton {
             self.videoContainerLayer.contentsLayer.cornerCurve = .circular
         }
         
-        self.videoLayer = PrivateCallVideoLayer()
+        self.videoLayer = PrivateCallVideoLayer(enableSharpening: self.enableSharpening)
         self.videoLayer.masksToBounds = true
         self.videoLayer.isDoubleSided = false
         if #available(iOS 13.0, *) {
@@ -245,7 +252,7 @@ final class VideoContainerView: HighlightTrackingButton {
         self.layer.addSublayer(self.shadowContainer)
         
         self.highligthedChanged = { [weak self] highlighted in
-            guard let self, let params = self.params, !self.videoContainerLayer.bounds.isEmpty else {
+            guard let self, let params = self.params, !self.videoContainerLayer.bounds.isEmpty, !self.videoContainerLayerTaken else {
                 return
             }
             var highlightedState = false
@@ -268,13 +275,13 @@ final class VideoContainerView: HighlightTrackingButton {
             
             if highlightedState {
                 self.videoContainerLayer.removeAnimation(forKey: "sublayerTransform")
-                let transition = Transition(animation: .curve(duration: 0.15, curve: .easeInOut))
+                let transition = ComponentTransition(animation: .curve(duration: 0.15, curve: .easeInOut))
                 transition.setSublayerTransform(layer: self.videoContainerLayer, transform: CATransform3DMakeScale(topScale, topScale, 1.0))
             } else {
                 let t = self.videoContainerLayer.presentation()?.sublayerTransform ?? self.videoContainerLayer.sublayerTransform
                 let currentScale = sqrt((t.m11 * t.m11) + (t.m12 * t.m12) + (t.m13 * t.m13))
                 
-                let transition = Transition(animation: .none)
+                let transition = ComponentTransition(animation: .none)
                 transition.setSublayerTransform(layer: self.videoContainerLayer, transform: CATransform3DIdentity)
                 
                 self.videoContainerLayer.animateSublayerScale(from: currentScale, to: maxScale, duration: 0.13, timingFunction: CAMediaTimingFunctionName.easeOut.rawValue, removeOnCompletion: false, completion: { [weak self] completed in
@@ -316,6 +323,10 @@ final class VideoContainerView: HighlightTrackingButton {
     }
     
     @objc private func panGesture(_ recognizer: UIPanGestureRecognizer) {
+        if self.videoContainerLayerTaken {
+            return
+        }
+        
         switch recognizer.state {
         case .began, .changed:
             self.dragVelocity = CGPoint()
@@ -408,7 +419,7 @@ final class VideoContainerView: HighlightTrackingButton {
             self.dragPositionAnimatorLink = nil
             return
         }
-        let videoLayout = self.calculateMinimizedLayout(params: params, videoMetrics: videoMetrics, resolvedRotationAngle: resolveVideoRotationAngle(angle: videoMetrics.rotationAngle, followsDeviceOrientation: videoMetrics.followsDeviceOrientation, interfaceOrientation: params.interfaceOrientation), applyDragPosition: false)
+        let videoLayout = self.calculateMinimizedLayout(params: params, videoMetrics: videoMetrics, resolvedRotationAngle: resolveCallVideoRotationAngle(angle: videoMetrics.rotationAngle, followsDeviceOrientation: videoMetrics.followsDeviceOrientation, interfaceOrientation: params.interfaceOrientation), applyDragPosition: false)
         let targetPosition = videoLayout.rotatedVideoFrame.center
         
         self.dragVelocity = self.updateVelocityUsingSpring(
@@ -445,7 +456,7 @@ final class VideoContainerView: HighlightTrackingButton {
         let previousVideoLayer = self.videoLayer
         self.disappearingVideoLayer = DisappearingVideo(flipAnimationInfo: flipAnimationInfo, videoLayer: self.videoLayer, videoMetrics: videoMetrics)
         
-        self.videoLayer = PrivateCallVideoLayer()
+        self.videoLayer = PrivateCallVideoLayer(enableSharpening: self.enableSharpening)
         self.videoLayer.opacity = previousVideoLayer.opacity
         self.videoLayer.masksToBounds = true
         self.videoLayer.isDoubleSided = false
@@ -462,14 +473,14 @@ final class VideoContainerView: HighlightTrackingButton {
         self.dragPositionAnimatorLink = nil
     }
     
-    private func update(transition: Transition) {
+    private func update(transition: ComponentTransition) {
         guard let params = self.params else {
             return
         }
         self.update(previousParams: params, params: params, transition: transition)
     }
     
-    func update(size: CGSize, insets: UIEdgeInsets, interfaceOrientation: UIInterfaceOrientation, cornerRadius: CGFloat, controlsHidden: Bool, isMinimized: Bool, isAnimatedOut: Bool, transition: Transition) {
+    func update(size: CGSize, insets: UIEdgeInsets, interfaceOrientation: UIInterfaceOrientation, cornerRadius: CGFloat, controlsHidden: Bool, isMinimized: Bool, isAnimatedOut: Bool, transition: ComponentTransition) {
         let params = Params(size: size, insets: insets, interfaceOrientation: interfaceOrientation, cornerRadius: cornerRadius, controlsHidden: controlsHidden, isMinimized: isMinimized, isAnimatedOut: isAnimatedOut)
         if self.params == params {
             return
@@ -548,7 +559,10 @@ final class VideoContainerView: HighlightTrackingButton {
         )
     }
     
-    private func update(previousParams: Params?, params: Params, transition: Transition) {
+    private func update(previousParams: Params?, params: Params, transition: ComponentTransition) {
+        if self.videoContainerLayerTaken {
+            return
+        }
         guard let videoMetrics = self.videoMetrics else {
             return
         }
@@ -558,7 +572,7 @@ final class VideoContainerView: HighlightTrackingButton {
         }
         self.appliedVideoMetrics = videoMetrics
         
-        let resolvedRotationAngle = resolveVideoRotationAngle(angle: videoMetrics.rotationAngle, followsDeviceOrientation: videoMetrics.followsDeviceOrientation, interfaceOrientation: params.interfaceOrientation)
+        let resolvedRotationAngle = resolveCallVideoRotationAngle(angle: videoMetrics.rotationAngle, followsDeviceOrientation: videoMetrics.followsDeviceOrientation, interfaceOrientation: params.interfaceOrientation)
         
         if params.isMinimized {
             self.isFillingBounds = false
@@ -588,7 +602,7 @@ final class VideoContainerView: HighlightTrackingButton {
             if let disappearingVideoLayer = self.disappearingVideoLayer {
                 self.disappearingVideoLayer = nil
                 
-                let disappearingVideoLayout = self.calculateMinimizedLayout(params: params, videoMetrics: disappearingVideoLayer.videoMetrics, resolvedRotationAngle: resolveVideoRotationAngle(angle: disappearingVideoLayer.videoMetrics.rotationAngle, followsDeviceOrientation: disappearingVideoLayer.videoMetrics.followsDeviceOrientation, interfaceOrientation: params.interfaceOrientation), applyDragPosition: true)
+                let disappearingVideoLayout = self.calculateMinimizedLayout(params: params, videoMetrics: disappearingVideoLayer.videoMetrics, resolvedRotationAngle: resolveCallVideoRotationAngle(angle: disappearingVideoLayer.videoMetrics.rotationAngle, followsDeviceOrientation: disappearingVideoLayer.videoMetrics.followsDeviceOrientation, interfaceOrientation: params.interfaceOrientation), applyDragPosition: true)
                 let initialDisappearingVideoSize = disappearingVideoLayout.effectiveVideoFrame.size
                 
                 if !disappearingVideoLayer.isAlphaAnimationInitiated {
@@ -613,7 +627,7 @@ final class VideoContainerView: HighlightTrackingButton {
                         animateFlipDisappearingVideo = disappearingVideoLayer
                         disappearingVideoLayer.videoLayer.blurredLayer.removeFromSuperlayer()
                     } else {
-                        let alphaTransition: Transition = .easeInOut(duration: 0.2)
+                        let alphaTransition: ComponentTransition = .easeInOut(duration: 0.2)
                         let disappearingVideoLayerValue = disappearingVideoLayer.videoLayer
                         alphaTransition.setAlpha(layer: disappearingVideoLayerValue, alpha: 0.0, completion: { [weak self, weak disappearingVideoLayerValue] _ in
                             guard let self, let disappearingVideoLayerValue else {
@@ -758,7 +772,7 @@ final class VideoContainerView: HighlightTrackingButton {
                     transition.setPosition(layer: disappearingVideoLayer.videoLayer, position: videoFrame.center)
                     transition.setPosition(layer: disappearingVideoLayer.videoLayer.blurredLayer, position: videoFrame.center)
                     
-                    let alphaTransition: Transition = .easeInOut(duration: 0.2)
+                    let alphaTransition: ComponentTransition = .easeInOut(duration: 0.2)
                     let disappearingVideoLayerValue = disappearingVideoLayer.videoLayer
                     alphaTransition.setAlpha(layer: disappearingVideoLayerValue, alpha: 0.0, completion: { [weak disappearingVideoLayerValue] _ in
                         disappearingVideoLayerValue?.removeFromSuperlayer()

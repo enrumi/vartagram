@@ -24,7 +24,7 @@ swift_library(
         "//submodules/GZip:GZip",
         "//submodules/PersistentStringHash:PersistentStringHash",
         "//submodules/Utils/RangeSet",
-    
+        "//submodules/Media/ConvertOpusToAAC",
     ],
     visibility = [
         "//visibility:public",

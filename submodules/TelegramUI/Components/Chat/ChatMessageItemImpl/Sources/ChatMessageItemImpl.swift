@@ -27,7 +27,7 @@ private func mediaMergeableStyle(_ media: Media) -> ChatMessageMerge {
             switch attribute {
                 case .Sticker:
                     return .semanticallyMerged
-                case let .Video(_, _, flags, _):
+                case let .Video(_, _, flags, _, _, _):
                     if flags.contains(.instantRoundVideo) {
                         return .none
                     }
@@ -75,11 +75,28 @@ private func messagesShouldBeMerged(accountPeerId: PeerId, _ lhs: Message, _ rhs
         }
     }
     
-    var sameThread = true
-    if let lhsPeer = lhs.peers[lhs.id.peerId], let rhsPeer = rhs.peers[rhs.id.peerId], arePeersEqual(lhsPeer, rhsPeer), let channel = lhsPeer as? TelegramChannel, channel.flags.contains(.isForum), lhs.threadId != rhs.threadId {
-        sameThread = false
+    if let channel = lhs.peers[lhs.id.peerId] as? TelegramChannel, case let .broadcast(info) = channel.info {
+        if info.flags.contains(.messagesShouldHaveProfiles) {
+            lhsEffectiveAuthor = lhs.author
+            rhsEffectiveAuthor = rhs.author
+        }
     }
     
+    var sameChat = true
+    if lhs.id.peerId != rhs.id.peerId {
+        sameChat = false
+    }
+    
+    var isPaid = false
+    if let _ = lhs.paidStarsAttribute, let _ = rhs.paidStarsAttribute {
+        isPaid = true
+    }
+    
+    let sameThread = true
+    /*if let lhsPeer = lhs.peers[lhs.id.peerId], let rhsPeer = rhs.peers[rhs.id.peerId], arePeersEqual(lhsPeer, rhsPeer), let channel = lhsPeer as? TelegramChannel, channel.isForumOrMonoForum, lhs.threadId != rhs.threadId {
+        sameThread = false
+    }*/
+        
     var sameAuthor = false
     if lhsEffectiveAuthor?.id == rhsEffectiveAuthor?.id && lhs.effectivelyIncoming(accountPeerId) == rhs.effectivelyIncoming(accountPeerId) {
         sameAuthor = true
@@ -124,7 +141,14 @@ private func messagesShouldBeMerged(accountPeerId: PeerId, _ lhs: Message, _ rhs
         }
     }
     
-    if abs(lhsEffectiveTimestamp - rhsEffectiveTimestamp) < Int32(10 * 60) && sameAuthor && sameThread {
+    var isNonMergeablePaid = isPaid
+    if isNonMergeablePaid {
+        if let channel = lhs.peers[lhs.id.peerId] as? TelegramChannel, channel.flags.contains(.isMonoforum) {
+            isNonMergeablePaid = false
+        }
+    }
+    
+    if abs(lhsEffectiveTimestamp - rhsEffectiveTimestamp) < Int32(10 * 60) && sameChat && sameAuthor && sameThread && !isNonMergeablePaid {
         if let channel = lhs.peers[lhs.id.peerId] as? TelegramChannel, case .group = channel.info, lhsEffectiveAuthor?.id == channel.id, !lhs.effectivelyIncoming(accountPeerId) {
             return .none
         }
@@ -203,6 +227,7 @@ public final class ChatMessageItemImpl: ChatMessageItem, CustomStringConvertible
     public let additionalContent: ChatMessageItemAdditionalContent?
     
     let dateHeader: ChatMessageDateHeader
+    let topicHeader: ChatMessageDateHeader?
     let avatarHeader: ChatMessageAvatarHeader?
 
     public let headers: [ListViewItemHeader]
@@ -266,9 +291,11 @@ public final class ChatMessageItemImpl: ChatMessageItem, CustomStringConvertible
         let incoming = content.effectivelyIncoming(self.context.account.peerId)
         
         var effectiveAuthor: Peer?
-        let displayAuthorInfo: Bool
+        var displayAuthorInfo: Bool
         
         let messagePeerId: PeerId = chatLocation.peerId ?? content.firstMessage.id.peerId
+        var headerSeparableThreadId: Int64?
+        var headerDisplayPeer: ChatMessageDateHeader.HeaderData?
         
         do {
             let peerId = messagePeerId
@@ -276,15 +303,18 @@ public final class ChatMessageItemImpl: ChatMessageItem, CustomStringConvertible
                 if let forwardInfo = content.firstMessage.forwardInfo {
                     effectiveAuthor = forwardInfo.author
                     if effectiveAuthor == nil, let authorSignature = forwardInfo.authorSignature  {
-                        effectiveAuthor = TelegramUser(id: PeerId(namespace: Namespaces.Peer.Empty, id: PeerId.Id._internalFromInt64Value(Int64(authorSignature.persistentHashValue % 32))), accessHash: nil, firstName: authorSignature, lastName: nil, username: nil, phone: nil, photo: [], botInfo: nil, restrictionInfo: nil, flags: [], emojiStatus: nil, usernames: [], storiesHidden: nil, nameColor: nil, backgroundEmojiId: nil, profileColor: nil, profileBackgroundEmojiId: nil)
+                        effectiveAuthor = TelegramUser(id: PeerId(namespace: Namespaces.Peer.Empty, id: PeerId.Id._internalFromInt64Value(Int64(authorSignature.persistentHashValue % 32))), accessHash: nil, firstName: authorSignature, lastName: nil, username: nil, phone: nil, photo: [], botInfo: nil, restrictionInfo: nil, flags: [], emojiStatus: nil, usernames: [], storiesHidden: nil, nameColor: nil, backgroundEmojiId: nil, profileColor: nil, profileBackgroundEmojiId: nil, subscriberCount: nil, verificationIconFileId: nil)
                     }
                 }
                 if let sourceAuthorInfo = content.firstMessage.sourceAuthorInfo {
                     if let originalAuthor = sourceAuthorInfo.originalAuthor, let peer = content.firstMessage.peers[originalAuthor] {
                         effectiveAuthor = peer
                     } else if let authorSignature = sourceAuthorInfo.originalAuthorName {
-                        effectiveAuthor = TelegramUser(id: PeerId(namespace: Namespaces.Peer.Empty, id: PeerId.Id._internalFromInt64Value(Int64(authorSignature.persistentHashValue % 32))), accessHash: nil, firstName: authorSignature, lastName: nil, username: nil, phone: nil, photo: [], botInfo: nil, restrictionInfo: nil, flags: [], emojiStatus: nil, usernames: [], storiesHidden: nil, nameColor: nil, backgroundEmojiId: nil, profileColor: nil, profileBackgroundEmojiId: nil)
+                        effectiveAuthor = TelegramUser(id: PeerId(namespace: Namespaces.Peer.Empty, id: PeerId.Id._internalFromInt64Value(Int64(authorSignature.persistentHashValue % 32))), accessHash: nil, firstName: authorSignature, lastName: nil, username: nil, phone: nil, photo: [], botInfo: nil, restrictionInfo: nil, flags: [], emojiStatus: nil, usernames: [], storiesHidden: nil, nameColor: nil, backgroundEmojiId: nil, profileColor: nil, profileBackgroundEmojiId: nil, subscriberCount: nil, verificationIconFileId: nil)
                     }
+                }
+                if peerId.isVerificationCodes && effectiveAuthor == nil {
+                    effectiveAuthor = content.firstMessage.author
                 }
                 displayAuthorInfo = incoming && effectiveAuthor != nil
             } else {
@@ -296,6 +326,38 @@ public final class ChatMessageItemImpl: ChatMessageItem, CustomStringConvertible
                     }
                 }
                 displayAuthorInfo = incoming && peerId.isGroupOrChannel && effectiveAuthor != nil
+                
+                if let channel = content.firstMessage.peers[content.firstMessage.id.peerId] as? TelegramChannel, channel.isForumOrMonoForum {
+                    if case .replyThread = chatLocation {
+                        if channel.isMonoForum && chatLocation.threadId != context.account.peerId.toInt64() {
+                            displayAuthorInfo = false
+                        }
+                    } else {
+                        if channel.isMonoForum {
+                            if let linkedMonoforumId = channel.linkedMonoforumId, let mainChannel = content.firstMessage.peers[linkedMonoforumId] as? TelegramChannel, mainChannel.hasPermission(.manageDirect) {
+                                headerSeparableThreadId = content.firstMessage.threadId
+                                
+                                if let threadId = content.firstMessage.threadId, let peer = content.firstMessage.peers[EnginePeer.Id(threadId)] {
+                                    headerDisplayPeer = ChatMessageDateHeader.HeaderData(contents: .peer(EnginePeer(peer)))
+                                }
+                            }
+                        } else if let threadId = content.firstMessage.threadId {
+                            if let threadInfo = content.firstMessage.associatedThreadInfo {
+                                headerSeparableThreadId = content.firstMessage.threadId
+                                headerDisplayPeer = ChatMessageDateHeader.HeaderData(contents: .thread(id: threadId, info: threadInfo))
+                            } else if content.firstMessage.threadId == EngineMessage.newTopicThreadId {
+                                headerSeparableThreadId = content.firstMessage.threadId
+                                //TODO:localize
+                                headerDisplayPeer = ChatMessageDateHeader.HeaderData(contents: .thread(id: threadId, info: Message.AssociatedThreadInfo(
+                                    title: "New Chat",
+                                    icon: nil,
+                                    iconColor: 0,
+                                    isClosed: false
+                                )))
+                            }
+                        }
+                    }
+                }
             }
         }
         
@@ -306,7 +368,7 @@ public final class ChatMessageItemImpl: ChatMessageItem, CustomStringConvertible
             isScheduledMessages = true
         }
         
-        self.dateHeader = ChatMessageDateHeader(timestamp: content.index.timestamp, scheduled: isScheduledMessages, presentationData: presentationData, controllerInteraction: controllerInteraction, context: context, action: { timestamp, alreadyThere in
+        self.dateHeader = ChatMessageDateHeader(timestamp: content.index.timestamp, separableThreadId: nil, scheduled: isScheduledMessages, displayHeader: nil, presentationData: presentationData, controllerInteraction: controllerInteraction, context: context, action: { timestamp, alreadyThere in
             var calendar = NSCalendar.current
             calendar.timeZone = TimeZone(abbreviation: "UTC")!
             let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
@@ -316,6 +378,14 @@ public final class ChatMessageItemImpl: ChatMessageItem, CustomStringConvertible
                 controllerInteraction.navigateToFirstDateMessage(Int32(date.timeIntervalSince1970), alreadyThere)
             }
         })
+        
+        if let headerSeparableThreadId, let headerDisplayPeer, !(associatedData.subject?.isService ?? false) {
+            self.topicHeader = ChatMessageDateHeader(timestamp: content.index.timestamp, separableThreadId: headerSeparableThreadId, scheduled: false, displayHeader: headerDisplayPeer, presentationData: presentationData, controllerInteraction: controllerInteraction, context: context, action: { _, _ in
+                controllerInteraction.updateChatLocationThread(headerSeparableThreadId, nil)
+            })
+        } else {
+            self.topicHeader = nil
+        }
         
         if displayAuthorInfo {
             let message = content.firstMessage
@@ -336,13 +406,17 @@ public final class ChatMessageItemImpl: ChatMessageItem, CustomStringConvertible
             }
             
             var hasAvatar = false
-            if !hasActionMedia && !isBroadcastChannel {
-                hasAvatar = true
-            }
-            
-            if let adAttribute = message.adAttribute {
-                if adAttribute.displayAvatar {
-                    hasAvatar = adAttribute.displayAvatar
+            if !hasActionMedia {
+                if !isBroadcastChannel {
+                    if let channel = message.peers[message.id.peerId] as? TelegramChannel, channel.isMonoForum, chatLocation.threadId != nil {
+                    } else {
+                        hasAvatar = true
+                    }
+                } else if let channel = message.peers[message.id.peerId] as? TelegramChannel, case let .broadcast(info) = channel.info {
+                    if info.flags.contains(.messagesShouldHaveProfiles) {
+                        hasAvatar = true
+                        effectiveAuthor = message.author
+                    }
                 }
             }
             
@@ -365,7 +439,13 @@ public final class ChatMessageItemImpl: ChatMessageItem, CustomStringConvertible
         }
         self.avatarHeader = avatarHeader
         
-        var headers: [ListViewItemHeader] = [self.dateHeader]
+        var headers: [ListViewItemHeader] = []
+        if !self.disableDate {
+            headers.append(self.dateHeader)
+            if let topicHeader = self.topicHeader {
+                headers.append(topicHeader)
+            }
+        }
         if case .messageOptions = associatedData.subject {
             headers = []
         }
@@ -421,7 +501,7 @@ public final class ChatMessageItemImpl: ChatMessageItem, CustomStringConvertible
                                 viewClassName = ChatMessageStickerItemNode.self
                             }
                             break loop
-                        case let .Video(_, _, flags, _):
+                        case let .Video(_, _, flags, _, _, _):
                             if flags.contains(.instantRoundVideo) {
                                 viewClassName = ChatMessageBubbleItemNode.self
                                 break loop
@@ -469,7 +549,7 @@ public final class ChatMessageItemImpl: ChatMessageItem, CustomStringConvertible
                 }
             }
             
-            let (layout, apply) = nodeLayout(self, params, top, bottom, dateAtBottom && !disableDate)
+            let (layout, apply) = nodeLayout(self, params, top, bottom, disableDate ? ChatMessageHeaderSpec(hasDate: false, hasTopic: false) : dateAtBottom)
             
             node.contentSize = layout.contentSize
             node.insets = layout.insets
@@ -480,7 +560,10 @@ public final class ChatMessageItemImpl: ChatMessageItem, CustomStringConvertible
             
             Queue.mainQueue().async {
                 completion(node, {
-                    return (nil, { _ in apply(.None, ListViewItemApply(isOnScreen: false), synchronousLoads) })
+                    return (nil, { info in
+                        info.setIsOffscreen()
+                        apply(.None, info, synchronousLoads)
+                    })
                 })
             }
         }
@@ -493,7 +576,7 @@ public final class ChatMessageItemImpl: ChatMessageItem, CustomStringConvertible
         }
     }
     
-    public func mergedWithItems(top: ListViewItem?, bottom: ListViewItem?, isRotated: Bool) -> (top: ChatMessageMerge, bottom: ChatMessageMerge, dateAtBottom: Bool) {
+    public func mergedWithItems(top: ListViewItem?, bottom: ListViewItem?, isRotated: Bool) -> (top: ChatMessageMerge, bottom: ChatMessageMerge, dateAtBottom: ChatMessageHeaderSpec) {
         var top = top
         var bottom = bottom
         if !isRotated {
@@ -504,7 +587,7 @@ public final class ChatMessageItemImpl: ChatMessageItem, CustomStringConvertible
         
         var mergedTop: ChatMessageMerge = .none
         var mergedBottom: ChatMessageMerge = .none
-        var dateAtBottom = false
+        var dateAtBottom = ChatMessageHeaderSpec(hasDate: false, hasTopic: false)
         if let top = top as? ChatMessageItemImpl {
             if top.dateHeader.id != self.dateHeader.id {
                 mergedBottom = .none
@@ -515,20 +598,35 @@ public final class ChatMessageItemImpl: ChatMessageItem, CustomStringConvertible
         if let bottom = bottom as? ChatMessageItemImpl {
             if bottom.dateHeader.id != self.dateHeader.id {
                 mergedTop = .none
-                dateAtBottom = true
-            } else {
+                dateAtBottom.hasDate = true
+            }
+            if let topicHeader = self.topicHeader, bottom.topicHeader?.id != topicHeader.id {
+                mergedTop = .none
+                dateAtBottom.hasTopic = true
+            }
+            
+            if !(dateAtBottom.hasDate || dateAtBottom.hasTopic) {
                 mergedTop = messagesShouldBeMerged(accountPeerId: self.context.account.peerId, bottom.message, message)
             }
         } else if let bottom = bottom as? ChatUnreadItem {
             if bottom.header.id != self.dateHeader.id {
-                dateAtBottom = true
+                dateAtBottom.hasDate = true
+            }
+            if self.topicHeader != nil {
+                dateAtBottom.hasTopic = true
             }
         } else if let bottom = bottom as? ChatReplyCountItem {
             if bottom.header.id != self.dateHeader.id {
-                dateAtBottom = true
+                dateAtBottom.hasDate = true
+            }
+            if self.topicHeader != nil {
+                dateAtBottom.hasTopic = true
             }
         } else {
-            dateAtBottom = true
+            dateAtBottom.hasDate = true
+            if self.topicHeader != nil {
+                dateAtBottom.hasTopic = true
+            }
         }
         
         return (mergedTop, mergedBottom, dateAtBottom)
@@ -556,7 +654,7 @@ public final class ChatMessageItemImpl: ChatMessageItem, CustomStringConvertible
                         }
                     }
                     
-                    let (layout, apply) = nodeLayout(self, params, top, bottom, dateAtBottom && !disableDate)
+                    let (layout, apply) = nodeLayout(self, params, top, bottom, disableDate ? ChatMessageHeaderSpec(hasDate: false, hasTopic: false) : dateAtBottom)
                     Queue.mainQueue().async {
                         completion(layout, { info in
                             apply(animation, info, false)

@@ -17,7 +17,12 @@ public final class TelegramSecretChat: Peer, Equatable {
     public var associatedMediaIds: [MediaId]? { return nil }
     
     public let associatedPeerId: PeerId?
+    public var associatedPeerControlsNotifications: Bool {
+        return true
+    }
+    
     public let notificationSettingsPeerId: PeerId?
+    public let associatedPeerOverridesIdentity: Bool = true
     
     public var timeoutAttribute: UInt32? { return nil }
     
@@ -93,7 +98,7 @@ public final class CachedSecretChatData: CachedPeerData {
     
     public init(decoder: PostboxDecoder) {
         if let legacyValue = decoder.decodeOptionalInt32ForKey("pcs") {
-            self.peerStatusSettings = PeerStatusSettings(flags: PeerStatusSettings.Flags(rawValue: legacyValue), geoDistance: nil)
+            self.peerStatusSettings = PeerStatusSettings(flags: PeerStatusSettings.Flags(rawValue: legacyValue), geoDistance: nil, managingBot: nil)
         } else if let peerStatusSettings = decoder.decodeObjectForKey("pss", decoder: { PeerStatusSettings(decoder: $0) }) as? PeerStatusSettings {
             self.peerStatusSettings = peerStatusSettings
         } else {

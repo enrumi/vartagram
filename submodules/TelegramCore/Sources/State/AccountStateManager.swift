@@ -44,6 +44,14 @@ private final class UpdatedPeersNearbySubscriberContext {
     let subscribers = Bag<([PeerNearby]) -> Void>()
 }
 
+private final class UpdatedStarsBalanceSubscriberContext {
+    let subscribers = Bag<([PeerId: StarsAmount]) -> Void>()
+}
+
+private final class UpdatedStarsRevenueStatusSubscriberContext {
+    let subscribers = Bag<([PeerId: StarsRevenueStats.Balances]) -> Void>()
+}
+
 public enum DeletedMessageId: Hashable {
     case global(Int32)
     case messageId(MessageId)
@@ -51,6 +59,7 @@ public enum DeletedMessageId: Hashable {
 
 final class MessagesRemovedContext {
     private var messagesRemovedInteractively = Set<DeletedMessageId>()
+    private var messagesRemovedRemotely = Set<DeletedMessageId>()
     private var messagesRemovedInteractivelyLock = NSLock()
     
     func synchronouslyIsMessageDeletedInteractively(ids: [MessageId]) -> [EngineMessage.Id] {
@@ -73,6 +82,26 @@ final class MessagesRemovedContext {
         return result
     }
     
+    func synchronouslyIsMessageDeletedRemotely(ids: [MessageId]) -> [EngineMessage.Id] {
+        var result: [EngineMessage.Id] = []
+        
+        self.messagesRemovedInteractivelyLock.lock()
+        for id in ids {
+            let mappedId: DeletedMessageId
+            if id.peerId.namespace == Namespaces.Peer.CloudUser || id.peerId.namespace == Namespaces.Peer.CloudGroup {
+                mappedId = .global(id.id)
+            } else {
+                mappedId = .messageId(id)
+            }
+            if self.messagesRemovedRemotely.contains(mappedId) {
+                result.append(id)
+            }
+        }
+        self.messagesRemovedInteractivelyLock.unlock()
+        
+        return result
+    }
+    
     func addIsMessagesDeletedInteractively(ids: [DeletedMessageId]) {
         if ids.isEmpty {
             return
@@ -80,6 +109,16 @@ final class MessagesRemovedContext {
         
         self.messagesRemovedInteractivelyLock.lock()
         self.messagesRemovedInteractively.formUnion(ids)
+        self.messagesRemovedInteractivelyLock.unlock()
+    }
+    
+    func addIsMessagesDeletedRemotely(ids: [DeletedMessageId]) {
+        if ids.isEmpty {
+            return
+        }
+        
+        self.messagesRemovedInteractivelyLock.lock()
+        self.messagesRemovedRemotely.formUnion(ids)
         self.messagesRemovedInteractivelyLock.unlock()
     }
 }
@@ -91,19 +130,22 @@ public final class AccountStateManager {
         public let timestamp: Int32
         public let peer: EnginePeer
         public let isVideo: Bool
+        public let isConference: Bool
         
         init(
             callId: Int64,
             callAccessHash: Int64,
             timestamp: Int32,
             peer: EnginePeer,
-            isVideo: Bool
+            isVideo: Bool,
+            isConference: Bool
         ) {
             self.callId = callId
             self.callAccessHash = callAccessHash
             self.timestamp = timestamp
             self.peer = peer
             self.isVideo = isVideo
+            self.isConference = isConference
         }
     }
     
@@ -232,6 +274,12 @@ public final class AccountStateManager {
             return self.appUpdateInfoPromise.get()
         }
         
+        private let contactBirthdaysValue = Atomic<[EnginePeer.Id: TelegramBirthday]>(value: [:])
+        private let contactBirthdaysPromise = Promise<[EnginePeer.Id: TelegramBirthday]>([:])
+        public var contactBirthdays: Signal<[EnginePeer.Id: TelegramBirthday], NoError> {
+            return self.contactBirthdaysPromise.get()
+        }
+        
         private let appliedIncomingReadMessagesPipe = ValuePipe<[MessageId]>()
         public var appliedIncomingReadMessages: Signal<[MessageId], NoError> {
             return self.appliedIncomingReadMessagesPipe.signal()
@@ -247,8 +295,8 @@ public final class AccountStateManager {
             return self.authorizationListUpdatesPipe.signal()
         }
         
-        private let threadReadStateUpdatesPipe = ValuePipe<(incoming: [MessageId: MessageId.Id], outgoing: [MessageId: MessageId.Id])>()
-        var threadReadStateUpdates: Signal<(incoming: [MessageId: MessageId.Id], outgoing: [MessageId: MessageId.Id]), NoError> {
+        private let threadReadStateUpdatesPipe = ValuePipe<(incoming: [PeerAndBoundThreadId: MessageId.Id], outgoing: [PeerAndBoundThreadId: MessageId.Id])>()
+        var threadReadStateUpdates: Signal<(incoming: [PeerAndBoundThreadId: MessageId.Id], outgoing: [PeerAndBoundThreadId: MessageId.Id]), NoError> {
             return self.threadReadStateUpdatesPipe.signal()
         }
         
@@ -269,14 +317,48 @@ public final class AccountStateManager {
             return self.storyUpdatesPipe.signal()
         }
         
+        fileprivate let botPreviewUpdatesPipe = ValuePipe<[InternalBotPreviewUpdate]>()
+        public var botPreviewUpdates: Signal<[InternalBotPreviewUpdate], NoError> {
+            return self.botPreviewUpdatesPipe.signal()
+        }
+        
+        fileprivate let forceSendPendingStarsReactionPipe = ValuePipe<MessageId>()
+        public var forceSendPendingStarsReaction: Signal<MessageId, NoError> {
+            return self.forceSendPendingStarsReactionPipe.signal()
+        }
+        
+        fileprivate let forceSendPendingPaidMessagePipe = ValuePipe<PeerId>()
+        public var forceSendPendingPaidMessage: Signal<PeerId, NoError> {
+            return self.forceSendPendingPaidMessagePipe.signal()
+        }
+        
+        fileprivate let commitSendPendingPaidMessagePipe = ValuePipe<MessageId>()
+        public var commitSendPendingPaidMessage: Signal<MessageId, NoError> {
+            return self.commitSendPendingPaidMessagePipe.signal()
+        }
+        
+        fileprivate let sentScheduledMessageIdsPipe = ValuePipe<Set<MessageId>>()
+        public var sentScheduledMessageIds: Signal<Set<MessageId>, NoError> {
+            return self.sentScheduledMessageIdsPipe.signal()
+        }
+        
+        fileprivate let starRefBotConnectionEventsPipe = ValuePipe<StarRefBotConnectionEvent>()
+        public var starRefBotConnectionEvents: Signal<StarRefBotConnectionEvent, NoError> {
+            return self.starRefBotConnectionEventsPipe.signal()
+        }
+        
         private var updatedWebpageContexts: [MediaId: UpdatedWebpageSubscriberContext] = [:]
         private var updatedPeersNearbyContext = UpdatedPeersNearbySubscriberContext()
+        private var updatedStarsBalanceContext = UpdatedStarsBalanceSubscriberContext()
+        private var updatedTonBalanceContext = UpdatedStarsBalanceSubscriberContext()
+        private var updatedStarsRevenueStatusContext = UpdatedStarsRevenueStatusSubscriberContext()
         
         private let delayNotificatonsUntil = Atomic<Int32?>(value: nil)
         private let appliedMaxMessageIdPromise = Promise<Int32?>(nil)
         private let appliedMaxMessageIdDisposable = MetaDisposable()
         private let appliedQtsPromise = Promise<Int32?>(nil)
         private let appliedQtsDisposable = MetaDisposable()
+        private let reportMessageDeliveryDisposable = DisposableSet()
         
         let updateConfigRequested: (() -> Void)?
         let isPremiumUpdated: (() -> Void)?
@@ -316,6 +398,7 @@ public final class AccountStateManager {
             self.operationDisposable.dispose()
             self.appliedMaxMessageIdDisposable.dispose()
             self.appliedQtsDisposable.dispose()
+            self.reportMessageDeliveryDisposable.dispose()
         }
         
         public func reset() {
@@ -659,6 +742,7 @@ public final class AccountStateManager {
                     
                     if let result = result, !result.deletedMessageIds.isEmpty {
                         messagesRemovedContext.addIsMessagesDeletedInteractively(ids: result.deletedMessageIds)
+                        messagesRemovedContext.addIsMessagesDeletedRemotely(ids: result.deletedMessageIds)
                     }
                     
                     return result
@@ -737,11 +821,16 @@ public final class AccountStateManager {
                 |> deliverOn(self.queue)
                 |> mapToSignal { [weak self] state, invalidatedChannels, disableParallelChannelReset -> Signal<(difference: Api.updates.Difference?, finalStatte: AccountReplayedFinalState?, skipBecauseOfError: Bool, resetState: Bool), NoError> in
                     if let state = state, let authorizedState = state.state {
-                        let flags: Int32
-                        let ptsTotalLimit: Int32?
+                        var flags: Int32 = 0
+                        var ptsTotalLimit: Int32?
                         
-                        flags = 1 << 0
-                        ptsTotalLimit = 1000
+                        if !"".isEmpty {
+                            flags |= 1 << 0
+                            ptsTotalLimit = 1000
+                        }
+                        
+                        flags = 0
+                        ptsTotalLimit = nil
                         
                         if let strongSelf = self {
                             if !invalidatedChannels.isEmpty {
@@ -799,6 +888,7 @@ public final class AccountStateManager {
                                                 if let replayedState = replayedState {
                                                     if !replayedState.deletedMessageIds.isEmpty {
                                                         messagesRemovedContext.addIsMessagesDeletedInteractively(ids: replayedState.deletedMessageIds)
+                                                        messagesRemovedContext.addIsMessagesDeletedRemotely(ids: replayedState.deletedMessageIds)
                                                     }
                                                     
                                                     return (difference, replayedState, false, false)
@@ -937,6 +1027,7 @@ public final class AccountStateManager {
                                 
                                 if let result = result, !result.deletedMessageIds.isEmpty {
                                     messagesRemovedContext.addIsMessagesDeletedInteractively(ids: result.deletedMessageIds)
+                                    messagesRemovedContext.addIsMessagesDeletedRemotely(ids: result.deletedMessageIds)
                                 }
                                 
                                 let deltaTime = CFAbsoluteTimeGetCurrent() - startTime
@@ -1016,6 +1107,15 @@ public final class AccountStateManager {
                             if let updatedPeersNearby = events.updatedPeersNearby {
                                 strongSelf.notifyUpdatedPeersNearby(updatedPeersNearby)
                             }
+                            if !events.updatedStarsBalance.isEmpty {
+                                strongSelf.notifyUpdatedStarsBalance(events.updatedStarsBalance)
+                            }
+                            if !events.updatedTonBalance.isEmpty {
+                                strongSelf.notifyUpdatedTonBalance(events.updatedTonBalance)
+                            }
+                            if !events.updatedStarsRevenueStatus.isEmpty {
+                                strongSelf.notifyUpdatedStarsRevenueStatus(events.updatedStarsRevenueStatus)
+                            }
                             if !events.updatedCalls.isEmpty {
                                 for call in events.updatedCalls {
                                     strongSelf.callSessionManager?.updateSession(call, completion: { _ in })
@@ -1034,6 +1134,15 @@ public final class AccountStateManager {
                             }
                             if !events.updatedIncomingThreadReadStates.isEmpty || !events.updatedOutgoingThreadReadStates.isEmpty {
                                 strongSelf.threadReadStateUpdatesPipe.putNext((events.updatedIncomingThreadReadStates, events.updatedOutgoingThreadReadStates))
+                            }
+                            if !events.sentScheduledMessageIds.isEmpty {
+                                strongSelf.sentScheduledMessageIdsPipe.putNext(events.sentScheduledMessageIds)
+                            }
+                            if !events.reportMessageDelivery.isEmpty {
+                                strongSelf.reportMessageDeliveryDisposable.add(_internal_reportMessageDelivery(postbox: strongSelf.postbox, network: strongSelf.network, messageIds: Array(events.reportMessageDelivery), fromPushNotification: false).start())
+                            }
+                            if !events.addedConferenceInvitationMessagesIds.isEmpty {
+                                strongSelf.callSessionManager?.addConferenceInvitationMessages(ids: events.addedConferenceInvitationMessagesIds.map { ($0, nil) })
                             }
                             if !events.isContactUpdates.isEmpty {
                                 strongSelf.addIsContactUpdates(events.isContactUpdates)
@@ -1203,6 +1312,7 @@ public final class AccountStateManager {
                     
                     if let result = result, !result.deletedMessageIds.isEmpty {
                         messagesRemovedContext.addIsMessagesDeletedInteractively(ids: result.deletedMessageIds)
+                        messagesRemovedContext.addIsMessagesDeletedRemotely(ids: result.deletedMessageIds)
                     }
                     
                     return result
@@ -1251,6 +1361,7 @@ public final class AccountStateManager {
                 
                 if let result = result, !result.deletedMessageIds.isEmpty {
                     messagesRemovedContext.addIsMessagesDeletedInteractively(ids: result.deletedMessageIds)
+                    messagesRemovedContext.addIsMessagesDeletedRemotely(ids: result.deletedMessageIds)
                 }
                 
                 let deltaTime = CFAbsoluteTimeGetCurrent() - startTime
@@ -1343,6 +1454,7 @@ public final class AccountStateManager {
                                             
                                             if let replayedState = replayedState, !replayedState.deletedMessageIds.isEmpty {
                                                 messagesRemovedContext.addIsMessagesDeletedInteractively(ids: replayedState.deletedMessageIds)
+                                                messagesRemovedContext.addIsMessagesDeletedRemotely(ids: replayedState.deletedMessageIds)
                                             }
                                             
                                             let deltaTime = CFAbsoluteTimeGetCurrent() - startTime
@@ -1550,6 +1662,17 @@ public final class AccountStateManager {
             }
         }
         
+        func modifyContactBirthdays(_ f: @escaping ([EnginePeer.Id: TelegramBirthday]) -> ([EnginePeer.Id: TelegramBirthday])) {
+            self.queue.async {
+                let current = self.contactBirthdaysValue.with { $0 }
+                let updated = f(current)
+                if (current != updated) {
+                    let _ = self.contactBirthdaysValue.swap(updated)
+                    self.contactBirthdaysPromise.set(.single(updated))
+                }
+            }
+        }
+        
         public func updatedPeersNearby() -> Signal<[PeerNearby], NoError> {
             let queue = self.queue
             return Signal { [weak self] subscriber in
@@ -1577,6 +1700,87 @@ public final class AccountStateManager {
             }
         }
         
+        public func updatedStarsBalance() -> Signal<[PeerId: StarsAmount], NoError> {
+            let queue = self.queue
+            return Signal { [weak self] subscriber in
+                let disposable = MetaDisposable()
+                queue.async {
+                    if let strongSelf = self {
+                        let index = strongSelf.updatedStarsBalanceContext.subscribers.add({ starsBalance in
+                            subscriber.putNext(starsBalance)
+                        })
+                        
+                        disposable.set(ActionDisposable {
+                            if let strongSelf = self {
+                                strongSelf.updatedStarsBalanceContext.subscribers.remove(index)
+                            }
+                        })
+                    }
+                }
+                return disposable
+            }
+        }
+                
+        private func notifyUpdatedStarsBalance(_ updatedStarsBalance: [PeerId: StarsAmount]) {
+            for subscriber in self.updatedStarsBalanceContext.subscribers.copyItems() {
+                subscriber(updatedStarsBalance)
+            }
+        }
+                
+        public func updatedTonBalance() -> Signal<[PeerId: StarsAmount], NoError> {
+            let queue = self.queue
+            return Signal { [weak self] subscriber in
+                let disposable = MetaDisposable()
+                queue.async {
+                    if let strongSelf = self {
+                        let index = strongSelf.updatedTonBalanceContext.subscribers.add({ starsBalance in
+                            subscriber.putNext(starsBalance)
+                        })
+                        
+                        disposable.set(ActionDisposable {
+                            if let strongSelf = self {
+                                strongSelf.updatedTonBalanceContext.subscribers.remove(index)
+                            }
+                        })
+                    }
+                }
+                return disposable
+            }
+        }
+        
+        private func notifyUpdatedTonBalance(_ updatedTonBalance: [PeerId: StarsAmount]) {
+            for subscriber in self.updatedTonBalanceContext.subscribers.copyItems() {
+                subscriber(updatedTonBalance)
+            }
+        }
+        
+        public func updatedStarsRevenueStatus() -> Signal<[PeerId: StarsRevenueStats.Balances], NoError> {
+            let queue = self.queue
+            return Signal { [weak self] subscriber in
+                let disposable = MetaDisposable()
+                queue.async {
+                    if let strongSelf = self {
+                        let index = strongSelf.updatedStarsRevenueStatusContext.subscribers.add({ revenueBalances in
+                            subscriber.putNext(revenueBalances)
+                        })
+                        
+                        disposable.set(ActionDisposable {
+                            if let strongSelf = self {
+                                strongSelf.updatedStarsRevenueStatusContext.subscribers.remove(index)
+                            }
+                        })
+                    }
+                }
+                return disposable
+            }
+        }
+        
+        private func notifyUpdatedStarsRevenueStatus(_ updatedStarsRevenueStatus: [PeerId: StarsRevenueStats.Balances]) {
+            for subscriber in self.updatedStarsRevenueStatusContext.subscribers.copyItems() {
+                subscriber(updatedStarsRevenueStatus)
+            }
+        }
+                
         func notifyDeletedMessages(messageIds: [MessageId]) {
             self.deletedMessagesPipe.putNext(messageIds.map { .messageId($0) })
         }
@@ -1621,6 +1825,10 @@ public final class AccountStateManager {
             self.queue.async {
                 self.removePossiblyDeliveredMessagesUniqueIds.merge(uniqueIds, uniquingKeysWith: { _, rhs in rhs })
             }
+        }
+        
+        func addStarRefBotConnectionEvent(event: StarRefBotConnectionEvent) {
+            self.starRefBotConnectionEventsPipe.putNext(event)
         }
     }
     
@@ -1680,6 +1888,12 @@ public final class AccountStateManager {
         }
     }
     
+    public var contactBirthdays: Signal<[EnginePeer.Id: TelegramBirthday], NoError> {
+        return self.impl.signalWith { impl, subscriber in
+            return impl.contactBirthdays.start(next: subscriber.putNext, error: subscriber.putError, completed: subscriber.putCompletion)
+        }
+    }
+    
     public var appliedIncomingReadMessages: Signal<[MessageId], NoError> {
         return self.impl.signalWith { impl, subscriber in
             return impl.appliedIncomingReadMessages.start(next: subscriber.putNext, error: subscriber.putError, completed: subscriber.putCompletion)
@@ -1698,7 +1912,7 @@ public final class AccountStateManager {
         }
     }
     
-    var threadReadStateUpdates: Signal<(incoming: [MessageId: MessageId.Id], outgoing: [MessageId: MessageId.Id]), NoError> {
+    var threadReadStateUpdates: Signal<(incoming: [PeerAndBoundThreadId: MessageId.Id], outgoing: [PeerAndBoundThreadId: MessageId.Id]), NoError> {
         return self.impl.signalWith { impl, subscriber in
             return impl.threadReadStateUpdates.start(next: subscriber.putNext, error: subscriber.putError, completed: subscriber.putCompletion)
         }
@@ -1728,10 +1942,68 @@ public final class AccountStateManager {
         }
     }
     
+    var botPreviewUpdates: Signal<[InternalBotPreviewUpdate], NoError> {
+        return self.impl.signalWith { impl, subscriber in
+            return impl.botPreviewUpdates.start(next: subscriber.putNext, error: subscriber.putError, completed: subscriber.putCompletion)
+        }
+    }
+    
+    func injectBotPreviewUpdates(updates: [InternalBotPreviewUpdate]) {
+        self.impl.with { impl in
+            impl.botPreviewUpdatesPipe.putNext(updates)
+        }
+    }
+    
+    var forceSendPendingStarsReaction: Signal<MessageId, NoError> {
+        return self.impl.signalWith { impl, subscriber in
+            return impl.forceSendPendingStarsReaction.start(next: subscriber.putNext, error: subscriber.putError, completed: subscriber.putCompletion)
+        }
+    }
+    
+    var forceSendPendingPaidMessage: Signal<PeerId, NoError> {
+        return self.impl.signalWith { impl, subscriber in
+            return impl.forceSendPendingPaidMessage.start(next: subscriber.putNext, error: subscriber.putError, completed: subscriber.putCompletion)
+        }
+    }
+    
+    var commitSendPendingPaidMessage: Signal<MessageId, NoError> {
+        return self.impl.signalWith { impl, subscriber in
+            return impl.commitSendPendingPaidMessage.start(next: subscriber.putNext, error: subscriber.putError, completed: subscriber.putCompletion)
+        }
+    }
+    
+    public var sentScheduledMessageIds: Signal<Set<MessageId>, NoError> {
+        return self.impl.signalWith { impl, subscriber in
+            return impl.sentScheduledMessageIds.start(next: subscriber.putNext, error: subscriber.putError, completed: subscriber.putCompletion)
+        }
+    }
+    
+    func forceSendPendingStarsReaction(messageId: MessageId) {
+        self.impl.with { impl in
+            impl.forceSendPendingStarsReactionPipe.putNext(messageId)
+        }
+    }
+    
+    
+    func forceSendPendingPaidMessage(peerId: PeerId) {
+        self.impl.with { impl in
+            impl.forceSendPendingPaidMessagePipe.putNext(peerId)
+        }
+    }
+    
+    func commitSendPendingPaidMessage(messageId: MessageId) {
+        self.impl.with { impl in
+            impl.commitSendPendingPaidMessagePipe.putNext(messageId)
+        }
+    }
+    
     var updateConfigRequested: (() -> Void)?
     var isPremiumUpdated: (() -> Void)?
     
     let messagesRemovedContext = MessagesRemovedContext()
+    
+    public weak var starsContext: StarsContext?
+    public weak var tonContext: StarsContext?
     
     init(
         accountPeerId: PeerId,
@@ -1828,6 +2100,12 @@ public final class AccountStateManager {
         }
     }
     
+    func modifyContactBirthdays(_ f: @escaping ([EnginePeer.Id: TelegramBirthday]) -> ([EnginePeer.Id: TelegramBirthday])) {
+        self.impl.with { impl in
+            impl.modifyContactBirthdays(f)
+        }
+    }
+    
     public func pollStateUpdateCompletion() -> Signal<[MessageId], NoError> {
         return self.impl.signalWith { impl, subscriber in
             return impl.pollStateUpdateCompletion().start(next: subscriber.putNext, error: subscriber.putError, completed: subscriber.putCompletion)
@@ -1849,6 +2127,24 @@ public final class AccountStateManager {
     public func updatedPeersNearby() -> Signal<[PeerNearby], NoError> {
         return self.impl.signalWith { impl, subscriber in
             return impl.updatedPeersNearby().start(next: subscriber.putNext, error: subscriber.putError, completed: subscriber.putCompletion)
+        }
+    }
+    
+    public func updatedStarsBalance() -> Signal<[PeerId: StarsAmount], NoError> {
+        return self.impl.signalWith { impl, subscriber in
+            return impl.updatedStarsBalance().start(next: subscriber.putNext, error: subscriber.putError, completed: subscriber.putCompletion)
+        }
+    }
+    
+    public func updatedTonBalance() -> Signal<[PeerId: StarsAmount], NoError> {
+        return self.impl.signalWith { impl, subscriber in
+            return impl.updatedTonBalance().start(next: subscriber.putNext, error: subscriber.putError, completed: subscriber.putCompletion)
+        }
+    }
+    
+    public func updatedStarsRevenueStatus() -> Signal<[PeerId: StarsRevenueStats.Balances], NoError> {
+        return self.impl.signalWith { impl, subscriber in
+            return impl.updatedStarsRevenueStatus().start(next: subscriber.putNext, error: subscriber.putError, completed: subscriber.putCompletion)
         }
     }
     
@@ -1916,7 +2212,8 @@ public final class AccountStateManager {
                             callAccessHash: accessHash,
                             timestamp: date,
                             peer: EnginePeer(peer),
-                            isVideo: (flags & (1 << 6)) != 0
+                            isVideo: (flags & (1 << 6)) != 0,
+                            isConference: false
                         )
                     default:
                         break
@@ -1934,6 +2231,22 @@ public final class AccountStateManager {
     
     public func synchronouslyIsMessageDeletedInteractively(ids: [EngineMessage.Id]) -> [EngineMessage.Id] {
         return self.messagesRemovedContext.synchronouslyIsMessageDeletedInteractively(ids: ids)
+    }
+    
+    public func synchronouslyIsMessageDeletedRemotely(ids: [EngineMessage.Id]) -> [EngineMessage.Id] {
+        return self.messagesRemovedContext.synchronouslyIsMessageDeletedRemotely(ids: ids)
+    }
+    
+    func starRefBotConnectionEvents() -> Signal<StarRefBotConnectionEvent, NoError> {
+        return self.impl.signalWith { impl, subscriber in
+            return impl.starRefBotConnectionEventsPipe.signal().start(next: subscriber.putNext)
+        }
+    }
+    
+    func addStarRefBotConnectionEvent(event: StarRefBotConnectionEvent) {
+        self.impl.with { impl in
+            impl.addStarRefBotConnectionEvent(event: event)
+        }
     }
 }
 
@@ -2020,7 +2333,7 @@ public func messagesForNotification(transaction: Transaction, id: MessageId, alw
     
     var notificationPeerId = id.peerId
     let peer = transaction.getPeer(id.peerId)
-    if let peer = peer, let associatedPeerId = peer.associatedPeerId {
+    if let peer, peer is TelegramSecretChat, let associatedPeerId = peer.associatedPeerId {
         notificationPeerId = associatedPeerId
     }
     if message.personal, let author = message.author {
@@ -2029,7 +2342,8 @@ public func messagesForNotification(transaction: Transaction, id: MessageId, alw
     
     var notificationSettingsStack: [TelegramPeerNotificationSettings] = []
     
-    if let threadId = message.threadId, let threadData = transaction.getMessageHistoryThreadInfo(peerId: message.id.peerId, threadId: threadId)?.data.get(MessageHistoryThreadData.self) {
+    if let peer = peer as? TelegramChannel, peer.isMonoForum {
+    } else if let threadId = message.threadId, let threadData = transaction.getMessageHistoryThreadInfo(peerId: message.id.peerId, threadId: threadId)?.data.get(MessageHistoryThreadData.self) {
         notificationSettingsStack.append(threadData.notificationSettings)
     }
     

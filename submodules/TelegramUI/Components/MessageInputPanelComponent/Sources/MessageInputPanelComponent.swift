@@ -20,6 +20,8 @@ import AnimatedCountLabelNode
 import MessageInputActionButtonComponent
 import ContextReferenceButtonComponent
 import ForwardInfoPanelComponent
+import MultilineTextComponent
+import PlainButtonComponent
 
 private var sharedIsReduceTransparencyEnabled = UIAccessibility.isReduceTransparencyEnabled
 
@@ -54,6 +56,12 @@ public final class MessageInputPanelComponent: Component {
         case emoji
     }
     
+    public enum AttachmentButtonMode: Hashable {
+        case attach
+        case captionUp
+        case captionDown
+    }
+    
     public struct MyReaction: Equatable {
         public let reaction: MessageReaction.Reaction
         public let file: TelegramMediaFile?
@@ -86,6 +94,52 @@ public final class MessageInputPanelComponent: Component {
         case counter([CounterItem])
     }
     
+    public enum DisabledPlaceholder: Equatable {
+        enum Kind {
+            case text
+            case premiumRequired
+            case boostRequired
+        }
+        
+        case text(String)
+        case premiumRequired(title: String, subtitle: String, action: () -> Void)
+        case boostRequired(title: String, subtitle: String, action: () -> Void)
+        
+        var kind: Kind {
+            switch self {
+            case .text:
+                return .text
+            case .premiumRequired:
+                return .premiumRequired
+            case .boostRequired:
+                return .boostRequired
+            }
+        }
+        
+        public static func ==(lhs: DisabledPlaceholder, rhs: DisabledPlaceholder) -> Bool {
+            switch lhs {
+            case let .text(value):
+                if case .text(value) = rhs {
+                    return true
+                } else {
+                    return false
+                }
+            case let .premiumRequired(title, subtitle, _):
+                if case .premiumRequired(title, subtitle, _) = rhs {
+                    return true
+                } else {
+                    return false
+                }
+            case let .boostRequired(title, subtitle, _):
+                if case .boostRequired(title, subtitle, _) = rhs {
+                    return true
+                } else {
+                    return false
+                }
+            }
+        }
+    }
+    
     public final class ExternalState {
         public fileprivate(set) var isEditing: Bool = false
         public fileprivate(set) var hasText: Bool = false
@@ -106,9 +160,11 @@ public final class MessageInputPanelComponent: Component {
     public let strings: PresentationStrings
     public let style: Style
     public let placeholder: Placeholder
+    public let sendPaidMessageStars: StarsAmount?
     public let maxLength: Int?
     public let queryTypes: ContextQueryTypes
     public let alwaysDarkWhenHasText: Bool
+    public let useGrayBackground: Bool
     public let resetInputContents: SendMessageInput?
     public let nextInputMode: (Bool) -> InputMode?
     public let areVoiceMessagesAvailable: Bool
@@ -122,6 +178,7 @@ public final class MessageInputPanelComponent: Component {
     public let stopAndPreviewMediaRecording: (() -> Void)?
     public let discardMediaRecordingPreview: (() -> Void)?
     public let attachmentAction: (() -> Void)?
+    public let attachmentButtonMode: AttachmentButtonMode?
     public let myReaction: MyReaction?
     public let likeAction: (() -> Void)?
     public let likeOptionsAction: ((UIView, ContextGesture?) -> Void)?
@@ -129,6 +186,7 @@ public final class MessageInputPanelComponent: Component {
     public let timeoutAction: ((UIView, ContextGesture?) -> Void)?
     public let forwardAction: (() -> Void)?
     public let moreAction: ((UIView, ContextGesture?) -> Void)?
+    public let presentCaptionPositionTooltip: ((UIView) -> Void)?
     public let presentVoiceMessagesUnavailableTooltip: ((UIView) -> Void)?
     public let presentTextLengthLimitTooltip: (() -> Void)?
     public let presentTextFormattingTooltip: (() -> Void)?
@@ -148,7 +206,7 @@ public final class MessageInputPanelComponent: Component {
     public let hideKeyboard: Bool
     public let customInputView: UIView?
     public let forceIsEditing: Bool
-    public let disabledPlaceholder: String?
+    public let disabledPlaceholder: DisabledPlaceholder?
     public let header: AnyComponent<Empty>?
     public let isChannel: Bool
     public let storyItem: EngineStoryItem?
@@ -161,9 +219,11 @@ public final class MessageInputPanelComponent: Component {
         strings: PresentationStrings,
         style: Style,
         placeholder: Placeholder,
+        sendPaidMessageStars: StarsAmount?,
         maxLength: Int?,
         queryTypes: ContextQueryTypes,
         alwaysDarkWhenHasText: Bool,
+        useGrayBackground: Bool = false,
         resetInputContents: SendMessageInput?,
         nextInputMode: @escaping (Bool) -> InputMode?,
         areVoiceMessagesAvailable: Bool,
@@ -177,6 +237,7 @@ public final class MessageInputPanelComponent: Component {
         stopAndPreviewMediaRecording: (() -> Void)?,
         discardMediaRecordingPreview: (() -> Void)?,
         attachmentAction: (() -> Void)?,
+        attachmentButtonMode: AttachmentButtonMode? = nil,
         myReaction: MyReaction?,
         likeAction: (() -> Void)?,
         likeOptionsAction: ((UIView, ContextGesture?) -> Void)?,
@@ -184,6 +245,7 @@ public final class MessageInputPanelComponent: Component {
         timeoutAction: ((UIView, ContextGesture?) -> Void)?,
         forwardAction: (() -> Void)?,
         moreAction: ((UIView, ContextGesture?) -> Void)?,
+        presentCaptionPositionTooltip: ((UIView) -> Void)?,
         presentVoiceMessagesUnavailableTooltip: ((UIView) -> Void)?,
         presentTextLengthLimitTooltip: (() -> Void)?,
         presentTextFormattingTooltip: (() -> Void)?,
@@ -203,7 +265,7 @@ public final class MessageInputPanelComponent: Component {
         hideKeyboard: Bool,
         customInputView: UIView?,
         forceIsEditing: Bool,
-        disabledPlaceholder: String?,
+        disabledPlaceholder: DisabledPlaceholder?,
         header: AnyComponent<Empty>?,
         isChannel: Bool,
         storyItem: EngineStoryItem?,
@@ -216,9 +278,11 @@ public final class MessageInputPanelComponent: Component {
         self.style = style
         self.nextInputMode = nextInputMode
         self.placeholder = placeholder
+        self.sendPaidMessageStars = sendPaidMessageStars
         self.maxLength = maxLength
         self.queryTypes = queryTypes
         self.alwaysDarkWhenHasText = alwaysDarkWhenHasText
+        self.useGrayBackground = useGrayBackground
         self.resetInputContents = resetInputContents
         self.areVoiceMessagesAvailable = areVoiceMessagesAvailable
         self.presentController = presentController
@@ -231,6 +295,7 @@ public final class MessageInputPanelComponent: Component {
         self.stopAndPreviewMediaRecording = stopAndPreviewMediaRecording
         self.discardMediaRecordingPreview = discardMediaRecordingPreview
         self.attachmentAction = attachmentAction
+        self.attachmentButtonMode = attachmentButtonMode
         self.myReaction = myReaction
         self.likeAction = likeAction
         self.likeOptionsAction = likeOptionsAction
@@ -238,6 +303,7 @@ public final class MessageInputPanelComponent: Component {
         self.timeoutAction = timeoutAction
         self.forwardAction = forwardAction
         self.moreAction = moreAction
+        self.presentCaptionPositionTooltip = presentCaptionPositionTooltip
         self.presentVoiceMessagesUnavailableTooltip = presentVoiceMessagesUnavailableTooltip
         self.presentTextLengthLimitTooltip = presentTextLengthLimitTooltip
         self.presentTextFormattingTooltip = presentTextFormattingTooltip
@@ -283,6 +349,9 @@ public final class MessageInputPanelComponent: Component {
         if lhs.placeholder != rhs.placeholder {
             return false
         }
+        if lhs.sendPaidMessageStars != rhs.sendPaidMessageStars {
+            return false
+        }
         if lhs.maxLength != rhs.maxLength {
             return false
         }
@@ -290,6 +359,9 @@ public final class MessageInputPanelComponent: Component {
             return false
         }
         if lhs.alwaysDarkWhenHasText != rhs.alwaysDarkWhenHasText {
+            return false
+        }
+        if lhs.useGrayBackground != rhs.useGrayBackground {
             return false
         }
         if lhs.resetInputContents != rhs.resetInputContents {
@@ -313,7 +385,7 @@ public final class MessageInputPanelComponent: Component {
         if lhs.wasRecordingDismissed != rhs.wasRecordingDismissed {
             return false
         }
-        if lhs.recordedAudioPreview !== rhs.recordedAudioPreview {
+        if lhs.recordedAudioPreview != rhs.recordedAudioPreview {
             return false
         }
         if lhs.hasRecordedVideoPreview != rhs.hasRecordedVideoPreview {
@@ -361,6 +433,9 @@ public final class MessageInputPanelComponent: Component {
         if (lhs.attachmentAction == nil) != (rhs.attachmentAction == nil) {
             return false
         }
+        if lhs.attachmentButtonMode != rhs.attachmentButtonMode {
+            return false
+        }
         if lhs.myReaction != rhs.myReaction {
             return false
         }
@@ -388,12 +463,13 @@ public final class MessageInputPanelComponent: Component {
             
     public final class View: UIView {
         private let fieldBackgroundView: BlurredBackgroundView
-        private let vibrancyEffectView: UIVisualEffectView
+        private let fieldBackgroundTint: UIView
         private let gradientView: UIImageView
         private let bottomGradientView: UIView
         
-        private let placeholder = ComponentView<Empty>()
-        private let vibrancyPlaceholder = ComponentView<Empty>()
+        private var currentPlaceholderType: Bool?
+        private var placeholder = ComponentView<Empty>()
+        private var vibrancyPlaceholder = ComponentView<Empty>()
         
         private let counter = ComponentView<Empty>()
         private var header: ComponentView<Empty>?
@@ -408,7 +484,6 @@ public final class MessageInputPanelComponent: Component {
         private let inputActionButton = ComponentView<Empty>()
         private let likeButton = ComponentView<Empty>()
         private let stickerButton = ComponentView<Empty>()
-        private let reactionButton = ComponentView<Empty>()
         private let timeoutButton = ComponentView<Empty>()
         
         private var mediaRecordingVibrancyContainer: UIView
@@ -424,16 +499,20 @@ public final class MessageInputPanelComponent: Component {
         
         private var contextQueryStates: [ChatPresentationInputQueryKind: (ChatPresentationInputQuery, Disposable)] = [:]
         private var contextQueryResults: [ChatPresentationInputQueryKind: ChatPresentationInputQueryResult] = [:]
+        private var contextQueryPeer: EnginePeer?
         private var contextQueryResultPanel: ComponentView<Empty>?
         
         private var stickersResultPanel: ComponentView<Empty>?
         
         private var viewForOverlayContent: ViewForOverlayContent?
         private var currentEmojiSuggestionView: ComponentHostView<Empty>?
+        private var currentEmojiSearchView: ComponentHostView<Empty>?
         
         private var viewsIconView: UIImageView?
         private var viewStatsCountText: AnimatedCountLabelView?
         private var reactionStatsCountText: AnimatedCountLabelView?
+        
+        private var didDisplayCaptionPositionTooltip = false
         
         private let hapticFeedback = HapticFeedback()
         
@@ -451,12 +530,16 @@ public final class MessageInputPanelComponent: Component {
         }
         
         override init(frame: CGRect) {
-            self.fieldBackgroundView = BlurredBackgroundView(color: UIColor(white: 0.0, alpha: 0.5), enableBlur: true)
-            
-            self.vibrancyEffectView = UIVisualEffectView(effect: UIVibrancyEffect(blurEffect: UIBlurEffect(style: .dark)))
+            self.fieldBackgroundView = BlurredBackgroundView(color: nil, enableBlur: true)
+            self.fieldBackgroundTint = UIView()
+            self.fieldBackgroundTint.backgroundColor = UIColor(white: 1.0, alpha: 0.1)
             
             self.mediaRecordingVibrancyContainer = UIView()
-            self.vibrancyEffectView.contentView.addSubview(self.mediaRecordingVibrancyContainer)
+            if let filter = CALayer.luminanceToAlpha() {
+                self.mediaRecordingVibrancyContainer.backgroundColor = .white
+                self.mediaRecordingVibrancyContainer.layer.filters = [filter]
+            }
+            self.fieldBackgroundTint.mask = self.mediaRecordingVibrancyContainer
             
             self.gradientView = UIImageView()
             self.bottomGradientView = UIView()
@@ -467,8 +550,8 @@ public final class MessageInputPanelComponent: Component {
             
             self.addSubview(self.bottomGradientView)
             self.addSubview(self.gradientView)
-            self.fieldBackgroundView.addSubview(self.vibrancyEffectView)
             self.addSubview(self.fieldBackgroundView)
+            self.addSubview(self.fieldBackgroundTint)
             self.addSubview(self.textClippingView)
             
             self.viewForOverlayContent = ViewForOverlayContent(
@@ -489,6 +572,7 @@ public final class MessageInputPanelComponent: Component {
                         return
                     }
                     self.textFieldExternalState.dismissedEmojiSuggestionPosition = self.textFieldExternalState.currentEmojiSuggestion?.position
+                    self.textFieldExternalState.dismissedEmojiSearchPosition = self.textFieldExternalState.currentEmojiSearch?.position
                     self.state?.updated()
                 }
             )
@@ -595,6 +679,17 @@ public final class MessageInputPanelComponent: Component {
             }
             let contextQueryUpdates = contextQueryResultState(context: context, inputState: inputState, availableTypes: availableTypes, chatLocation: component.chatLocation, currentQueryStates: &self.contextQueryStates)
 
+            if self.contextQueryPeer == nil, let peerId = component.chatLocation?.peerId {
+                let _ = (context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: peerId))
+                |> deliverOnMainQueue).start(next: { [weak self] peer in
+                    guard let self, let peer, case .channel = peer, peer.addressName != nil else {
+                        return
+                    }
+                    self.contextQueryPeer = peer
+                    self.state?.updated(transition: .immediate)
+                })
+            }
+            
             for (kind, update) in contextQueryUpdates {
                 switch update {
                 case .remove:
@@ -641,6 +736,15 @@ public final class MessageInputPanelComponent: Component {
                     textFieldView.updateEmojiSuggestion(transition: .immediate)
                 }
                 self.state?.updated()
+            } else if let _ = self.textField.view, let currentEmojiSearch = self.textFieldExternalState.currentEmojiSearch, let currentEmojiSearchView = self.currentEmojiSearchView {
+                if let result = currentEmojiSearchView.hitTest(self.convert(point, to: currentEmojiSearchView), with: event) {
+                    return result
+                }
+                self.textFieldExternalState.dismissedEmojiSearchPosition = currentEmojiSearch.position
+                if let textFieldView = self.textField.view as? TextFieldComponent.View {
+                    textFieldView.updateEmojiSuggestion(transition: .immediate)
+                }
+                self.state?.updated()
             }
             
             if result == nil, let stickersResultPanel = self.stickersResultPanel?.view, let panelResult = stickersResultPanel.hitTest(self.convert(point, to: stickersResultPanel), with: event), panelResult !== stickersResultPanel {
@@ -654,10 +758,13 @@ public final class MessageInputPanelComponent: Component {
             return result
         }
         
-        func update(component: MessageInputPanelComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+        func update(component: MessageInputPanelComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
             let previousPlaceholder = self.component?.placeholder
             
-            var insets = UIEdgeInsets(top: 14.0, left: 9.0, bottom: 6.0, right: 41.0)
+            let defaultInsets = UIEdgeInsets(top: 14.0, left: 9.0, bottom: 6.0, right: 41.0)
+            var insets = defaultInsets
+            
+            let layoutFromTop = component.attachmentButtonMode == .captionDown
             
             if let _ = component.attachmentAction {
                 insets.left = 41.0
@@ -676,7 +783,8 @@ public final class MessageInputPanelComponent: Component {
             let baseFieldHeight: CGFloat = 40.0
             
             var transition = transition
-            if transition.animation.isImmediate, let previousComponent = self.component, previousComponent.storyItem?.id == component.storyItem?.id, component.isChannel {
+            let previousComponent = self.component
+            if transition.animation.isImmediate, let previousComponent, previousComponent.storyItem?.id == component.storyItem?.id, component.isChannel {
                 transition = transition.withAnimation(.curve(duration: 0.3, curve: .spring))
             }
 
@@ -727,10 +835,12 @@ public final class MessageInputPanelComponent: Component {
                 transition: .immediate,
                 component: AnyComponent(TextFieldComponent(
                     context: component.context,
+                    theme: component.theme,
                     strings: component.strings,
                     externalState: self.textFieldExternalState,
                     fontSize: 17.0,
                     textColor: UIColor(rgb: 0xffffff),
+                    accentColor: UIColor(rgb: 0xffffff),
                     insets: UIEdgeInsets(top: 9.0, left: 8.0, bottom: 10.0, right: 48.0),
                     hideKeyboard: component.hideKeyboard,
                     customInputView: component.customInputView,
@@ -741,7 +851,7 @@ public final class MessageInputPanelComponent: Component {
                         }
                     },
                     isOneLineWhenUnfocused: component.style == .media,
-                    formatMenuAvailability: component.isFormattingLocked ? .locked : .available,
+                    formatMenuAvailability: component.isFormattingLocked ? .locked : .available(TextFieldComponent.FormatMenuAvailability.Action.all),
                     lockedFormatAction: {
                         component.presentTextFormattingTooltip?()
                     },
@@ -757,45 +867,101 @@ public final class MessageInputPanelComponent: Component {
             )
             let isEditing = self.textFieldExternalState.isEditing || component.forceIsEditing
             
-            var placeholderItems: [AnimatedTextComponent.Item] = []
-            switch component.placeholder {
-            case let .plain(string):
-                placeholderItems.append(AnimatedTextComponent.Item(id: AnyHashable(0 as Int), content: .text(string)))
-            case let .counter(items):
-                for item in items {
-                    switch item.content {
-                    case let .text(string):
-                        placeholderItems.append(AnimatedTextComponent.Item(id: AnyHashable(item.id), content: .text(string)))
-                    case let .number(value, minDigits):
-                        placeholderItems.append(AnimatedTextComponent.Item(id: AnyHashable(item.id), content: .number(value, minDigits: minDigits)))
+            let placeholderTransition: ComponentTransition = (previousPlaceholder != nil && previousPlaceholder != component.placeholder) ? ComponentTransition(animation: .curve(duration: 0.3, curve: .spring)) : .immediate
+            let placeholderSize: CGSize
+            
+            if case let .plain(string) = component.placeholder, string.contains("#") {
+                let placeholderType = false
+                if let currentPlaceholderType = self.currentPlaceholderType, currentPlaceholderType != placeholderType {
+                    self.placeholder.view?.removeFromSuperview()
+                    self.placeholder = ComponentView()
+                    
+                    self.vibrancyPlaceholder.view?.removeFromSuperview()
+                    self.vibrancyPlaceholder = ComponentView()
+                }
+                self.currentPlaceholderType = placeholderType
+                
+                let attributedPlaceholder = NSMutableAttributedString(string: string, font:Font.regular(17.0), textColor: UIColor(rgb: 0xffffff, alpha: 0.4))
+                if let range = attributedPlaceholder.string.range(of: "#") {
+                    attributedPlaceholder.addAttribute(.attachment, value: PresentationResourcesChat.chatPlaceholderStarIcon(component.theme)!, range: NSRange(range, in: attributedPlaceholder.string))
+                    attributedPlaceholder.addAttribute(.foregroundColor, value: UIColor(rgb: 0xffffff, alpha: 0.4), range: NSRange(range, in: attributedPlaceholder.string))
+                    attributedPlaceholder.addAttribute(.baselineOffset, value: 1.0, range: NSRange(range, in: attributedPlaceholder.string))
+                }
+                
+                placeholderSize = self.placeholder.update(
+                    transition: placeholderTransition,
+                    component: AnyComponent(MultilineTextComponent(text: .plain(attributedPlaceholder))),
+                    environment: {},
+                    containerSize: availableTextFieldSize
+                )
+                
+                let vibrancyAttributedPlaceholder = NSMutableAttributedString(string: string, font:Font.regular(17.0), textColor: UIColor.black)
+                if let range = vibrancyAttributedPlaceholder.string.range(of: "#") {
+                    vibrancyAttributedPlaceholder.addAttribute(.attachment, value: PresentationResourcesChat.chatPlaceholderStarIcon(component.theme)!, range: NSRange(range, in: vibrancyAttributedPlaceholder.string))
+                    vibrancyAttributedPlaceholder.addAttribute(.foregroundColor, value: UIColor.black, range: NSRange(range, in: vibrancyAttributedPlaceholder.string))
+                    vibrancyAttributedPlaceholder.addAttribute(.baselineOffset, value: 1.0, range: NSRange(range, in: vibrancyAttributedPlaceholder.string))
+                }
+                
+                let _ = self.vibrancyPlaceholder.update(
+                    transition: placeholderTransition,
+                    component: AnyComponent(MultilineTextComponent(text: .plain(attributedPlaceholder))),
+                    environment: {},
+                    containerSize: availableTextFieldSize
+                )
+            } else {
+                let placeholderType = true
+                if let currentPlaceholderType = self.currentPlaceholderType, currentPlaceholderType != placeholderType {
+                    self.placeholder.view?.removeFromSuperview()
+                    self.placeholder = ComponentView()
+                    
+                    self.vibrancyPlaceholder.view?.removeFromSuperview()
+                    self.vibrancyPlaceholder = ComponentView()
+                }
+                self.currentPlaceholderType = placeholderType
+                
+                var placeholderItems: [AnimatedTextComponent.Item] = []
+                switch component.placeholder {
+                case let .plain(string):
+                    placeholderItems.append(AnimatedTextComponent.Item(id: AnyHashable(0 as Int), content: .text(string)))
+                case let .counter(items):
+                    for item in items {
+                        switch item.content {
+                        case let .text(string):
+                            placeholderItems.append(AnimatedTextComponent.Item(id: AnyHashable(item.id), content: .text(string)))
+                        case let .number(value, minDigits):
+                            placeholderItems.append(AnimatedTextComponent.Item(id: AnyHashable(item.id), content: .number(value, minDigits: minDigits)))
+                        }
                     }
                 }
+                
+                placeholderSize = self.placeholder.update(
+                    transition: placeholderTransition,
+                    component: AnyComponent(AnimatedTextComponent(
+                        font: Font.regular(17.0),
+                        color: UIColor(rgb: 0xffffff, alpha: 0.4),
+                        items: placeholderItems
+                    )),
+                    environment: {},
+                    containerSize: availableTextFieldSize
+                )
+                
+                let _ = self.vibrancyPlaceholder.update(
+                    transition: placeholderTransition,
+                    component: AnyComponent(AnimatedTextComponent(
+                        font: Font.regular(17.0),
+                        color: .black,
+                        items: placeholderItems
+                    )),
+                    environment: {},
+                    containerSize: availableTextFieldSize
+                )
             }
             
-            let placeholderTransition: Transition = (previousPlaceholder != nil && previousPlaceholder != component.placeholder) ? Transition(animation: .curve(duration: 0.3, curve: .spring)) : .immediate
-            let placeholderSize = self.placeholder.update(
-                transition: placeholderTransition,
-                component: AnyComponent(AnimatedTextComponent(
-                    font: Font.regular(17.0),
-                    color: UIColor(rgb: 0xffffff, alpha: 0.3),
-                    items: placeholderItems
-                )),
-                environment: {},
-                containerSize: availableTextFieldSize
-            )
-            
-            let _ = self.vibrancyPlaceholder.update(
-                transition: placeholderTransition,
-                component: AnyComponent(AnimatedTextComponent(
-                    font: Font.regular(17.0),
-                    color: .white,
-                    items: placeholderItems
-                )),
-                environment: {},
-                containerSize: availableTextFieldSize
-            )
             if !isEditing && component.setMediaRecordingActive == nil {
-                insets.right = insets.left
+                insets.right = defaultInsets.left
+            }
+            if component.attachmentButtonMode != .attach && !isEditing && !self.textFieldExternalState.hasText {
+                insets.left = defaultInsets.left
             }
             
             var headerHeight: CGFloat = 0.0
@@ -821,7 +987,7 @@ public final class MessageInputPanelComponent: Component {
                     if let headerView = headerView as? ForwardInfoPanelComponent.View {
                         if headerView.superview == nil {
                             self.addSubview(headerView)
-                            self.vibrancyEffectView.contentView.addSubview(headerView.backgroundView)
+                            self.mediaRecordingVibrancyContainer.addSubview(headerView.backgroundView)
                             
                             headerView.backgroundView.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.4)
                         }
@@ -874,11 +1040,15 @@ public final class MessageInputPanelComponent: Component {
             let rawFieldBackgroundFrame = fieldBackgroundFrame
             fieldBackgroundFrame.size.height += headerHeight
                         
-            transition.setFrame(view: self.vibrancyEffectView, frame: CGRect(origin: CGPoint(), size: fieldBackgroundFrame.size))
-            self.vibrancyEffectView.isHidden = component.style == .media
+            //transition.setFrame(view: self.vibrancyEffectView, frame: CGRect(origin: CGPoint(), size: fieldBackgroundFrame.size))
             
             transition.setFrame(view: self.fieldBackgroundView, frame: fieldBackgroundFrame)
             self.fieldBackgroundView.update(size: fieldBackgroundFrame.size, cornerRadius: headerHeight > 0.0 ? 18.0 : baseFieldHeight * 0.5, transition: transition.containedViewLayoutTransition)
+            transition.setFrame(view: self.fieldBackgroundTint, frame: fieldBackgroundFrame)
+            transition.setFrame(view: self.mediaRecordingVibrancyContainer, frame: CGRect(origin: CGPoint(), size: fieldBackgroundFrame.size))
+            
+            //self.fieldBackgroundTint.backgroundColor = .blue
+            transition.setCornerRadius(layer: self.fieldBackgroundTint.layer, cornerRadius: headerHeight > 0.0 ? 18.0 : baseFieldHeight * 0.5)
             
             var textClippingFrame = rawFieldBackgroundFrame.offsetBy(dx: 0.0, dy: headerHeight)
             if component.style == .media, !isEditing {
@@ -902,7 +1072,7 @@ public final class MessageInputPanelComponent: Component {
             if let placeholderView = self.placeholder.view, let vibrancyPlaceholderView = self.vibrancyPlaceholder.view {
                 if vibrancyPlaceholderView.superview == nil {
                     vibrancyPlaceholderView.layer.anchorPoint = CGPoint()
-                    self.vibrancyEffectView.contentView.addSubview(vibrancyPlaceholderView)
+                    self.mediaRecordingVibrancyContainer.addSubview(vibrancyPlaceholderView)
                     
                     vibrancyPlaceholderView.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.4)
                 }
@@ -1034,23 +1204,58 @@ public final class MessageInputPanelComponent: Component {
                 }
             }
             
-            if let disabledPlaceholderText = component.disabledPlaceholder, !component.isChannel {
+            if let disabledPlaceholderValue = component.disabledPlaceholder, !component.isChannel {
                 let disabledPlaceholder: ComponentView<Empty>
                 var disabledPlaceholderTransition = transition
-                if let current = self.disabledPlaceholder {
+                if let current = self.disabledPlaceholder, let previous = previousComponent?.disabledPlaceholder, disabledPlaceholderValue.kind == previous.kind {
                     disabledPlaceholder = current
                 } else {
+                    self.disabledPlaceholder?.view?.removeFromSuperview()
+                    
                     disabledPlaceholderTransition = .immediate
                     disabledPlaceholder = ComponentView()
                     self.disabledPlaceholder = disabledPlaceholder
                 }
+                
+                let contents: AnyComponent<Empty>
+                var leftAlignment = false
+                switch disabledPlaceholderValue {
+                case let .text(text):
+                    contents = AnyComponent(MultilineTextComponent(
+                        text: .plain(NSAttributedString(string: text, font: Font.regular(17.0), textColor: UIColor(rgb: 0xffffff, alpha: 0.3)))
+                    ))
+                case let .premiumRequired(title, subtitle, action), let .boostRequired(title, subtitle, action):
+                    leftAlignment = true
+                    
+                    let text = NSMutableAttributedString(attributedString: NSAttributedString())
+                    text.append(NSAttributedString(string: "\(title) ", font: Font.regular(13.0), textColor: UIColor(rgb: 0xffffff, alpha: 0.3)))
+                    text.append(NSAttributedString(string: subtitle, font: Font.regular(13.0), textColor: component.theme.list.itemAccentColor))
+                    
+                    contents = AnyComponent(PlainButtonComponent(
+                        content: AnyComponent(MultilineTextComponent(
+                            text: .plain(text),
+                            maximumNumberOfLines: 0,
+                            lineSpacing: 0.1
+                        )),
+                        effectAlignment: .center,
+                        action: {
+                            action()
+                        }
+                    ))
+                }
+                
                 let disabledPlaceholderSize = disabledPlaceholder.update(
                     transition: .immediate,
-                    component: AnyComponent(Text(text: disabledPlaceholderText, font: Font.regular(17.0), color: UIColor(rgb: 0xffffff, alpha: 0.3))),
+                    component: contents,
                     environment: {},
                     containerSize: CGSize(width: fieldBackgroundFrame.width - 8.0 * 2.0, height: 100.0)
                 )
-                let disabledPlaceholderFrame = CGRect(origin: CGPoint(x: fieldBackgroundFrame.minX + floor((fieldBackgroundFrame.width - disabledPlaceholderSize.width) * 0.5), y: fieldBackgroundFrame.minY + floor((fieldBackgroundFrame.height - disabledPlaceholderSize.height) * 0.5)), size: disabledPlaceholderSize)
+                let disabledPlaceholderFrame: CGRect
+                if leftAlignment {
+                    disabledPlaceholderFrame = CGRect(origin: CGPoint(x: 12.0, y: fieldBackgroundFrame.minY + floor((fieldBackgroundFrame.height - disabledPlaceholderSize.height) * 0.5)), size: disabledPlaceholderSize)
+                } else {
+                    disabledPlaceholderFrame = CGRect(origin: CGPoint(x: fieldBackgroundFrame.minX + floor((fieldBackgroundFrame.width - disabledPlaceholderSize.width) * 0.5), y: fieldBackgroundFrame.minY + floor((fieldBackgroundFrame.height - disabledPlaceholderSize.height) * 0.5)), size: disabledPlaceholderSize)
+                }
                 if let disabledPlaceholderView = disabledPlaceholder.view {
                     if disabledPlaceholderView.superview == nil {
                         self.addSubview(disabledPlaceholderView)
@@ -1097,7 +1302,24 @@ public final class MessageInputPanelComponent: Component {
             
             if component.attachmentAction != nil {
                 let attachmentButtonMode: MessageInputActionButtonComponent.Mode
-                attachmentButtonMode = .attach
+        
+                var attachmentVisible = isEditing || self.textFieldExternalState.hasText
+                switch component.attachmentButtonMode {
+                case .captionUp:
+                    attachmentButtonMode = .captionUp
+                case .captionDown:
+                    attachmentButtonMode = .captionDown
+                default:
+                    attachmentButtonMode = .attach
+                    attachmentVisible = !(hasMediaRecording || hasMediaEditing || !isEditing)
+                }
+                
+                if attachmentButtonMode == .captionUp && !self.didDisplayCaptionPositionTooltip && self.textFieldExternalState.textLength > 3 {
+                    self.didDisplayCaptionPositionTooltip = true
+                    if let sourceView = self.attachmentButton.view {
+                        component.presentCaptionPositionTooltip?(sourceView)
+                    }
+                }
                 
                 let attachmentButtonSize = self.attachmentButton.update(
                     transition: transition,
@@ -1112,7 +1334,7 @@ public final class MessageInputPanelComponent: Component {
                             switch mode {
                             case .delete:
                                 break
-                            case .attach:
+                            case .attach, .captionUp, .captionDown:
                                 component.attachmentAction?()
                             default:
                                 break
@@ -1147,10 +1369,16 @@ public final class MessageInputPanelComponent: Component {
                     if attachmentButtonView.superview == nil {
                         self.addSubview(attachmentButtonView)
                     }
-                    let attachmentButtonFrame = CGRect(origin: CGPoint(x: floor((insets.left - attachmentButtonSize.width) * 0.5) + (fieldBackgroundFrame.minX - fieldFrame.minX), y: size.height - insets.bottom - baseFieldHeight + floor((baseFieldHeight - attachmentButtonSize.height) * 0.5)), size: attachmentButtonSize)
+                    var attachmentButtonPosition = floor((baseFieldHeight - attachmentButtonSize.height) * 0.5)
+                    if layoutFromTop {
+                        attachmentButtonPosition += 14.0
+                    } else {
+                        attachmentButtonPosition = size.height - insets.bottom - baseFieldHeight + attachmentButtonPosition
+                    }
+                    let attachmentButtonFrame = CGRect(origin: CGPoint(x: floor((insets.left - attachmentButtonSize.width) * 0.5) + (fieldBackgroundFrame.minX - fieldFrame.minX), y: attachmentButtonPosition), size: attachmentButtonSize)
                     transition.setPosition(view: attachmentButtonView, position: attachmentButtonFrame.center)
                     transition.setBounds(view: attachmentButtonView, bounds: CGRect(origin: CGPoint(), size: attachmentButtonFrame.size))
-                    transition.setAlpha(view: attachmentButtonView, alpha: (hasMediaRecording || hasMediaEditing || !isEditing) ? 0.0 : 1.0)
+                    transition.setAlpha(view: attachmentButtonView, alpha: attachmentVisible ? 1.0 : 0.0)
                     transition.setScale(view: attachmentButtonView, scale: hasMediaEditing ? 0.001 : 1.0)
                 }
             }
@@ -1206,7 +1434,7 @@ public final class MessageInputPanelComponent: Component {
                             guard let self, let deleteMediaPreviewButtonView else {
                                 return
                             }
-                            let transition = Transition(animation: .curve(duration: 0.3, curve: .spring))
+                            let transition = ComponentTransition(animation: .curve(duration: 0.3, curve: .spring))
                             transition.setAlpha(view: deleteMediaPreviewButtonView, alpha: 0.0, completion: { [weak deleteMediaPreviewButtonView] _ in
                                 deleteMediaPreviewButtonView?.removeFromSuperview()
                             })
@@ -1228,6 +1456,7 @@ public final class MessageInputPanelComponent: Component {
                 }
             }
             
+            var inputActionButtonAlpha = 1.0
             let inputActionButtonMode: MessageInputActionButtonComponent.Mode
             if case .editor = component.style {
                 if isEditing {
@@ -1236,13 +1465,20 @@ public final class MessageInputPanelComponent: Component {
                     inputActionButtonMode = component.hasRecordedVideo ? .removeVideoInput : .videoInput
                 }
             } else if case .media = component.style {
-                inputActionButtonMode = isEditing ? .apply : .none
+                inputActionButtonMode = .apply
+                if !isEditing {
+                    inputActionButtonAlpha = 0.0
+                }
             } else {
                 if hasMediaEditing {
                     inputActionButtonMode = .send
                 } else {
                     if self.textFieldExternalState.hasText {
-                        inputActionButtonMode = .send
+                        if let sendPaidMessageStars = component.sendPaidMessageStars, "".isEmpty {
+                            inputActionButtonMode = .stars(sendPaidMessageStars.value)
+                        } else {
+                            inputActionButtonMode = .send
+                        }
                     } else if !isEditing && component.forwardAction != nil {
                         inputActionButtonMode = .forward
                     } else {
@@ -1267,7 +1503,7 @@ public final class MessageInputPanelComponent: Component {
                         switch mode {
                         case .none:
                             break
-                        case .send:
+                        case .send, .stars:
                             if case .up = action {
                                 if component.recordedAudioPreview != nil {
                                     component.sendMessageAction()
@@ -1318,7 +1554,7 @@ public final class MessageInputPanelComponent: Component {
                         
                         self.currentMediaInputIsVoice = !self.currentMediaInputIsVoice
                         self.hapticFeedback.impact(.medium)
-                        self.state?.updated(transition: Transition(animation: .curve(duration: 0.4, curve: .spring)))
+                        self.state?.updated(transition: ComponentTransition(animation: .curve(duration: 0.4, curve: .spring)))
                     },
                     updateMediaCancelFraction: { [weak self] mediaCancelFraction in
                         guard let self else {
@@ -1396,10 +1632,16 @@ public final class MessageInputPanelComponent: Component {
                 if inputActionButtonView.superview == nil {
                     self.addSubview(inputActionButtonView)
                 }
-                let inputActionButtonFrame = CGRect(origin: CGPoint(x: inputActionButtonOriginX, y: size.height - insets.bottom - baseFieldHeight + floor((baseFieldHeight - inputActionButtonSize.height) * 0.5)), size: inputActionButtonSize)
+                var inputActionButtonPosition = floor((baseFieldHeight - inputActionButtonSize.height) * 0.5)
+                if layoutFromTop {
+                    inputActionButtonPosition += 14.0
+                } else {
+                    inputActionButtonPosition = size.height - insets.bottom - baseFieldHeight + inputActionButtonPosition
+                }
+                let inputActionButtonFrame = CGRect(origin: CGPoint(x: inputActionButtonOriginX, y: inputActionButtonPosition), size: inputActionButtonSize)
                 transition.setPosition(view: inputActionButtonView, position: inputActionButtonFrame.center)
                 transition.setBounds(view: inputActionButtonView, bounds: CGRect(origin: CGPoint(), size: inputActionButtonFrame.size))
-                transition.setAlpha(view: inputActionButtonView, alpha: likeActionReplacesInputAction ? 0.0 : 1.0)
+                transition.setAlpha(view: inputActionButtonView, alpha: likeActionReplacesInputAction ? 0.0 : inputActionButtonAlpha)
                 
                 if rightButtonsOffsetX != 0.0 {
                     if hasLikeAction {
@@ -1600,15 +1842,19 @@ public final class MessageInputPanelComponent: Component {
                 }
             }
             
+            var lightFieldColor = UIColor(white: 1.0, alpha: 0.09)
             var fieldBackgroundIsDark = false
-            if component.style == .media {
-                
+            if component.useGrayBackground {
+                fieldBackgroundIsDark = false
+            } else if component.style == .media {
+                fieldBackgroundIsDark = false
+                lightFieldColor = UIColor(white: 0.2, alpha: 0.45)
             } else if self.textFieldExternalState.hasText && component.alwaysDarkWhenHasText {
                 fieldBackgroundIsDark = true
-            } else if isEditing || component.style == .editor {
+            } else if isEditing || component.style == .story || component.style == .editor {
                 fieldBackgroundIsDark = true
             }
-            self.fieldBackgroundView.updateColor(color: fieldBackgroundIsDark ? UIColor(white: 0.0, alpha: 0.5) : UIColor(white: 1.0, alpha: 0.09), transition: transition.containedViewLayoutTransition)
+            self.fieldBackgroundView.updateColor(color: fieldBackgroundIsDark ? UIColor(white: 0.0, alpha: 0.5) : lightFieldColor, transition: transition.containedViewLayoutTransition)
             if let placeholder = self.placeholder.view, let vibrancyPlaceholderView = self.vibrancyPlaceholder.view {
                 placeholder.isHidden = self.textFieldExternalState.hasText
                 vibrancyPlaceholderView.isHidden = placeholder.isHidden
@@ -1701,7 +1947,7 @@ public final class MessageInputPanelComponent: Component {
                             attachmentButtonView.isHidden = true
                         }
                         mediaRecordingPanelView.animateOut(transition: transition, dismissRecording: wasRecordingDismissed, completion: { [weak self, weak mediaRecordingPanelView] in
-                            let transition = Transition(animation: .curve(duration: 0.3, curve: .spring))
+                            let transition = ComponentTransition(animation: .curve(duration: 0.3, curve: .spring))
                             
                             if let mediaRecordingPanelView = mediaRecordingPanelView {
                                 transition.setAlpha(view: mediaRecordingPanelView, alpha: 0.0, completion: { [weak mediaRecordingPanelView] _ in
@@ -1785,6 +2031,8 @@ public final class MessageInputPanelComponent: Component {
             var contextResults: ContextResultPanelComponent.Results?
             if let result = self.contextQueryResults[.mention], case let .mentions(mentions) = result, !mentions.isEmpty {
                 contextResults = .mentions(mentions)
+            } else if let result = self.contextQueryResults[.hashtag], case let .hashtags(hashtags, query) = result, !hashtags.isEmpty || (query.count >= 4 && self.contextQueryPeer != nil) {
+                contextResults = .hashtags(self.contextQueryPeer, hashtags, query)
             }
             
             if let result = self.contextQueryResults[.emoji], case let .stickers(stickers) = result, !stickers.isEmpty {
@@ -1903,7 +2151,23 @@ public final class MessageInputPanelComponent: Component {
                                         }
                                     }
                                 case let .hashtag(hashtag):
-                                    let _ = hashtag
+                                    var hashtagQueryRange: NSRange?
+                                    inner: for (range, type, _) in textInputStateContextQueryRangeAndType(inputState: inputState) {
+                                        if type == [.hashtag] {
+                                            hashtagQueryRange = range
+                                            break inner
+                                        }
+                                    }
+                                    
+                                    if let range = hashtagQueryRange {
+                                        let inputText = NSMutableAttributedString(attributedString: inputState.inputText)
+                                        
+                                        let replacementText = hashtag
+                                        inputText.replaceCharacters(in: range, with: replacementText)
+                                        
+                                        let selectionPosition = range.lowerBound + (replacementText as NSString).length
+                                        textView.updateText(inputText, selectionRange: selectionPosition ..< selectionPosition)
+                                    }
                                 }
                             }
                         }
@@ -1948,6 +2212,18 @@ public final class MessageInputPanelComponent: Component {
                 })
             }
             
+            if let emojiSearch = self.textFieldExternalState.currentEmojiSearch, emojiSearch.disposable == nil {
+                emojiSearch.disposable = (EmojiSuggestionsComponent.searchData(context: component.context, isSavedMessages: false, query: emojiSearch.position.value)
+                |> deliverOnMainQueue).start(next: { [weak self, weak emojiSearch] result in
+                    guard let self, let emojiSearch, self.textFieldExternalState.currentEmojiSearch === emojiSearch else {
+                        return
+                    }
+                    
+                    emojiSearch.value = result
+                    self.state?.updated()
+                })
+            }
+            
             var hasTrackingView = self.textFieldExternalState.hasTrackingView
             if let currentEmojiSuggestion = self.textFieldExternalState.currentEmojiSuggestion, let value = currentEmojiSuggestion.value as? [TelegramMediaFile], value.isEmpty {
                 hasTrackingView = false
@@ -1970,6 +2246,20 @@ public final class MessageInputPanelComponent: Component {
                         currentEmojiSuggestionView?.removeFromSuperview()
                     })
                 }
+                
+                if let currentEmojiSearch = self.textFieldExternalState.currentEmojiSearch {
+                    self.textFieldExternalState.currentEmojiSearch = nil
+                    currentEmojiSearch.disposable?.dispose()
+                }
+                
+                if let currentEmojiSearchView = self.currentEmojiSearchView {
+                    self.currentEmojiSearchView = nil
+                    
+                    currentEmojiSearchView.alpha = 0.0
+                    currentEmojiSearchView.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.25, removeOnCompletion: false, completion: { [weak currentEmojiSearchView] _ in
+                        currentEmojiSearchView?.removeFromSuperview()
+                    })
+                }
             }
             
             if let currentEmojiSuggestion = self.textFieldExternalState.currentEmojiSuggestion, let value = currentEmojiSuggestion.value as? [TelegramMediaFile] {
@@ -1982,8 +2272,6 @@ public final class MessageInputPanelComponent: Component {
                     self.addSubview(currentEmojiSuggestionView)
                     
                     currentEmojiSuggestionView.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.15)
-                    
-                    //self.installEmojiSuggestionPreviewGesture(hostView: currentEmojiSuggestionView)
                 }
             
                 let globalPosition: CGPoint
@@ -2001,7 +2289,7 @@ public final class MessageInputPanelComponent: Component {
                         context: component.context,
                         userLocation: .other,
                         theme: EmojiSuggestionsComponent.Theme(
-                            backgroundColor: UIColor(white: 0.0, alpha: 0.5),
+                            backgroundColor: UIColor(white: 0.1, alpha: 1.0),
                             textColor: .white,
                             placeholderColor: UIColor(rgb: 0xffffff).mixedWith(UIColor(rgb: 0x1c1c1d), alpha: 0.9)
                         ),
@@ -2020,7 +2308,7 @@ public final class MessageInputPanelComponent: Component {
                             
                             var text: String?
                             var emojiAttribute: ChatTextInputTextCustomEmojiAttribute?
-                    loop:   for attribute in file.attributes {
+                            loop: for attribute in file.attributes {
                                 switch attribute {
                                 case let .CustomEmoji(_, _, displayText, _):
                                     text = displayText
@@ -2072,6 +2360,113 @@ public final class MessageInputPanelComponent: Component {
                 }
             }
             
+            if let currentEmojiSearch = self.textFieldExternalState.currentEmojiSearch, let value = currentEmojiSearch.value as? [TelegramMediaFile], !value.isEmpty {
+                let currentEmojiSearchView: ComponentHostView<Empty>
+                if let current = self.currentEmojiSearchView {
+                    currentEmojiSearchView = current
+                } else {
+                    currentEmojiSearchView = ComponentHostView<Empty>()
+                    self.currentEmojiSearchView = currentEmojiSearchView
+                    self.addSubview(currentEmojiSearchView)
+                    
+                    currentEmojiSearchView.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.15)
+                }
+            
+                var globalPosition: CGPoint
+                if let textView = self.textField.view {
+                    globalPosition = textView.convert(currentEmojiSearch.localPosition, to: self)
+                    globalPosition.x += 16.0
+                } else {
+                    globalPosition = .zero
+                }
+                
+                let sideInset: CGFloat = 7.0
+                
+                let viewSize = currentEmojiSearchView.update(
+                    transition: .immediate,
+                    component: AnyComponent(EmojiSuggestionsComponent(
+                        context: component.context,
+                        userLocation: .other,
+                        theme: EmojiSuggestionsComponent.Theme(
+                            backgroundColor: UIColor(white: 0.1, alpha: 1.0),
+                            textColor: .white,
+                            placeholderColor: UIColor(rgb: 0xffffff).mixedWith(UIColor(rgb: 0x1c1c1d), alpha: 0.9)
+                        ),
+                        animationCache: component.context.animationCache,
+                        animationRenderer: component.context.animationRenderer,
+                        files: value,
+                        action: { [weak self] file in
+                            guard let self, let textView = self.textField.view as? TextFieldComponent.View, let currentEmojiSearch = self.textFieldExternalState.currentEmojiSearch else {
+                                return
+                            }
+                            
+                            AudioServicesPlaySystemSound(0x450)
+                            
+                            let inputState = textView.getInputState()
+                            let inputText = NSMutableAttributedString(attributedString: inputState.inputText)
+                            
+                            var text: String?
+                            var emojiAttribute: ChatTextInputTextCustomEmojiAttribute?
+                            loop: for attribute in file.attributes {
+                                switch attribute {
+                                case let .CustomEmoji(_, _, displayText, _):
+                                    text = displayText
+                                    emojiAttribute = ChatTextInputTextCustomEmojiAttribute(interactivelySelectedFromPackId: nil, fileId: file.fileId.id, file: file)
+                                    break loop
+                                default:
+                                    break
+                                }
+                            }
+                            
+                            if let emojiAttribute = emojiAttribute, let text = text {
+                                let replacementText = NSAttributedString(string: text, attributes: [ChatTextInputAttributes.customEmoji: emojiAttribute])
+                                
+                                var range = currentEmojiSearch.position.range
+                                let previousText = inputText.attributedSubstring(from: range)
+                                if range.location != 0 && inputText.attributedSubstring(from: NSRange(location: range.location - 1, length: range.length + 1)).string.hasPrefix(":") {
+                                    range = NSRange(location: range.location - 1, length: range.length + 1)
+                                }
+                                inputText.replaceCharacters(in: range, with: replacementText)
+                                
+                                var replacedUpperBound = range.lowerBound
+                                while true {
+                                    if inputText.attributedSubstring(from: NSRange(location: 0, length: replacedUpperBound)).string.hasSuffix(previousText.string) {
+                                        let replaceRange = NSRange(location: replacedUpperBound - previousText.length, length: previousText.length)
+                                        if replaceRange.location < 0 {
+                                            break
+                                        }
+                                        let adjacentString = inputText.attributedSubstring(from: replaceRange)
+                                        if adjacentString.string != previousText.string || adjacentString.attribute(ChatTextInputAttributes.customEmoji, at: 0, effectiveRange: nil) != nil {
+                                            break
+                                        }
+                                        inputText.replaceCharacters(in: replaceRange, with: NSAttributedString(string: text, attributes: [ChatTextInputAttributes.customEmoji: ChatTextInputTextCustomEmojiAttribute(interactivelySelectedFromPackId: emojiAttribute.interactivelySelectedFromPackId, fileId: emojiAttribute.fileId, file: emojiAttribute.file)]))
+                                        replacedUpperBound = replaceRange.lowerBound
+                                    } else {
+                                        break
+                                    }
+                                }
+                                
+                                let selectionPosition = range.lowerBound + (replacementText.string as NSString).length
+                                textView.updateText(inputText, selectionRange: selectionPosition ..< selectionPosition)
+                            }
+                        }
+                    )),
+                    environment: {},
+                    containerSize: CGSize(width: self.bounds.width - sideInset * 2.0, height: 100.0)
+                )
+                
+                var viewFrame = CGRect(origin: CGPoint(x: globalPosition.x - floor((viewSize.width) * 0.5), y: globalPosition.y - 4.0 - viewSize.height), size: viewSize)
+                if viewFrame.origin.x + viewFrame.width > self.bounds.width - sideInset {
+                    viewFrame.origin.x = self.bounds.width - sideInset - viewFrame.width
+                }
+                viewFrame.origin.x = max(viewFrame.origin.x, sideInset)
+                
+                currentEmojiSearchView.frame = viewFrame
+                if let componentView = currentEmojiSearchView.componentView as? EmojiSuggestionsComponent.View {
+                    componentView.adjustBackground(relativePositionX: floor(globalPosition.x - viewFrame.minX))
+                }
+            }
+            
             return size
         }
     }
@@ -2080,7 +2475,7 @@ public final class MessageInputPanelComponent: Component {
         return View(frame: CGRect())
     }
     
-    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
 }

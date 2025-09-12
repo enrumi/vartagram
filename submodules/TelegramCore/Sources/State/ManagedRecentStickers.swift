@@ -15,23 +15,23 @@ private func hashForIds(_ ids: [Int64]) -> Int64 {
 
 final class CachedOrderedItemListHashes: Codable {
     public let hashes: [Int32: (Int64, Int64)]
-    
+
     public init(hashes: [Int32: (Int64, Int64)]) {
         self.hashes = hashes
     }
-    
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: StringCodingKey.self)
-        
+
         let keys = try container.decode([Int32].self, forKey: "keys")
         let localHashes = try container.decode([Int64].self, forKey: "localHashes")
         let remoteHashes = try container.decode([Int64].self, forKey: "remoteHashes")
         self.hashes = Dictionary(uniqueKeysWithValues: zip(keys, zip(localHashes, remoteHashes)))
     }
-    
+
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: StringCodingKey.self)
-        
+
         try container.encode(self.hashes.map { $0.key }, forKey: "keys")
         try container.encode(self.hashes.map { $0.value.0 }, forKey: "localHashes")
         try container.encode(self.hashes.map { $0.value.1 }, forKey: "remoteHashes")
@@ -44,9 +44,9 @@ func getOrderedItemListHash(transaction: Transaction, collectionId: Int32) -> (I
 
 func setOrderedItemListHash(transaction: Transaction, collectionId: Int32, localHash: Int64, remoteHash: Int64) {
     var cachedOrderedItemListHashes = transaction.retrieveItemCacheEntry(id: ItemCacheEntryId(collectionId: Namespaces.CachedItemCollection.cachedOrderedItemListHashes, key: ValueBoxKey(length: 0)))?.get(CachedOrderedItemListHashes.self)?.hashes ?? [:]
-    
+
     cachedOrderedItemListHashes[collectionId] = (localHash, remoteHash)
-    
+
     if let entry = CodableEntry(CachedOrderedItemListHashes(hashes: cachedOrderedItemListHashes)) {
         transaction.putItemCacheEntry(id: ItemCacheEntryId(collectionId: Namespaces.CachedItemCollection.cachedOrderedItemListHashes, key: ValueBoxKey(length: 0)), entry: entry)
     }
@@ -58,7 +58,7 @@ private func managedRecentMedia(postbox: Postbox, network: Network, collectionId
         if reverseHashOrder {
             itemIds.reverse()
         }
-        
+
         // for some collections hash is calculated identically on client and server
         // for others we save remote hash value for further requests
         // local hash is also saved in latter case to detect when collection have been updated locally
@@ -70,7 +70,7 @@ private func managedRecentMedia(postbox: Postbox, network: Network, collectionId
             Namespaces.OrderedItemList.CloudRecentStickers,
             Namespaces.OrderedItemList.CloudRecentGifs,
         ]
-        
+
         let hash: Int64
         if goodHashCollectionIds.contains(collectionId) {
             hash = hashForIds(itemIds)
@@ -78,7 +78,7 @@ private func managedRecentMedia(postbox: Postbox, network: Network, collectionId
             let (localHash, remoteHash) = getOrderedItemListHash(transaction: transaction, collectionId: collectionId)
             hash = hashForIds(itemIds) == localHash ? remoteHash : 0
         }
-        
+
         return fetch(forceFetch ? 0 : hash)
             |> mapToSignal { sourceItems, fetchedHash in
                 var items: [OrderedItemListEntry] = []
@@ -94,12 +94,12 @@ private func managedRecentMedia(postbox: Postbox, network: Network, collectionId
 
                     return postbox.transaction { transaction -> Void in
                         transaction.replaceOrderedItemListItems(collectionId: collectionId, items: items)
-                        
+
                         var itemIds = items.map({ $0.id }).compactMap(extractItemId)
                         if reverseHashOrder {
                             itemIds.reverse()
                         }
-                        
+
                         if goodHashCollectionIds.contains(collectionId) {
                             assert(hashForIds(itemIds) == fetchedHash)
                         } else {
@@ -114,11 +114,14 @@ private func managedRecentMedia(postbox: Postbox, network: Network, collectionId
     } |> switchToLatest
 }
 
-func managedRecentStickers(postbox: Postbox, network: Network) -> Signal<Void, NoError> {
-    return managedRecentMedia(postbox: postbox, network: network, collectionId: Namespaces.OrderedItemList.CloudRecentStickers, extractItemId: { RecentMediaItemId($0).mediaId.id }, reverseHashOrder: false, forceFetch: false, fetch: { hash in
+func managedRecentStickers(postbox: Postbox, network: Network, forceFetch: Bool = false) -> Signal<Void, NoError> {
+    return managedRecentMedia(postbox: postbox, network: network, collectionId: Namespaces.OrderedItemList.CloudRecentStickers, extractItemId: { RecentMediaItemId($0).mediaId.id }, reverseHashOrder: false, forceFetch: forceFetch, fetch: { hash in
         return network.request(Api.functions.messages.getRecentStickers(flags: 0, hash: hash))
-        |> retryRequest
+        |> retryRequestIfNotFrozen
         |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
+            guard let result else {
+                return .single(nil)
+            }
             switch result {
                 case .recentStickersNotModified:
                     return .single(nil)
@@ -126,7 +129,7 @@ func managedRecentStickers(postbox: Postbox, network: Network) -> Signal<Void, N
                 case let .recentStickers(hash, _, stickers, _):
                     var items: [OrderedItemListEntry] = []
                     for sticker in stickers {
-                        if let file = telegramMediaFileFromApiDocument(sticker), let id = file.id {
+                        if let file = telegramMediaFileFromApiDocument(sticker, altDocuments: []), let id = file.id {
                             if let entry = CodableEntry(RecentMediaItem(file)) {
                                 items.append(OrderedItemListEntry(id: RecentMediaItemId(id).rawValue, contents: entry))
                             }
@@ -142,8 +145,11 @@ func managedRecentStickers(postbox: Postbox, network: Network) -> Signal<Void, N
 func managedRecentGifs(postbox: Postbox, network: Network, forceFetch: Bool = false) -> Signal<Void, NoError> {
     return managedRecentMedia(postbox: postbox, network: network, collectionId: Namespaces.OrderedItemList.CloudRecentGifs, extractItemId: { RecentMediaItemId($0).mediaId.id }, reverseHashOrder: false, forceFetch: forceFetch, fetch: { hash in
         return network.request(Api.functions.messages.getSavedGifs(hash: hash))
-            |> retryRequest
+            |> retryRequestIfNotFrozen
             |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
+                guard let result else {
+                    return .single(nil)
+                }
                 switch result {
                     case .savedGifsNotModified:
                         return .single(nil)
@@ -151,7 +157,7 @@ func managedRecentGifs(postbox: Postbox, network: Network, forceFetch: Bool = fa
                     case let .savedGifs(hash, gifs):
                         var items: [OrderedItemListEntry] = []
                         for gif in gifs {
-                            if let file = telegramMediaFileFromApiDocument(gif), let id = file.id {
+                            if let file = telegramMediaFileFromApiDocument(gif, altDocuments: []), let id = file.id {
                                 if let entry = CodableEntry(RecentMediaItem(file)) {
                                     items.append(OrderedItemListEntry(id: RecentMediaItemId(id).rawValue, contents: entry))
                                 }
@@ -164,11 +170,14 @@ func managedRecentGifs(postbox: Postbox, network: Network, forceFetch: Bool = fa
     })
 }
 
-func managedSavedStickers(postbox: Postbox, network: Network) -> Signal<Void, NoError> {
-    return managedRecentMedia(postbox: postbox, network: network, collectionId: Namespaces.OrderedItemList.CloudSavedStickers, extractItemId: { RecentMediaItemId($0).mediaId.id }, reverseHashOrder: true, forceFetch: false, fetch: { hash in
+func managedSavedStickers(postbox: Postbox, network: Network, forceFetch: Bool = false) -> Signal<Void, NoError> {
+    return managedRecentMedia(postbox: postbox, network: network, collectionId: Namespaces.OrderedItemList.CloudSavedStickers, extractItemId: { RecentMediaItemId($0).mediaId.id }, reverseHashOrder: true, forceFetch: forceFetch, fetch: { hash in
         return network.request(Api.functions.messages.getFavedStickers(hash: hash))
-            |> retryRequest
+            |> retryRequestIfNotFrozen
             |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
+                guard let result else {
+                    return .single(nil)
+                }
                 switch result {
                     case .favedStickersNotModified:
                         return .single(nil)
@@ -191,7 +200,7 @@ func managedSavedStickers(postbox: Postbox, network: Network) -> Signal<Void, No
                         
                         var items: [OrderedItemListEntry] = []
                         for sticker in stickers {
-                            if let file = telegramMediaFileFromApiDocument(sticker), let id = file.id {
+                            if let file = telegramMediaFileFromApiDocument(sticker, altDocuments: []), let id = file.id {
                                 var stringRepresentations: [String] = []
                                 if let representations = fileStringRepresentations[id] {
                                     stringRepresentations = representations
@@ -211,8 +220,11 @@ func managedSavedStickers(postbox: Postbox, network: Network) -> Signal<Void, No
 func managedGreetingStickers(postbox: Postbox, network: Network) -> Signal<Void, NoError> {
     let poll = managedRecentMedia(postbox: postbox, network: network, collectionId: Namespaces.OrderedItemList.CloudGreetingStickers, extractItemId: { RecentMediaItemId($0).mediaId.id }, reverseHashOrder: false, forceFetch: false, fetch: { hash in
         return network.request(Api.functions.messages.getStickers(emoticon: "👋⭐️", hash: hash))
-        |> retryRequest
+        |> retryRequestIfNotFrozen
         |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
+            guard let result else {
+                return .single(nil)
+            }
             switch result {
                 case .stickersNotModified:
                     return .single(nil)
@@ -220,7 +232,7 @@ func managedGreetingStickers(postbox: Postbox, network: Network) -> Signal<Void,
                 case let .stickers(hash, stickers):
                     var items: [OrderedItemListEntry] = []
                     for sticker in stickers {
-                        if let file = telegramMediaFileFromApiDocument(sticker), let id = file.id {
+                        if let file = telegramMediaFileFromApiDocument(sticker, altDocuments: []), let id = file.id {
                             if let entry = CodableEntry(RecentMediaItem(file)) {
                                 items.append(OrderedItemListEntry(id: RecentMediaItemId(id).rawValue, contents: entry))
                             }
@@ -237,8 +249,11 @@ func managedGreetingStickers(postbox: Postbox, network: Network) -> Signal<Void,
 func managedPremiumStickers(postbox: Postbox, network: Network) -> Signal<Void, NoError> {
     let poll = managedRecentMedia(postbox: postbox, network: network, collectionId: Namespaces.OrderedItemList.CloudPremiumStickers, extractItemId: { RecentMediaItemId($0).mediaId.id }, reverseHashOrder: false, forceFetch: false, fetch: { hash in
         return network.request(Api.functions.messages.getStickers(emoticon: "⭐️⭐️", hash: hash))
-        |> retryRequest
+        |> retryRequestIfNotFrozen
         |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
+            guard let result else {
+                return .single(nil)
+            }
             switch result {
                 case .stickersNotModified:
                     return .single(nil)
@@ -246,7 +261,7 @@ func managedPremiumStickers(postbox: Postbox, network: Network) -> Signal<Void, 
                 case let .stickers(hash, stickers):
                     var items: [OrderedItemListEntry] = []
                     for sticker in stickers {
-                        if let file = telegramMediaFileFromApiDocument(sticker), let id = file.id {
+                        if let file = telegramMediaFileFromApiDocument(sticker, altDocuments: []), let id = file.id {
                             if let entry = CodableEntry(RecentMediaItem(file)) {
                                 items.append(OrderedItemListEntry(id: RecentMediaItemId(id).rawValue, contents: entry))
                             }
@@ -263,8 +278,11 @@ func managedPremiumStickers(postbox: Postbox, network: Network) -> Signal<Void, 
 func managedAllPremiumStickers(postbox: Postbox, network: Network) -> Signal<Void, NoError> {
     let poll = managedRecentMedia(postbox: postbox, network: network, collectionId: Namespaces.OrderedItemList.CloudAllPremiumStickers, extractItemId: { RecentMediaItemId($0).mediaId.id }, reverseHashOrder: false, forceFetch: false, fetch: { hash in
         return network.request(Api.functions.messages.getStickers(emoticon: "📂⭐️", hash: hash))
-        |> retryRequest
+        |> retryRequestIfNotFrozen
         |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
+            guard let result else {
+                return .single(nil)
+            }
             switch result {
                 case .stickersNotModified:
                     return .single(nil)
@@ -272,7 +290,7 @@ func managedAllPremiumStickers(postbox: Postbox, network: Network) -> Signal<Voi
                 case let .stickers(hash, stickers):
                     var items: [OrderedItemListEntry] = []
                     for sticker in stickers {
-                        if let file = telegramMediaFileFromApiDocument(sticker), let id = file.id {
+                        if let file = telegramMediaFileFromApiDocument(sticker, altDocuments: []), let id = file.id {
                             if let entry = CodableEntry(RecentMediaItem(file)) {
                                 items.append(OrderedItemListEntry(id: RecentMediaItemId(id).rawValue, contents: entry))
                             }
@@ -289,8 +307,11 @@ func managedAllPremiumStickers(postbox: Postbox, network: Network) -> Signal<Voi
 func managedRecentStatusEmoji(postbox: Postbox, network: Network) -> Signal<Void, NoError> {
     let poll = managedRecentMedia(postbox: postbox, network: network, collectionId: Namespaces.OrderedItemList.CloudRecentStatusEmoji, extractItemId: { RecentMediaItemId($0).mediaId.id }, reverseHashOrder: false, forceFetch: false, fetch: { hash in
         return network.request(Api.functions.account.getRecentEmojiStatuses(hash: hash))
-        |> retryRequest
+        |> retryRequestIfNotFrozen
         |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
+            guard let result else {
+                return .single(nil)
+            }
             switch result {
             case .emojiStatusesNotModified:
                 return .single(nil)
@@ -298,11 +319,11 @@ func managedRecentStatusEmoji(postbox: Postbox, network: Network) -> Signal<Void
             case let .emojiStatuses(hash, statuses):
                 let parsedStatuses = statuses.compactMap(PeerEmojiStatus.init(apiStatus:))
                 
-                return _internal_resolveInlineStickers(postbox: postbox, network: network, fileIds: parsedStatuses.map(\.fileId))
+                return _internal_resolveInlineStickers(postbox: postbox, network: network, fileIds: parsedStatuses.compactMap(\.emojiFileId))
                 |> map { files -> [OrderedItemListEntry] in
                     var items: [OrderedItemListEntry] = []
                     for status in parsedStatuses {
-                        guard let file = files[status.fileId] else {
+                        guard let fileId = status.emojiFileId, let file = files[fileId] else {
                             continue
                         }
                         if let entry = CodableEntry(RecentMediaItem(file)) {
@@ -321,8 +342,11 @@ func managedRecentStatusEmoji(postbox: Postbox, network: Network) -> Signal<Void
 func managedFeaturedStatusEmoji(postbox: Postbox, network: Network) -> Signal<Void, NoError> {
     let poll = managedRecentMedia(postbox: postbox, network: network, collectionId: Namespaces.OrderedItemList.CloudFeaturedStatusEmoji, extractItemId: { RecentMediaItemId($0).mediaId.id }, reverseHashOrder: false, forceFetch: false, fetch: { hash in
         return network.request(Api.functions.account.getDefaultEmojiStatuses(hash: hash))
-        |> retryRequest
+        |> retryRequestIfNotFrozen
         |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
+            guard let result else {
+                return .single(nil)
+            }
             switch result {
             case .emojiStatusesNotModified:
                 return .single(nil)
@@ -330,11 +354,11 @@ func managedFeaturedStatusEmoji(postbox: Postbox, network: Network) -> Signal<Vo
             case let .emojiStatuses(hash, statuses):
                 let parsedStatuses = statuses.compactMap(PeerEmojiStatus.init(apiStatus:))
                 
-                return _internal_resolveInlineStickers(postbox: postbox, network: network, fileIds: parsedStatuses.map(\.fileId))
+                return _internal_resolveInlineStickers(postbox: postbox, network: network, fileIds: parsedStatuses.compactMap(\.emojiFileId))
                 |> map { files -> [OrderedItemListEntry] in
                     var items: [OrderedItemListEntry] = []
                     for status in parsedStatuses {
-                        guard let file = files[status.fileId] else {
+                        guard let fileId = status.emojiFileId, let file = files[fileId] else {
                             continue
                         }
                         if let entry = CodableEntry(RecentMediaItem(file)) {
@@ -353,8 +377,11 @@ func managedFeaturedStatusEmoji(postbox: Postbox, network: Network) -> Signal<Vo
 func managedFeaturedChannelStatusEmoji(postbox: Postbox, network: Network) -> Signal<Void, NoError> {
     let poll = managedRecentMedia(postbox: postbox, network: network, collectionId: Namespaces.OrderedItemList.CloudFeaturedChannelStatusEmoji, extractItemId: { RecentMediaItemId($0).mediaId.id }, reverseHashOrder: false, forceFetch: false, fetch: { hash in
         return network.request(Api.functions.account.getChannelDefaultEmojiStatuses(hash: hash))
-        |> retryRequest
+        |> retryRequestIfNotFrozen
         |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
+            guard let result else {
+                return .single(nil)
+            }
             switch result {
             case .emojiStatusesNotModified:
                 return .single(nil)
@@ -362,11 +389,11 @@ func managedFeaturedChannelStatusEmoji(postbox: Postbox, network: Network) -> Si
             case let .emojiStatuses(hash, statuses):
                 let parsedStatuses = statuses.compactMap(PeerEmojiStatus.init(apiStatus:))
                 
-                return _internal_resolveInlineStickers(postbox: postbox, network: network, fileIds: parsedStatuses.map(\.fileId))
+                return _internal_resolveInlineStickers(postbox: postbox, network: network, fileIds: parsedStatuses.compactMap(\.emojiFileId))
                 |> map { files -> [OrderedItemListEntry] in
                     var items: [OrderedItemListEntry] = []
                     for status in parsedStatuses {
-                        guard let file = files[status.fileId] else {
+                        guard let fileId = status.emojiFileId, let file = files[fileId] else {
                             continue
                         }
                         if let entry = CodableEntry(RecentMediaItem(file)) {
@@ -382,11 +409,75 @@ func managedFeaturedChannelStatusEmoji(postbox: Postbox, network: Network) -> Si
     return (poll |> then(.complete() |> suspendAwareDelay(3.0 * 60.0 * 60.0, queue: Queue.concurrentDefaultQueue()))) |> restart
 }
 
+func managedUniqueStarGifts(accountPeerId: PeerId, postbox: Postbox, network: Network) -> Signal<Void, NoError> {
+    let poll = managedRecentMedia(postbox: postbox, network: network, collectionId: Namespaces.OrderedItemList.CloudUniqueStarGifts, extractItemId: { RecentStarGiftItemId($0).id }, reverseHashOrder: false, forceFetch: false, fetch: { hash in
+        return network.request(Api.functions.account.getCollectibleEmojiStatuses(hash: hash))
+        |> retryRequestIfNotFrozen
+        |> mapToSignal { result -> Signal<[OrderedItemListEntry]?, NoError> in
+            guard let result else {
+                return .single(nil)
+            }
+            switch result {
+            case .emojiStatusesNotModified:
+                return .single(nil)
+            case let .emojiStatuses(_, statuses):
+                let parsedStatuses = statuses.compactMap(PeerEmojiStatus.init(apiStatus:))
+
+                return _internal_resolveInlineStickers(postbox: postbox, network: network, fileIds: parsedStatuses.flatMap(\.associatedFileIds))
+                |> map { files -> [OrderedItemListEntry] in
+                    var items: [OrderedItemListEntry] = []
+                    for status in parsedStatuses {
+                        switch status.content {
+                        case let .starGift(id, fileId, title, slug, patternFileId, innerColor, outerColor, patternColor, textColor):
+                            let slugComponents = slug.components(separatedBy: "-")
+                            if let file = files[fileId], let patternFile = files[patternFileId], let numberString = slugComponents.last, let number = Int32(numberString) {
+                                let gift = StarGift.UniqueGift(
+                                    id: id,
+                                    giftId: 0,
+                                    title: title,
+                                    number: number,
+                                    slug: slug,
+                                    owner: .peerId(accountPeerId),
+                                    attributes: [
+                                        .model(name: "", file: file, rarity: 0),
+                                        .pattern(name: "", file: patternFile, rarity: 0),
+                                        .backdrop(name: "", id: 0, innerColor: innerColor, outerColor: outerColor, patternColor: patternColor, textColor: textColor, rarity: 0)
+                                    ],
+                                    availability: StarGift.UniqueGift.Availability(issued: 0, total: 0),
+                                    giftAddress: nil,
+                                    resellAmounts: nil,
+                                    resellForTonOnly: false,
+                                    releasedBy: nil,
+                                    valueAmount: nil,
+                                    valueCurrency: nil,
+                                    flags: [],
+                                    themePeerId: nil
+                                )
+                                if let entry = CodableEntry(RecentStarGiftItem(gift)) {
+                                    items.append(OrderedItemListEntry(id: RecentStarGiftItemId(id).rawValue, contents: entry))
+                                }
+                            }
+                        default:
+                            break
+                        }
+                    }
+                    return items
+                }
+            }
+        }
+    })
+    return (poll |> then(.complete() |> suspendAwareDelay(1.0 * 60.0 * 60.0, queue: Queue.concurrentDefaultQueue()))) |> restart
+}
+
+
 func managedProfilePhotoEmoji(postbox: Postbox, network: Network) -> Signal<Void, NoError> {
     let poll = managedRecentMedia(postbox: postbox, network: network, collectionId: Namespaces.OrderedItemList.CloudFeaturedProfilePhotoEmoji, extractItemId: { RecentMediaItemId($0).mediaId.id }, reverseHashOrder: false, forceFetch: false, fetch: { hash in
         return network.request(Api.functions.account.getDefaultProfilePhotoEmojis(hash: hash))
-        |> retryRequest
+        |> retryRequestIfNotFrozen
         |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
+            guard let result else {
+                return .single(nil)
+            }
             switch result {
             case .emojiListNotModified:
                 return .single(nil)
@@ -415,8 +506,11 @@ func managedProfilePhotoEmoji(postbox: Postbox, network: Network) -> Signal<Void
 func managedGroupPhotoEmoji(postbox: Postbox, network: Network) -> Signal<Void, NoError> {
     let poll = managedRecentMedia(postbox: postbox, network: network, collectionId: Namespaces.OrderedItemList.CloudFeaturedGroupPhotoEmoji, extractItemId: { RecentMediaItemId($0).mediaId.id }, reverseHashOrder: false, forceFetch: false, fetch: { hash in
         return network.request(Api.functions.account.getDefaultGroupPhotoEmojis(hash: hash))
-        |> retryRequest
+        |> retryRequestIfNotFrozen
         |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
+            guard let result else {
+                return .single(nil)
+            }
             switch result {
             case .emojiListNotModified:
                 return .single(nil)
@@ -445,8 +539,11 @@ func managedGroupPhotoEmoji(postbox: Postbox, network: Network) -> Signal<Void, 
 func managedBackgroundIconEmoji(postbox: Postbox, network: Network) -> Signal<Void, NoError> {
     let poll = managedRecentMedia(postbox: postbox, network: network, collectionId: Namespaces.OrderedItemList.CloudFeaturedBackgroundIconEmoji, extractItemId: { RecentMediaItemId($0).mediaId.id }, reverseHashOrder: false, forceFetch: false, fetch: { hash in
         return network.request(Api.functions.account.getDefaultBackgroundEmojis(hash: hash))
-        |> retryRequest
+        |> retryRequestIfNotFrozen
         |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
+            guard let result else {
+                return .single(nil)
+            }
             switch result {
             case .emojiListNotModified:
                 return .single(nil)
@@ -475,8 +572,11 @@ func managedBackgroundIconEmoji(postbox: Postbox, network: Network) -> Signal<Vo
 func managedDisabledChannelStatusIconEmoji(postbox: Postbox, network: Network) -> Signal<Void, NoError> {
     let poll = managedRecentMedia(postbox: postbox, network: network, collectionId: Namespaces.OrderedItemList.CloudDisabledChannelStatusEmoji, extractItemId: { RecentMediaItemId($0).mediaId.id }, reverseHashOrder: false, forceFetch: false, fetch: { hash in
         return network.request(Api.functions.account.getChannelRestrictedStatusEmojis(hash: hash))
-        |> retryRequest
+        |> retryRequestIfNotFrozen
         |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
+            guard let result else {
+                return .single(nil)
+            }
             switch result {
             case .emojiListNotModified:
                 return .single(nil)
@@ -509,11 +609,16 @@ func managedRecentReactions(postbox: Postbox, network: Network) -> Signal<Void, 
             return 0
         case let .custom(fileId):
             return fileId.id
+        case .stars:
+            return 0
         }
     }, reverseHashOrder: false, forceFetch: false, fetch: { hash in
         return network.request(Api.functions.messages.getRecentReactions(limit: 100, hash: hash))
-        |> retryRequest
+        |> retryRequestIfNotFrozen
         |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
+            guard let result else {
+                return .single(nil)
+            }
             switch result {
             case .reactionsNotModified:
                 return .single(nil)
@@ -527,6 +632,8 @@ func managedRecentReactions(postbox: Postbox, network: Network) -> Signal<Void, 
                         return nil
                     case let .custom(fileId):
                         return fileId
+                    case .stars:
+                        return nil
                     }
                 })
                 |> map { files -> [OrderedItemListEntry] in
@@ -540,7 +647,9 @@ func managedRecentReactions(postbox: Postbox, network: Network) -> Signal<Void, 
                             guard let file = files[fileId] else {
                                 continue
                             }
-                            item = RecentReactionItem(.custom(file))
+                            item = RecentReactionItem(.custom(TelegramMediaFile.Accessor(file)))
+                        case .stars:
+                            item = RecentReactionItem(.stars)
                         }
                         if let entry = CodableEntry(item) {
                             items.append(OrderedItemListEntry(id: item.id.rawValue, contents: entry))
@@ -562,11 +671,16 @@ func managedTopReactions(postbox: Postbox, network: Network) -> Signal<Void, NoE
             return 0
         case let .custom(fileId):
             return fileId.id
+        case .stars:
+            return 0
         }
     }, reverseHashOrder: false, forceFetch: false, fetch: { hash in
         return network.request(Api.functions.messages.getTopReactions(limit: 32, hash: hash))
-        |> retryRequest
+        |> retryRequestIfNotFrozen
         |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
+            guard let result else {
+                return .single(nil)
+            }
             switch result {
             case .reactionsNotModified:
                 return .single(nil)
@@ -580,6 +694,8 @@ func managedTopReactions(postbox: Postbox, network: Network) -> Signal<Void, NoE
                         return nil
                     case let .custom(fileId):
                         return fileId
+                    case .stars:
+                        return nil
                     }
                 })
                 |> map { files -> [OrderedItemListEntry] in
@@ -593,7 +709,69 @@ func managedTopReactions(postbox: Postbox, network: Network) -> Signal<Void, NoE
                             guard let file = files[fileId] else {
                                 continue
                             }
-                            item = RecentReactionItem(.custom(file))
+                            item = RecentReactionItem(.custom(TelegramMediaFile.Accessor(file)))
+                        case .stars:
+                            item = RecentReactionItem(.stars)
+                        }
+                        if let entry = CodableEntry(item) {
+                            items.append(OrderedItemListEntry(id: item.id.rawValue, contents: entry))
+                        }
+                    }
+                    return items
+                }
+            }
+        }
+    })
+    return (poll |> then(.complete() |> suspendAwareDelay(3.0 * 60.0 * 60.0, queue: Queue.concurrentDefaultQueue()))) |> restart
+}
+
+func managedDefaultTagReactions(postbox: Postbox, network: Network) -> Signal<Void, NoError> {
+    let poll = managedRecentMedia(postbox: postbox, network: network, collectionId: Namespaces.OrderedItemList.CloudDefaultTagReactions, extractItemId: { rawId in
+        switch RecentReactionItemId(rawId).id {
+        case .builtin:
+            return 0
+        case let .custom(fileId):
+            return fileId.id
+        case .stars:
+            return 0
+        }
+    }, reverseHashOrder: false, forceFetch: false, fetch: { hash in
+        return network.request(Api.functions.messages.getDefaultTagReactions(hash: hash))
+        |> retryRequestIfNotFrozen
+        |> mapToSignal { result -> Signal<[OrderedItemListEntry]?, NoError> in
+            guard let result else {
+                return .single(nil)
+            }
+            switch result {
+            case .reactionsNotModified:
+                return .single(nil)
+            case let .reactions(_, reactions):
+                let parsedReactions = reactions.compactMap(MessageReaction.Reaction.init(apiReaction:))
+
+                return _internal_resolveInlineStickers(postbox: postbox, network: network, fileIds: parsedReactions.compactMap { reaction -> Int64? in
+                    switch reaction {
+                    case .builtin:
+                        return nil
+                    case let .custom(fileId):
+                        return fileId
+                    case .stars:
+                        return nil
+                    }
+                })
+                |> map { files -> [OrderedItemListEntry] in
+                    var items: [OrderedItemListEntry] = []
+                    for reaction in parsedReactions {
+                        let item: RecentReactionItem
+                        switch reaction {
+                        case let .builtin(value):
+                            item = RecentReactionItem(.builtin(value))
+                        case let .custom(fileId):
+                            guard let file = files[fileId] else {
+                                continue
+                            }
+                            item = RecentReactionItem(.custom(TelegramMediaFile.Accessor(file)))
+                        case .stars:
+                            item = RecentReactionItem(.stars)
                         }
                         if let entry = CodableEntry(item) {
                             items.append(OrderedItemListEntry(id: item.id.rawValue, contents: entry))

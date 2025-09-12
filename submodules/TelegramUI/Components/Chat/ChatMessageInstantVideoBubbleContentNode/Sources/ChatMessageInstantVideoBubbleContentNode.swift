@@ -144,11 +144,11 @@ public class ChatMessageInstantVideoBubbleContentNode: ChatMessageBubbleContentN
             }
         }
         
-        self.interactiveFileNode.dateAndStatusNode.reactionSelected = { [weak self] value in
+        self.interactiveFileNode.dateAndStatusNode.reactionSelected = { [weak self] _, value, sourceView in
             guard let strongSelf = self, let item = strongSelf.item else {
                 return
             }
-            item.controllerInteraction.updateMessageReaction(item.message, .reaction(value))
+            item.controllerInteraction.updateMessageReaction(item.topMessage, .reaction(value), false, sourceView)
         }
         
         self.interactiveFileNode.dateAndStatusNode.openReactionPreview = { [weak self] gesture, sourceNode, value in
@@ -192,14 +192,20 @@ public class ChatMessageInstantVideoBubbleContentNode: ChatMessageBubbleContentN
                 }
             }
             
+            let isViewOnceMessage = item.message.minAutoremoveOrClearTimeout == viewOnceTimeout
+            let forceIsPlaying = isViewOnceMessage && didSetupFileNode
+            
             var incoming = item.message.effectivelyIncoming(item.context.account.peerId)
             if let subject = item.associatedData.subject, case let .messageOptions(_, _, info) = subject, case .forward = info {
                 incoming = false
             }
             
             let statusType: ChatMessageDateAndStatusType?
-            switch preparePosition {
-            case .linear(_, .None), .linear(_, .Neighbour(true, _, _)):
+            if case .customChatContents = item.associatedData.subject {
+                statusType = nil
+            } else {
+                switch preparePosition {
+                case .linear(_, .None), .linear(_, .Neighbour(true, _, _)):
                     if incoming {
                         statusType = .BubbleIncoming
                     } else {
@@ -213,6 +219,7 @@ public class ChatMessageInstantVideoBubbleContentNode: ChatMessageBubbleContentN
                     }
                 default:
                     statusType = nil
+                }
             }
             
             let automaticDownload = shouldDownloadMediaAutomatically(settings: item.controllerInteraction.automaticMediaDownloadSettings, peerType: item.associatedData.automaticDownloadPeerType, networkType: item.associatedData.automaticDownloadNetworkType, authorPeerId: item.message.author?.id, contactsPeerIds: item.associatedData.contactsPeerIds, media: selectedFile!)
@@ -256,7 +263,7 @@ public class ChatMessageInstantVideoBubbleContentNode: ChatMessageBubbleContentN
             let normalDisplaySize = layoutConstants.instantVideo.dimensions
             var displaySize = normalDisplaySize
             let maximumDisplaySize = CGSize(width: min(404, constrainedSize.width - 2.0), height: min(404, constrainedSize.width - 2.0))
-            if item.associatedData.currentlyPlayingMessageId == item.message.index {
+            if (item.associatedData.currentlyPlayingMessageId == item.message.index || forceIsPlaying) && (!isViewOnceMessage || item.associatedData.isStandalone) {
                 isPlaying = true
                 if !isExpanded {
                     displaySize = maximumDisplaySize
@@ -266,7 +273,7 @@ public class ChatMessageInstantVideoBubbleContentNode: ChatMessageBubbleContentN
             let leftInset: CGFloat = 0.0
             let rightInset: CGFloat = 0.0
         
-            let (videoLayout, videoApply) = interactiveVideoLayout(ChatMessageBubbleContentItem(context: item.context, controllerInteraction: item.controllerInteraction, message: item.message, topMessage: item.message, read: item.read, chatLocation: item.chatLocation, presentationData: item.presentationData, associatedData: item.associatedData, attributes: item.attributes, isItemPinned: item.message.tags.contains(.pinned) && !isReplyThread, isItemEdited: false), constrainedSize.width - leftInset - rightInset - avatarInset, displaySize, maximumDisplaySize, isPlaying ? 1.0 : 0.0, .free, automaticDownload, avatarInset)
+            let (videoLayout, videoApply) = interactiveVideoLayout(ChatMessageBubbleContentItem(context: item.context, controllerInteraction: item.controllerInteraction, message: item.message, topMessage: item.message, content: item.content, read: item.read, chatLocation: item.chatLocation, presentationData: item.presentationData, associatedData: item.associatedData, attributes: item.attributes, isItemPinned: item.message.tags.contains(.pinned) && !isReplyThread, isItemEdited: false), constrainedSize.width - leftInset - rightInset - avatarInset, displaySize, maximumDisplaySize, isPlaying ? 1.0 : 0.0, .free, automaticDownload, avatarInset)
             
             let videoFrame = CGRect(origin: CGPoint(x: 1.0, y: 1.0), size: videoLayout.contentSize)
             
@@ -447,6 +454,13 @@ public class ChatMessageInstantVideoBubbleContentNode: ChatMessageBubbleContentN
     override public func reactionTargetView(value: MessageReaction.Reaction) -> UIView? {
         if !self.interactiveVideoNode.dateAndStatusNode.isHidden {
             return self.interactiveVideoNode.dateAndStatusNode.reactionView(value: value)
+        }
+        return nil
+    }
+    
+    override public func messageEffectTargetView() -> UIView? {
+        if !self.interactiveVideoNode.dateAndStatusNode.isHidden {
+            return self.interactiveVideoNode.dateAndStatusNode.messageEffectTargetView()
         }
         return nil
     }

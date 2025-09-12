@@ -43,45 +43,11 @@ private func parseAuthTransferUrl(_ url: URL) -> Data? {
     return nil
 }
 
-private func generateFrameImage() -> UIImage? {
-    return generateImage(CGSize(width: 64.0, height: 64.0), contextGenerator: { size, context in
-        let bounds = CGRect(origin: CGPoint(), size: size)
-        context.clear(bounds)
-        context.setStrokeColor(UIColor.white.cgColor)
-        context.setLineWidth(4.0)
-        context.setLineCap(.round)
-        
-        let path = CGMutablePath()
-        path.move(to: CGPoint(x: 2.0, y: 2.0 + 26.0))
-        path.addArc(tangent1End: CGPoint(x: 2.0, y: 2.0), tangent2End: CGPoint(x: 2.0 + 26.0, y: 2.0), radius: 6.0)
-        path.addLine(to: CGPoint(x: 2.0 + 26.0, y: 2.0))
-        context.addPath(path)
-        context.strokePath()
-        
-        path.move(to: CGPoint(x: size.width - 2.0, y: 2.0 + 26.0))
-        path.addArc(tangent1End: CGPoint(x: size.width - 2.0, y: 2.0), tangent2End: CGPoint(x: 2.0 + 26.0, y: 2.0), radius: 6.0)
-        path.addLine(to: CGPoint(x: size.width - 2.0 - 26.0, y: 2.0))
-        context.addPath(path)
-        context.strokePath()
-        
-        path.move(to: CGPoint(x: 2.0, y: size.height - 2.0 - 26.0))
-        path.addArc(tangent1End: CGPoint(x: 2.0, y: size.height - 2.0), tangent2End: CGPoint(x: 2.0 + 26.0, y: size.height - 2.0), radius: 6.0)
-        path.addLine(to: CGPoint(x: 2.0 + 26.0, y: size.height - 2.0))
-        context.addPath(path)
-        context.strokePath()
-        
-        path.move(to: CGPoint(x: size.width - 2.0, y: size.height - 2.0 - 26.0))
-        path.addArc(tangent1End: CGPoint(x: size.width - 2.0, y: size.height - 2.0), tangent2End: CGPoint(x: 2.0 + 26.0, y: size.height - 2.0), radius: 6.0)
-        path.addLine(to: CGPoint(x: size.width - 2.0 - 26.0, y: size.height - 2.0))
-        context.addPath(path)
-        context.strokePath()
-    })?.stretchableImage(withLeftCapWidth: 32, topCapHeight: 32)
-}
-
 public final class QrCodeScanScreen: ViewController {
     public enum Subject {
         case authTransfer(activeSessionsContext: ActiveSessionsContext)
         case peer
+        case cryptoAddress
         case custom(info: String)
     }
     
@@ -99,6 +65,7 @@ public final class QrCodeScanScreen: ViewController {
     
     public var showMyCode: () -> Void = {}
     public var completion: (String?) -> Void = { _ in }
+    public var dismissed: (() -> Void)?
     
     private var codeResolved = false
     
@@ -132,8 +99,6 @@ public final class QrCodeScanScreen: ViewController {
         
         if case .custom = subject {
             self.navigationItem.leftBarButtonItem = UIBarButtonItem(title: self.presentationData.strings.Common_Cancel, style: .plain, target: self, action: #selector(self.cancelPressed))
-        } else if case .peer = subject {
-            self.navigationItem.rightBarButtonItem = UIBarButtonItem(title: self.presentationData.strings.Contacts_QrCode_MyCode, style: .plain, target: self, action: #selector(self.myCodePressed))
         } else {
             #if DEBUG
             self.navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Test", style: .plain, target: self, action: #selector(self.testPressed))
@@ -264,6 +229,8 @@ public final class QrCodeScanScreen: ViewController {
                             strongSelf.controllerNode.updateFocusedRect(nil)
                         }))
                     }
+                case .cryptoAddress:
+                    break
                 case .peer:
                     if let _ = URL(string: code) {
                         strongSelf.controllerNode.resolveCode(code: code, completion: { [weak self] result in
@@ -384,7 +351,7 @@ private final class FrameNode: ASDisplayNode {
     }
 }
 
-private final class QrCodeScanScreenNode: ViewControllerTracingNode, UIScrollViewDelegate {
+private final class QrCodeScanScreenNode: ViewControllerTracingNode, ASScrollViewDelegate {
     private let context: AccountContext
     private var presentationData: PresentationData
     private weak var controller: QrCodeScanScreen?
@@ -477,6 +444,9 @@ private final class QrCodeScanScreenNode: ViewControllerTracingNode, UIScrollVie
                 title = presentationData.strings.AuthSessions_AddDevice_ScanTitle
                 text = presentationData.strings.AuthSessions_AddDevice_ScanInstallInfo
             case .peer:
+                title = ""
+                text = ""
+            case .cryptoAddress:
                 title = ""
                 text = ""
             case let .custom(info):
@@ -596,6 +566,8 @@ private final class QrCodeScanScreenNode: ViewControllerTracingNode, UIScrollVie
                     filteredCodes = codes.filter { $0.message.hasPrefix("tg://") }
                 case .peer:
                     filteredCodes = codes.filter { $0.message.hasPrefix("https://t.me/") || $0.message.hasPrefix("t.me/") }
+                case .cryptoAddress:
+                    filteredCodes = codes.filter { $0.message.hasPrefix("ton://") }
                 case .custom:
                     filteredCodes = codes
             }
@@ -891,7 +863,7 @@ private final class QrCodeScanScreenNode: ViewControllerTracingNode, UIScrollVie
         guard let navigationController = self.controller?.navigationController as? NavigationController else {
             return false
         }
-        self.context.sharedContext.openResolvedUrl(result, context: self.context, urlContext: .generic, navigationController: navigationController, forceExternal: false, openPeer: { [weak self] peer, navigation in
+        self.context.sharedContext.openResolvedUrl(result, context: self.context, urlContext: .generic, navigationController: navigationController, forceExternal: false, forceUpdate: false, openPeer: { [weak self] peer, navigation in
             guard let strongSelf = self else {
                 return
             }
@@ -902,15 +874,19 @@ private final class QrCodeScanScreenNode: ViewControllerTracingNode, UIScrollVie
                         if controller is QrCodeScanScreen {
                             return false
                         }
+                        if controller is ChatQrCodeScreen {
+                            return false
+                        }
                         return true
                     }
                     navigationController.setViewControllers(viewControllers, animated: false)
                 }
             }))
-        }, sendFile: nil,
-        sendSticker: { _, _, _ in
-            return false
-        }, requestMessageActionUrlAuth: nil,
+        }, 
+        sendFile: nil,
+        sendSticker: nil,
+        sendEmoji: nil,
+        requestMessageActionUrlAuth: nil,
         joinVoiceChat: { peerId, invite, call in
         }, present: { [weak self] c, a in
             self?.controller?.present(c, in: .window(.root), with: a)

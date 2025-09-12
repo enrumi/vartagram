@@ -39,13 +39,13 @@ public final class OverlayUniversalVideoNode: OverlayMediaItemNode, AVPictureInP
     public var controlsAreShowingUpdated: ((Bool) -> Void)?
     
     private let close: () -> Void
-    
+
     private var statusDisposable: Disposable?
     private var status: MediaPlayerStatus?
     
     public let sourceAccountId: AccountRecordId
-    
-    public init(postbox: Postbox, audioSession: ManagedAudioSession, manager: UniversalVideoManager, content: UniversalVideoContent, shouldBeDismissed: Signal<Bool, NoError> = .single(false), expand: @escaping () -> Void, close: @escaping () -> Void, sourceAccountId: AccountRecordId) {
+
+    public init(context: AccountContext, postbox: Postbox, audioSession: ManagedAudioSession, manager: UniversalVideoManager, content: UniversalVideoContent, shouldBeDismissed: Signal<Bool, NoError> = .single(false), expand: @escaping () -> Void, close: @escaping () -> Void, sourceAccountId: AccountRecordId) {
         self.content = content
         self.defaultExpand = expand
         
@@ -66,13 +66,13 @@ public final class OverlayUniversalVideoNode: OverlayMediaItemNode, AVPictureInP
         }, controlsAreShowingUpdated: { value in
             controlsAreShowingUpdatedImpl?(value)
         })
-        self.videoNode = UniversalVideoNode(postbox: postbox, audioSession: audioSession, manager: manager, decoration: decoration, content: content, priority: .overlay, sourceAccountId: sourceAccountId)
+        self.videoNode = UniversalVideoNode(context: context, postbox: postbox, audioSession: audioSession, manager: manager, decoration: decoration, content: content, priority: .overlay, sourceAccountId: sourceAccountId)
         self.decoration = decoration
         
         self.close = close
-        
+
         self.sourceAccountId = sourceAccountId
-        
+
         super.init()
         
         expandImpl = { [weak self] in
@@ -152,7 +152,7 @@ public final class OverlayUniversalVideoNode: OverlayMediaItemNode, AVPictureInP
         self.dismiss()
         self.close()
     }
-    
+
     override public func didLoad() {
         super.didLoad()
     }

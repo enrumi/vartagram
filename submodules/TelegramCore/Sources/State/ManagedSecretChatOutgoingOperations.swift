@@ -556,7 +556,7 @@ private func decryptedAttributes46(_ attributes: [TelegramMediaFileAttribute], t
                 result.append(.documentAttributeSticker(alt: displayText, stickerset: stickerSet))
             case let .ImageSize(size):
                 result.append(.documentAttributeImageSize(w: Int32(size.width), h: Int32(size.height)))
-            case let .Video(duration, size, _, _):
+            case let .Video(duration, size, _, _, _, _):
                 result.append(.documentAttributeVideo(duration: Int32(duration), w: Int32(size.width), h: Int32(size.height)))
             case let .Audio(isVoice, duration, title, performer, waveform):
                 var flags: Int32 = 0
@@ -615,7 +615,7 @@ private func decryptedAttributes73(_ attributes: [TelegramMediaFileAttribute], t
                 result.append(.documentAttributeSticker(alt: displayText, stickerset: stickerSet))
             case let .ImageSize(size):
                 result.append(.documentAttributeImageSize(w: Int32(size.width), h: Int32(size.height)))
-            case let .Video(duration, size, videoFlags, _):
+            case let .Video(duration, size, videoFlags, _, _, _):
                 var flags: Int32 = 0
                 if videoFlags.contains(.instantRoundVideo) {
                     flags |= 1 << 0
@@ -678,7 +678,7 @@ private func decryptedAttributes101(_ attributes: [TelegramMediaFileAttribute], 
                 result.append(.documentAttributeSticker(alt: displayText, stickerset: stickerSet))
             case let .ImageSize(size):
                 result.append(.documentAttributeImageSize(w: Int32(size.width), h: Int32(size.height)))
-            case let .Video(duration, size, videoFlags, _):
+            case let .Video(duration, size, videoFlags, _, _, _):
                 var flags: Int32 = 0
                 if videoFlags.contains(.instantRoundVideo) {
                     flags |= 1 << 0
@@ -741,7 +741,7 @@ private func decryptedAttributes144(_ attributes: [TelegramMediaFileAttribute], 
                 result.append(.documentAttributeSticker(alt: displayText, stickerset: stickerSet))
             case let .ImageSize(size):
                 result.append(.documentAttributeImageSize(w: Int32(size.width), h: Int32(size.height)))
-            case let .Video(duration, size, videoFlags, _):
+            case let .Video(duration, size, videoFlags, _, _, _):
                 var flags: Int32 = 0
                 if videoFlags.contains(.instantRoundVideo) {
                     flags |= 1 << 0
@@ -947,7 +947,9 @@ private func boxedDecryptedMessage(transaction: Transaction, message: Message, g
         if let attribute = attribute as? ReplyMessageAttribute {
             if let message = message.associatedMessages[attribute.messageId] {
                 replyGlobalId = message.globallyUniqueId
-                flags |= (1 << 3)
+                if replyGlobalId != nil {
+                    flags |= (1 << 3)
+                }
                 break
             }
         }
@@ -1826,13 +1828,13 @@ private func sendMessage(auxiliaryMethods: AccountAuxiliaryMethods, postbox: Pos
                                     var storageResource: TelegramMediaResource?
                                     var contentType: MediaResourceUserContentType?
                                     var fromResource: MediaResource?
-                                    
+
                                     if let fromMedia = fromMedia as? TelegramMediaFile {
                                         let updatedImmediateThumbnailData = immediateThumbnailData(fromMedia.immediateThumbnailData, fromMedia.previewRepresentations, thumbnailData[fromMedia.fileId]?.1)
-                                        let updatedFile = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.CloudSecretFile, id: encryptedFile.id), partialReference: nil, resource: SecretFileMediaResource(fileId: encryptedFile.id, accessHash: encryptedFile.accessHash, containerSize: encryptedFile.size, decryptedSize: file.size, datacenterId: Int(encryptedFile.datacenterId), key: file.key), previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: updatedImmediateThumbnailData, mimeType: fromMedia.mimeType, size: fromMedia.size, attributes: fromMedia.attributes)
+                                        let updatedFile = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.CloudSecretFile, id: encryptedFile.id), partialReference: nil, resource: SecretFileMediaResource(fileId: encryptedFile.id, accessHash: encryptedFile.accessHash, containerSize: encryptedFile.size, decryptedSize: file.size, datacenterId: Int(encryptedFile.datacenterId), key: file.key), previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: updatedImmediateThumbnailData, mimeType: fromMedia.mimeType, size: fromMedia.size, attributes: fromMedia.attributes, alternativeRepresentations: fromMedia.alternativeRepresentations)
                                         toMedia = updatedFile
                                         updatedMedia = [updatedFile]
-                                        
+
                                         storageResource = updatedFile.resource
                                         contentType = MediaResourceUserContentType(file: updatedFile)
                                         fromResource = fromMedia.resource
@@ -1841,7 +1843,7 @@ private func sendMessage(auxiliaryMethods: AccountAuxiliaryMethods, postbox: Pos
                                         let updatedImage = TelegramMediaImage(imageId: MediaId(namespace: Namespaces.Media.CloudSecretImage, id: encryptedFile.id), representations: [TelegramMediaImageRepresentation(dimensions: largestRepresentation.dimensions, resource: SecretFileMediaResource(fileId: encryptedFile.id, accessHash: encryptedFile.accessHash, containerSize: encryptedFile.size, decryptedSize: file.size, datacenterId: Int(encryptedFile.datacenterId), key: file.key), progressiveSizes: [], immediateThumbnailData: nil, hasVideo: false, isPersonal: false)], immediateThumbnailData: updatedImmediateThumbnailData, reference: nil, partialReference: nil, flags: [])
                                         toMedia = updatedImage
                                         updatedMedia = [updatedImage]
-                                        
+
                                         storageResource = updatedImage.representations.first!.resource
                                         contentType = .image
                                         fromResource = largestRepresentation.resource
@@ -1850,7 +1852,7 @@ private func sendMessage(auxiliaryMethods: AccountAuxiliaryMethods, postbox: Pos
                                     if let toMedia = toMedia {
                                         applyMediaResourceChanges(from: fromMedia, to: toMedia, postbox: postbox, force: false)
                                     }
-                                    
+
                                     // 0 in messageNamespace and messageId are intended for secret chats
                                     if let storageResource = storageResource, let contentType = contentType {
                                         postbox.mediaBox.storageBox.add(reference: StorageBox.Reference(peerId: messageId.peerId.toInt64(), messageNamespace: UInt8(clamping: 0), messageId: 0), to: storageResource.id.stringRepresentation.data(using: .utf8)!, contentType: contentType.rawValue, size: storageResource.size)
@@ -1863,7 +1865,7 @@ private func sendMessage(auxiliaryMethods: AccountAuxiliaryMethods, postbox: Pos
                                     }
                                 }
                                 
-                                return .update(StoreMessage(id: currentMessage.id, globallyUniqueId: currentMessage.globallyUniqueId, groupingKey: currentMessage.groupingKey, threadId: currentMessage.threadId, timestamp: timestamp, flags: flags, tags: currentMessage.tags, globalTags: currentMessage.globalTags, localTags: currentMessage.localTags, forwardInfo: storeForwardInfo, authorId: currentMessage.author?.id, text: currentMessage.text, attributes: currentMessage.attributes, media: updatedMedia))
+                                return .update(StoreMessage(id: currentMessage.id, customStableId: nil, globallyUniqueId: currentMessage.globallyUniqueId, groupingKey: currentMessage.groupingKey, threadId: currentMessage.threadId, timestamp: timestamp, flags: flags, tags: currentMessage.tags, globalTags: currentMessage.globalTags, localTags: currentMessage.localTags, forwardInfo: storeForwardInfo, authorId: currentMessage.author?.id, text: currentMessage.text, attributes: currentMessage.attributes, media: updatedMedia))
                             })
                             
                             maybeReadSecretOutgoingMessage(transaction: transaction, index: MessageIndex(id: message.id, timestamp: timestamp))
@@ -1938,6 +1940,7 @@ private func sendStandaloneMessage(auxiliaryMethods: AccountAuxiliaryMethods, po
                 tags: [],
                 globalTags: [],
                 localTags: [],
+                customTags: [],
                 forwardInfo: nil,
                 author: nil,
                 text: contents.text,
@@ -1981,7 +1984,7 @@ private func sendStandaloneMessage(auxiliaryMethods: AccountAuxiliaryMethods, po
                         for item in media {
                             var storageResource: TelegramMediaResource?
                             var contentType: MediaResourceUserContentType?
-                            
+
                             if let file = item as? TelegramMediaFile, let encryptedFile = encryptedFile, let sourceFile = contents.file {
                                 let updatedFile = TelegramMediaFile(
                                     fileId: MediaId(namespace: Namespaces.Media.CloudSecretFile, id: encryptedFile.id),
@@ -1992,7 +1995,8 @@ private func sendStandaloneMessage(auxiliaryMethods: AccountAuxiliaryMethods, po
                                     immediateThumbnailData: immediateThumbnailData(file.immediateThumbnailData, file.previewRepresentations, thumbnailData[file.fileId]?.1),
                                     mimeType: file.mimeType,
                                     size: file.size,
-                                    attributes: file.attributes
+                                    attributes: file.attributes,
+                                    alternativeRepresentations: file.alternativeRepresentations
                                 )
                                 updatedMedia.append(updatedFile)
                                 storageResource = updatedFile.resource
@@ -2020,7 +2024,7 @@ private func sendStandaloneMessage(auxiliaryMethods: AccountAuxiliaryMethods, po
                             } else {
                                 updatedMedia.append(item)
                             }
-                            
+
                             // 0 in messageNamespace and messageId are intended for secret chats
                             if let storageResource = storageResource, let contentType = contentType {
                                 postbox.mediaBox.storageBox.add(reference: StorageBox.Reference(peerId: peerId.toInt64(), messageNamespace: UInt8(clamping: 0), messageId: 0), to: storageResource.id.stringRepresentation.data(using: .utf8)!, contentType: contentType.rawValue, size: storageResource.size)
@@ -2033,6 +2037,7 @@ private func sendStandaloneMessage(auxiliaryMethods: AccountAuxiliaryMethods, po
                         let storedMessage = StoreMessage(
                             peerId: peerId,
                             namespace: Namespaces.Message.Local,
+                            customStableId: nil,
                             globallyUniqueId: globallyUniqueId,
                             groupingKey: nil,
                             threadId: nil,
@@ -2113,7 +2118,7 @@ private func sendServiceActionMessage(postbox: Postbox, network: Network, peerId
                             if let forwardInfo = currentMessage.forwardInfo {
                                 storeForwardInfo = StoreMessageForwardInfo(authorId: forwardInfo.author?.id, sourceId: forwardInfo.source?.id, sourceMessageId: forwardInfo.sourceMessageId, date: forwardInfo.date, authorSignature: forwardInfo.authorSignature, psaType: forwardInfo.psaType, flags: forwardInfo.flags)
                             }
-                            return .update(StoreMessage(id: currentMessage.id, globallyUniqueId: currentMessage.globallyUniqueId, groupingKey: currentMessage.groupingKey, threadId: currentMessage.threadId, timestamp: timestamp, flags: flags, tags: currentMessage.tags, globalTags: currentMessage.globalTags, localTags: currentMessage.localTags, forwardInfo: storeForwardInfo, authorId: currentMessage.author?.id, text: currentMessage.text, attributes: currentMessage.attributes, media: currentMessage.media))
+                            return .update(StoreMessage(id: currentMessage.id, customStableId: nil, globallyUniqueId: currentMessage.globallyUniqueId, groupingKey: currentMessage.groupingKey, threadId: currentMessage.threadId, timestamp: timestamp, flags: flags, tags: currentMessage.tags, globalTags: currentMessage.globalTags, localTags: currentMessage.localTags, forwardInfo: storeForwardInfo, authorId: currentMessage.author?.id, text: currentMessage.text, attributes: currentMessage.attributes, media: currentMessage.media))
                         })
                         
                         if let resultTimestamp = resultTimestamp {

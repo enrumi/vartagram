@@ -73,6 +73,24 @@ public struct PresentationResourcesRootController {
             return generateTintedImage(image: UIImage(bundleImageName: "Chat List/SearchIcon"), color: theme.rootController.navigationBar.accentTextColor)
         })
     }
+    
+    public static func navigationCompactSearchWhiteIcon(_ theme: PresentationTheme) -> UIImage? {
+        return theme.image(PresentationResourceKey.navigationCompactSearchWhiteIcon.rawValue, { theme in
+            return generateTintedImage(image: UIImage(bundleImageName: "Chat List/SearchIcon"), color: .white)
+        })
+    }
+    
+    public static func navigationCompactTagsSearchIcon(_ theme: PresentationTheme) -> UIImage? {
+        return theme.image(PresentationResourceKey.navigationCompactTagsSearchIcon.rawValue, { theme in
+            return generateTintedImage(image: UIImage(bundleImageName: "Chat/NavigationSearchTagsIcon"), color: theme.rootController.navigationBar.accentTextColor)
+        })
+    }
+    
+    public static func navigationCompactTagsSearchWhiteIcon(_ theme: PresentationTheme) -> UIImage? {
+        return theme.image(PresentationResourceKey.navigationCompactTagsSearchWhiteIcon.rawValue, { theme in
+            return generateTintedImage(image: UIImage(bundleImageName: "Chat/NavigationSearchTagsIcon"), color: .white)
+        })
+    }
 
     public static func navigationCalendarIcon(_ theme: PresentationTheme) -> UIImage? {
         return theme.image(PresentationResourceKey.navigationCalendarIcon.rawValue, { theme in
@@ -173,6 +191,18 @@ public struct PresentationResourcesRootController {
     public static func navigationPostStoryIcon(_ theme: PresentationTheme) -> UIImage? {
         return theme.image(PresentationResourceKey.navigationPostStoryIcon.rawValue, { theme in
             return generateTintedImage(image: UIImage(bundleImageName: "Chat List/AddStoryIcon"), color: .white)
+        })
+    }
+    
+    public static func navigationSortIcon(_ theme: PresentationTheme) -> UIImage? {
+        return theme.image(PresentationResourceKey.navigationSortIcon.rawValue, { theme in
+            return generateTintedImage(image: UIImage(bundleImageName: "Peer Info/SortIcon"), color: .white)
+        })
+    }
+    
+    public static func callListCallIcon(_ theme: PresentationTheme) -> UIImage? {
+        return theme.image(PresentationResourceKey.callListCallIcon.rawValue, { theme in
+            return generateTintedImage(image: UIImage(bundleImageName: "Call List/NewCallListIcon"), color: theme.rootController.navigationBar.accentTextColor)
         })
     }
 }

@@ -17,6 +17,7 @@ import AudioBlob
 import PeerInfoAvatarListNode
 import ComponentFlow
 import EmojiStatusComponent
+import VoiceChatActionButton
 
 final class VoiceChatParticipantItem: ListViewItem {
     enum ParticipantText: Equatable {
@@ -839,7 +840,7 @@ class VoiceChatParticipantItemNode: ItemListRevealOptionsItemNode {
                 credibilityIcon = .text(color: item.presentationData.theme.chat.message.incoming.scamColor, string: item.presentationData.strings.Message_ScamAccount.uppercased())
             } else if item.peer.isFake {
                 credibilityIcon = .text(color: item.presentationData.theme.chat.message.incoming.scamColor, string: item.presentationData.strings.Message_FakeAccount.uppercased())
-            } else if let emojiStatus = item.peer.emojiStatus, !premiumConfiguration.isPremiumDisabled {
+            } else if let emojiStatus = item.peer.emojiStatus {
                 credibilityIcon = .animation(content: .customEmoji(fileId: emojiStatus.fileId), size: CGSize(width: 20.0, height: 20.0), placeholderColor: item.presentationData.theme.list.mediaPlaceholderColor, themeColor: item.presentationData.theme.list.itemAccentColor, loopMode: .count(2))
             } else if item.peer.isVerified {
                 credibilityIcon = .verified(fillColor: item.presentationData.theme.list.itemCheckColors.fillColor, foregroundColor: item.presentationData.theme.list.itemCheckColors.foregroundColor, sizeType: .compact)
@@ -1291,7 +1292,7 @@ class VoiceChatParticipantItemNode: ItemListRevealOptionsItemNode {
         self.updateIsHighlighted(transition: (animated && !highlighted) ? .animated(duration: 0.3, curve: .easeInOut) : .immediate)
     }
     
-    override func animateInsertion(_ currentTimestamp: Double, duration: Double, short: Bool) {
+    override func animateInsertion(_ currentTimestamp: Double, duration: Double, options: ListViewItemAnimationOptions) {
         self.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.4)
     }
     

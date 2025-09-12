@@ -75,9 +75,9 @@ public final class MediaStreamComponent: CombinedComponent {
         var videoStalled: Bool = true
         
         var videoIsPlayable: Bool {
-            !videoStalled && hasVideo
+            return true
+            //!videoStalled && hasVideo
         }
-//        var wantsPiP: Bool = false
         
         let deactivatePictureInPictureIfVisible = StoredActionSlot(Void.self)
         
@@ -112,7 +112,12 @@ public final class MediaStreamComponent: CombinedComponent {
                 strongSelf.updated(transition: .immediate)
             })
             
-            let callPeer = call.accountContext.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: call.peerId))
+            let callPeer: Signal<EnginePeer?, NoError>
+            if let peerId = call.peerId {
+                callPeer = call.accountContext.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: peerId))
+            } else {
+                callPeer = .single(nil)
+            }
             
             self.infoDisposable = (combineLatest(queue: .mainQueue(), call.state, call.members, callPeer)
             |> deliverOnMainQueue).start(next: { [weak self] state, members, callPeer in
@@ -196,7 +201,7 @@ public final class MediaStreamComponent: CombinedComponent {
         
         func toggleDisplayUI() {
             self.displayUI = !self.displayUI
-            self.updated(transition: Transition(animation: .curve(duration: 0.4, curve: .easeInOut)))
+            self.updated(transition: ComponentTransition(animation: .curve(duration: 0.4, curve: .easeInOut)))
         }
         
         func cancelScheduledDismissUI() {
@@ -224,7 +229,7 @@ public final class MediaStreamComponent: CombinedComponent {
             if interactive {
                 self.updated(transition: .immediate)
             } else {
-                self.updated(transition: Transition(animation: .curve(duration: 0.25, curve: .easeInOut)))
+                self.updated(transition: ComponentTransition(animation: .curve(duration: 0.25, curve: .easeInOut)))
             }
         }
     }
@@ -447,7 +452,7 @@ public final class MediaStreamComponent: CombinedComponent {
             }
             var topLeftButton: AnyComponent<Empty>?
             
-            if context.state.canManageCall {
+            if context.state.canManageCall, let peerId = context.component.call.peerId {
                 let whiteColor = UIColor(white: 1.0, alpha: 1.0)
                 topLeftButton = AnyComponent(Button(
                     content: AnyComponent(ZStack([
@@ -542,20 +547,6 @@ public final class MediaStreamComponent: CombinedComponent {
                                     
                                     let _ = text
                                     let _ = controller
-                                    
-                                    /*strongSelf.presentUndoOverlay(content: .forward(savedMessages: true, text: text), action: { [weak self] value in
-                                        if case .info = value, let strongSelf = self, let navigationController = strongSelf.controller?.navigationController as? NavigationController {
-                                            let context = strongSelf.context
-                                            strongSelf.controller?.dismiss(completion: {
-                                                Queue.mainQueue().justDispatch {
-                                                    context.sharedContext.navigateToChatController(NavigateToChatControllerParams(navigationController: navigationController, context: context, chatLocation: .peer(context.account.peerId), keepStack: .always, purposefulAction: {}, peekData: nil))
-                                                }
-                                            })
-                                            
-                                            return true
-                                        }
-                                        return false
-                                    })*/
                                 })])
                                 controller.present(alertController, in: .window(.root))
                                 
@@ -604,7 +595,7 @@ public final class MediaStreamComponent: CombinedComponent {
                         }
                         
                         let credentialsPromise = Promise<GroupCallStreamCredentials>()
-                        credentialsPromise.set(call.accountContext.engine.calls.getGroupCallStreamCredentials(peerId: call.peerId, revokePreviousCredentials: false) |> `catch` { _ -> Signal<GroupCallStreamCredentials, NoError> in return .never() })
+                        credentialsPromise.set(call.accountContext.engine.calls.getGroupCallStreamCredentials(peerId: peerId, revokePreviousCredentials: false) |> `catch` { _ -> Signal<GroupCallStreamCredentials, NoError> in return .never() })
                         
                         items.append(.action(ContextMenuActionItem(id: nil, text: presentationData.strings.LiveStream_ViewCredentials, textColor: .primary, textLayout: .singleLine, textFont: .regular, badge: nil, icon: { theme in
                             return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Info"), color: theme.contextMenu.primaryColor, backgroundColor: nil)
@@ -613,7 +604,7 @@ public final class MediaStreamComponent: CombinedComponent {
                                 return
                             }
                             
-                            controller.push(CreateExternalMediaStreamScreen(context: call.accountContext, peerId: call.peerId, credentialsPromise: credentialsPromise, mode: .view))
+                            controller.push(CreateExternalMediaStreamScreen(context: call.accountContext, peerId: peerId, credentialsPromise: credentialsPromise, mode: .view))
                             
                             a(.default)
                         })))
@@ -663,38 +654,6 @@ public final class MediaStreamComponent: CombinedComponent {
                         }
                         
                         let contextController = ContextController(presentationData: presentationData.withUpdated(theme: defaultDarkPresentationTheme), source: .reference(ReferenceContentSource(sourceView: anchorView)), items: .single(ContextController.Items(content: .list(items))), gesture: nil)
-                        /*contextController.passthroughTouchEvent = { sourceView, point in
-                            guard let strongSelf = self else {
-                                return .ignore
-                            }
-
-                            let localPoint = strongSelf.view.convert(sourceView.convert(point, to: nil), from: nil)
-                            guard let localResult = strongSelf.hitTest(localPoint, with: nil) else {
-                                return .dismiss(consume: true, result: nil)
-                            }
-
-                            var testView: UIView? = localResult
-                            while true {
-                                if let testViewValue = testView {
-                                    if let node = testViewValue.asyncdisplaykit_node as? PeerInfoHeaderNavigationButton {
-                                        node.isUserInteractionEnabled = false
-                                        DispatchQueue.main.async {
-                                            node.isUserInteractionEnabled = true
-                                        }
-                                        return .dismiss(consume: false, result: nil)
-                                    } else if let node = testViewValue.asyncdisplaykit_node as? PeerInfoVisualMediaPaneNode {
-                                        node.brieflyDisableTouchActions()
-                                        return .dismiss(consume: false, result: nil)
-                                    } else {
-                                        testView = testViewValue.superview
-                                    }
-                                } else {
-                                    break
-                                }
-                            }
-
-                            return .dismiss(consume: true, result: nil)
-                        }*/
                         controller.presentInGlobalOverlay(contextController)
                     }
                 ).minSize(CGSize(width: 44.0, height: 44.0)).tagged(moreButtonTag))
@@ -1048,7 +1007,10 @@ public final class MediaStreamComponent: CombinedComponent {
 
 public final class MediaStreamComponentController: ViewControllerComponentContainer, VoiceChatController {
     private let context: AccountContext
-    public let call: PresentationGroupCall
+    public let callImpl: PresentationGroupCall
+    public var call: VideoChatCall {
+        return .group(self.callImpl)
+    }
     public private(set) var currentOverlayController: VoiceChatOverlayController? = nil
     public var parentNavigationController: NavigationController?
     
@@ -1061,7 +1023,7 @@ public final class MediaStreamComponentController: ViewControllerComponentContai
     
     public init(call: PresentationGroupCall) {
         self.context = call.accountContext
-        self.call = call
+        self.callImpl = call
         
         super.init(context: call.accountContext, component: MediaStreamComponent(call: call as! PresentationGroupCallImpl), navigationBarAppearance: .none)
         
@@ -1074,6 +1036,9 @@ public final class MediaStreamComponentController: ViewControllerComponentContai
     
     required public init(coder aDecoder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+    
+    public func updateCall(call: VideoChatCall) {
     }
     
     override public func viewDidAppear(_ animated: Bool) {
@@ -1172,10 +1137,13 @@ public final class MediaStreamComponentController: ViewControllerComponentContai
             guard let strongSelf = self else {
                 return
             }
+            guard let peerId = strongSelf.callImpl.peerId else {
+                return
+            }
             
             let _ = (strongSelf.context.engine.data.get(
-                TelegramEngine.EngineData.Item.Peer.Peer(id: strongSelf.call.peerId),
-                TelegramEngine.EngineData.Item.Peer.ExportedInvitation(id: strongSelf.call.peerId)
+                TelegramEngine.EngineData.Item.Peer.Peer(id: peerId),
+                TelegramEngine.EngineData.Item.Peer.ExportedInvitation(id: peerId)
             )
             |> map { peer, exportedInvitation -> GroupCallInviteLinks? in
                 if let inviteLinks = inviteLinks {
@@ -1213,7 +1181,11 @@ public final class MediaStreamComponentController: ViewControllerComponentContai
         }
         let _ = formatSendTitle
         
-        let _ = (combineLatest(queue: .mainQueue(), self.context.account.postbox.loadedPeerWithId(self.call.peerId), self.call.state |> take(1))
+        guard let peerId = self.callImpl.peerId else {
+            return
+        }
+        
+        let _ = (combineLatest(queue: .mainQueue(), self.context.account.postbox.loadedPeerWithId(peerId), self.callImpl.state |> take(1))
         |> deliverOnMainQueue).start(next: { [weak self] peer, callState in
             if let strongSelf = self {
                 var inviteLinks = inviteLinks
@@ -1268,7 +1240,7 @@ public final class MediaStreamComponentController: ViewControllerComponentContai
                 shareController.actionCompleted = {
                     if let strongSelf = self {
                         let presentationData = strongSelf.context.sharedContext.currentPresentationData.with { $0 }
-                        strongSelf.present(UndoOverlayController(presentationData: presentationData, content: .linkCopied(text: presentationData.strings.VoiceChat_InviteLinkCopiedText), elevatedLayout: false, animateInAsReplacement: false, action: { _ in return false }), in: .window(.root))
+                        strongSelf.present(UndoOverlayController(presentationData: presentationData, content: .linkCopied(title: nil, text: presentationData.strings.VoiceChat_InviteLinkCopiedText), elevatedLayout: false, animateInAsReplacement: false, action: { _ in return false }), in: .window(.root))
                     }
                 }
                 strongSelf.present(shareController, in: .window(.root))
@@ -1552,7 +1524,7 @@ private final class StreamTitleComponent: Component {
             }
         }
         
-        func update(component: StreamTitleComponent, availableSize: CGSize, transition: Transition) -> CGSize {
+        func update(component: StreamTitleComponent, availableSize: CGSize, transition: ComponentTransition) -> CGSize {
             let liveIndicatorWidth: CGFloat = self.liveIndicatorView.desiredWidth
             let liveIndicatorHeight: CGFloat = 20.0
             
@@ -1686,7 +1658,7 @@ private final class StreamTitleComponent: Component {
         return View(frame: CGRect())
     }
     
-    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, transition: transition)
     }
 }
@@ -2024,7 +1996,7 @@ final class RoundGradientButtonComponent: Component {
             fatalError("init(coder:) has not been implemented")
         }
         
-        func update(component: RoundGradientButtonComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+        func update(component: RoundGradientButtonComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
             self.iconView.image = component.image ?? component.icon.flatMap { UIImage(bundleImageName: $0) }
             let gradientColors: [CGColor]
             if component.gradientColors.count == 1 {
@@ -2062,12 +2034,12 @@ final class RoundGradientButtonComponent: Component {
         View()
     }
     
-    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
 }
 
-public final class Throttler<T: Hashable> {
+public final class Throttler<T: Hashable & Sendable> {
     public var duration: TimeInterval = 0.25
     public var queue: DispatchQueue = .main
     public var isEnabled: Bool { duration > 0 }

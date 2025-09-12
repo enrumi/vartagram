@@ -37,6 +37,10 @@ public extension TelegramEngine {
             return _internal_updateAccountAutoArchiveChats(account: self.account, value: value)
         }
         
+        public func updateNonContactChatsPrivacy(value: GlobalPrivacySettings.NonContactChatsPrivacy) -> Signal<Never, NoError> {
+            return _internal_updateNonContactChatsPrivacy(account: self.account, value: value)
+        }
+        
         public func updateAccountKeepArchivedFolders(value: Bool) -> Signal<Never, NoError> {
             return _internal_updateAccountKeepArchivedFolders(account: self.account, value: value)
         }

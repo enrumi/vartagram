@@ -271,11 +271,11 @@ final class ChatListTable: Table {
         var result: [Peer] = []
         self.valueBox.range(self.table, start: self.upperBound(groupId: groupId), end: self.lowerBound(groupId: groupId), keys: { key in
             let (_, _, messageIndex, _) = extractKey(key)
-            
+
             if inactiveSecretChatPeerIds.contains(messageIndex.id.peerId) {
                 return true
             }
-            
+
             if let peer = postbox.peerTable.get(messageIndex.id.peerId) {
                 //let state = postbox.readStateTable.getCombinedState(messageIndex.id.peerId), state.isUnread
                 
@@ -314,20 +314,30 @@ final class ChatListTable: Table {
         return result
     }
     
+    func getAllPeerIds(groupId: PeerGroupId) -> [PeerId] {
+        var result: [PeerId] = []
+        self.valueBox.range(self.table, start: self.upperBound(groupId: groupId), end: self.lowerBound(groupId: groupId), keys: { key in
+            let (_, _, messageIndex, _) = extractKey(key)
+            result.append(messageIndex.id.peerId)
+            return true
+        }, limit: 0)
+        return result
+    }
+
     func getUnreadChatListPeerIds(postbox: PostboxImpl, currentTransaction: Transaction, groupId: PeerGroupId, filterPredicate: ChatListFilterPredicate?, additionalFilter: ((Peer) -> Bool)?, stopOnFirstMatch: Bool, reverseOrder: Bool, inactiveSecretChatPeerIds: Set<PeerId>) -> [PeerId] {
         let globalNotificationSettings = postbox.getGlobalNotificationSettings(transaction: currentTransaction)
         
         let start = reverseOrder ? self.lowerBound(groupId: groupId) : self.upperBound(groupId: groupId)
         let end = reverseOrder ? self.upperBound(groupId: groupId) : self.lowerBound(groupId: groupId)
-        
+
         var result: [PeerId] = []
         self.valueBox.range(self.table, start: start, end: end, keys: { key in
             let (_, _, messageIndex, _) = extractKey(key)
-            
+
             if inactiveSecretChatPeerIds.contains(messageIndex.id.peerId) {
                 return true
             }
-            
+
             if let state = postbox.readStateTable.getCombinedState(messageIndex.id.peerId), state.isUnread, let peer = postbox.peerTable.get(messageIndex.id.peerId) {
                 var passFilter: Bool
                 if let filterPredicate = filterPredicate {
@@ -376,7 +386,7 @@ final class ChatListTable: Table {
         return result
     }
     
-    func replay(historyOperationsByPeerId: [PeerId: [MessageHistoryOperation]], updatedPeerChatListEmbeddedStates: Set<PeerId>, updatedChatListInclusions: [PeerId: PeerChatListInclusion], messageHistoryTable: MessageHistoryTable, peerChatInterfaceStateTable: PeerChatInterfaceStateTable, operations: inout [PeerGroupId: [ChatListOperation]]) {
+    func replay(postbox: PostboxImpl, historyOperationsByPeerId: [PeerId: [MessageHistoryOperation]], updatedPeerChatListEmbeddedStates: Set<PeerId>, updatedPeerCachedData: [PeerId: (previous: CachedPeerData?, updated: CachedPeerData)], updatedChatListInclusions: [PeerId: PeerChatListInclusion], messageHistoryTable: MessageHistoryTable, peerChatInterfaceStateTable: PeerChatInterfaceStateTable, operations: inout [PeerGroupId: [ChatListOperation]]) {
         var changedPeerIds = Set<PeerId>()
         for peerId in historyOperationsByPeerId.keys {
             changedPeerIds.insert(peerId)
@@ -387,7 +397,24 @@ final class ChatListTable: Table {
         for peerId in updatedChatListInclusions.keys {
             changedPeerIds.insert(peerId)
         }
-        
+        for (peerId, update) in updatedPeerCachedData {
+            if let previous = update.previous {
+                if self.seedConfiguration.decodeAssociatedChatListPeerId(previous) != self.seedConfiguration.decodeAssociatedChatListPeerId(update.updated) {
+                    changedPeerIds.insert(peerId)
+                }
+            } else {
+                changedPeerIds.insert(peerId)
+            }
+        }
+        var additionalChangedPeerIds = Set<PeerId>()
+        for peerId in changedPeerIds {
+            //TODO:release move this to seed configuration
+            if let peer = postbox.peerTable.get(peerId), peer.id.namespace._internalGetInt32Value() == 2, let associatedPeerId = peer.associatedPeerId, associatedPeerId.namespace._internalGetInt32Value() == 0 {
+                additionalChangedPeerIds.insert(associatedPeerId)
+            }
+        }
+        changedPeerIds.formUnion(additionalChangedPeerIds)
+
         self.ensureInitialized(groupId: .root)
         
         for peerId in changedPeerIds {
@@ -399,8 +426,8 @@ final class ChatListTable: Table {
             let topMessage = messageHistoryTable.topIndex(peerId: peerId)
             let embeddedChatStateOverrideTimestamp = peerChatInterfaceStateTable.get(peerId)?.overrideChatTimestamp
             
-            let rawTopMessageIndex: MessageIndex?
-            let topMessageIndex: MessageIndex?
+            var rawTopMessageIndex: MessageIndex?
+            var topMessageIndex: MessageIndex?
             if let topMessage = topMessage {
                 var updatedTimestamp = topMessage.timestamp
                 rawTopMessageIndex = MessageIndex(id: topMessage.id, timestamp: topMessage.timestamp)
@@ -416,6 +443,18 @@ final class ChatListTable: Table {
                 rawTopMessageIndex = nil
             }
             
+            if let cachedData = postbox.cachedPeerDataTable.get(peerId), let associatedChatListPeerId = self.seedConfiguration.decodeAssociatedChatListPeerId(cachedData) {
+                if let associatedTopMessage = messageHistoryTable.topIndex(peerId: associatedChatListPeerId) {
+                    if let currentTopMessageIndex = topMessageIndex {
+                        if currentTopMessageIndex.timestamp < associatedTopMessage.timestamp {
+                            topMessageIndex = MessageIndex(id: currentTopMessageIndex.id, timestamp: associatedTopMessage.timestamp)
+                        }
+                    } else {
+                        topMessageIndex = MessageIndex(id: MessageId(peerId: peerId, namespace: 0, id: 1), timestamp: associatedTopMessage.timestamp)
+                    }
+                }
+            }
+
             var updatedIndex = self.indexTable.setTopMessageIndex(peerId: peerId, index: topMessageIndex)
             if let updatedInclusion = updatedChatListInclusions[peerId] {
                 updatedIndex = self.indexTable.setInclusion(peerId: peerId, inclusion: updatedInclusion)
@@ -926,11 +965,11 @@ final class ChatListTable: Table {
             let index = ChatListIndex(pinningIndex: pinningIndex, messageIndex: messageIndex)
             if type == ChatListEntryType.message.rawValue {
                 let peerId = index.messageIndex.id.peerId
-                
+
                 if inactiveSecretChatPeerIds.contains(peerId) {
                     return true
                 }
-                
+
                 if let readState = postbox.readStateTable.getCombinedState(peerId), readState.isUnread {
                     if filtered {
                         if let peer = postbox.peerTable.get(peerId) {
@@ -997,7 +1036,7 @@ final class ChatListTable: Table {
                     }
                     var tagSummary: MessageHistoryTagNamespaceSummary?
                     if let summaryTag = summaryTag {
-                        tagSummary = summaryTable.get(MessageHistoryTagsSummaryKey(tag: summaryTag, peerId: peerIndex.messageIndex.id.peerId, threadId: nil, namespace: namespace))
+                        tagSummary = summaryTable.get(MessageHistoryTagsSummaryKey(tag: summaryTag, peerId: peerIndex.messageIndex.id.peerId, threadId: nil, namespace: namespace, customTag: nil))
                     }
                     var topMessageAttributes: [MessageAttribute] = []
                     if let topMessage = topMessage {

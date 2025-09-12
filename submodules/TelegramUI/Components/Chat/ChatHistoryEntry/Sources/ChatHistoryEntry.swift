@@ -19,8 +19,9 @@ public struct ChatMessageEntryAttributes: Equatable {
     public var isPlaying: Bool
     public var isCentered: Bool
     public var authorStoryStats: PeerStoryStats?
+    public var displayContinueThreadFooter: Bool
     
-    public init(rank: CachedChannelAdminRank?, isContact: Bool, contentTypeHint: ChatMessageEntryContentType, updatingMedia: ChatUpdatingMessageMedia?, isPlaying: Bool, isCentered: Bool, authorStoryStats: PeerStoryStats?) {
+    public init(rank: CachedChannelAdminRank?, isContact: Bool, contentTypeHint: ChatMessageEntryContentType, updatingMedia: ChatUpdatingMessageMedia?, isPlaying: Bool, isCentered: Bool, authorStoryStats: PeerStoryStats?, displayContinueThreadFooter: Bool) {
         self.rank = rank
         self.isContact = isContact
         self.contentTypeHint = contentTypeHint
@@ -28,6 +29,7 @@ public struct ChatMessageEntryAttributes: Equatable {
         self.isPlaying = isPlaying
         self.isCentered = isCentered
         self.authorStoryStats = authorStoryStats
+        self.displayContinueThreadFooter = displayContinueThreadFooter
     }
     
     public init() {
@@ -38,15 +40,22 @@ public struct ChatMessageEntryAttributes: Equatable {
         self.isPlaying = false
         self.isCentered = false
         self.authorStoryStats = nil
+        self.displayContinueThreadFooter = false
     }
+}
+
+public enum ChatInfoData: Equatable {
+    case botInfo(title: String, text: String, photo: TelegramMediaImage?, video: TelegramMediaFile?)
+    case userInfo(peer: EnginePeer, verification: PeerVerification?, registrationDate: String?, phoneCountry: String?, groupsInCommonCount: Int32)
+    case newThreadInfo
 }
 
 public enum ChatHistoryEntry: Identifiable, Comparable {
     case MessageEntry(Message, ChatPresentationData, Bool, MessageHistoryEntryLocation?, ChatHistoryMessageSelection, ChatMessageEntryAttributes)
-    case MessageGroupEntry(MessageGroupInfo, [(Message, Bool, ChatHistoryMessageSelection, ChatMessageEntryAttributes, MessageHistoryEntryLocation?)], ChatPresentationData)
+    case MessageGroupEntry(Int64, [(Message, Bool, ChatHistoryMessageSelection, ChatMessageEntryAttributes, MessageHistoryEntryLocation?)], ChatPresentationData)
     case UnreadEntry(MessageIndex, ChatPresentationData)
     case ReplyCountEntry(MessageIndex, Bool, Int, ChatPresentationData)
-    case ChatInfoEntry(String, String, TelegramMediaImage?, TelegramMediaFile?, ChatPresentationData)
+    case ChatInfoEntry(ChatInfoData, ChatPresentationData)
     case SearchEntry(PresentationTheme, PresentationStrings)
     
     public var stableId: UInt64 {
@@ -63,7 +72,7 @@ public enum ChatHistoryEntry: Identifiable, Comparable {
                 }
                 return UInt64(message.stableId) | ((type << 40))
             case let .MessageGroupEntry(groupInfo, _, _):
-                return UInt64(groupInfo.stableId) | ((UInt64(2) << 40))
+                return UInt64(bitPattern: groupInfo) | ((UInt64(2) << 40))
             case .UnreadEntry:
                 return UInt64(4) << 40
             case .ReplyCountEntry:
@@ -85,8 +94,13 @@ public enum ChatHistoryEntry: Identifiable, Comparable {
                 return index
             case let .ReplyCountEntry(index, _, _, _):
                 return index
-            case .ChatInfoEntry:
-                return MessageIndex.absoluteLowerBound()
+            case let .ChatInfoEntry(infoData, _):
+                switch infoData {
+                case .newThreadInfo:
+                    return MessageIndex.absoluteUpperBound()
+                default:
+                    return MessageIndex.absoluteLowerBound()
+                }
             case .SearchEntry:
                 return MessageIndex.absoluteLowerBound()
         }
@@ -102,8 +116,13 @@ public enum ChatHistoryEntry: Identifiable, Comparable {
                 return index
             case let .ReplyCountEntry(index, _, _, _):
                 return index
-            case .ChatInfoEntry:
-                return MessageIndex.absoluteLowerBound()
+            case let .ChatInfoEntry(infoData, _):
+                switch infoData {
+                case .newThreadInfo:
+                    return MessageIndex.absoluteUpperBound()
+                default:
+                    return MessageIndex.absoluteLowerBound()
+                }
             case .SearchEntry:
                 return MessageIndex.absoluteLowerBound()
         }
@@ -272,8 +291,8 @@ public enum ChatHistoryEntry: Identifiable, Comparable {
                 } else {
                     return false
                 }
-            case let .ChatInfoEntry(lhsTitle, lhsText, lhsPhoto, lhsVideo, lhsPresentationData):
-                if case let .ChatInfoEntry(rhsTitle, rhsText, rhsPhoto, rhsVideo, rhsPresentationData) = rhs, lhsTitle == rhsTitle, lhsText == rhsText, lhsPhoto == rhsPhoto, lhsVideo == rhsVideo, lhsPresentationData === rhsPresentationData {
+            case let .ChatInfoEntry(lhsData, lhsPresentationData):
+                if case let .ChatInfoEntry(rhsData, rhsPresentationData) = rhs, lhsData == rhsData, lhsPresentationData === rhsPresentationData {
                     return true
                 } else {
                     return false

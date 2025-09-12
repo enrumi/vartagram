@@ -30,7 +30,6 @@ swift_library(
         "//submodules/MediaPickerUI",
         "//submodules/LegacyMediaPickerUI",
         "//submodules/LocationUI",
-        "//submodules/WebUI",
         "//submodules/TelegramUI/Components/ChatScheduleTimeController",
         "//submodules/TelegramUI/Components/ChatTimerScreen",
         "//submodules/TextFormat",
@@ -94,7 +93,14 @@ swift_library(
         "//submodules/Components/BalancedTextComponent",
         "//submodules/AnimatedCountLabelNode",
         "//submodules/StickerResources",
-        "//submodules/TelegramUI/Components/Stories/ForwardInfoPanelComponent"
+        "//submodules/TelegramUI/Components/Stories/ForwardInfoPanelComponent",
+        "//submodules/TelegramUI/Components/Stories/StoryQualityUpgradeSheetScreen",
+        "//submodules/TelegramUI/Components/SliderContextItem",
+        "//submodules/TelegramUI/Components/InteractiveTextComponent",
+        "//submodules/TelegramUI/Components/SaveProgressScreen",
+        "//submodules/TelegramUI/Components/Chat/ChatMessagePaymentAlertController",
+        "//submodules/DirectMediaImageCache",
+        "//submodules/PromptUI",
     ],
     visibility = [
         "//visibility:public",

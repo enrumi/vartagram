@@ -17,9 +17,9 @@ private func alignUp(size: Int, align: Int) -> Int {
 private func fileSize(_ path: String, useTotalFileAllocatedSize: Bool = false) -> Int64? {
     if useTotalFileAllocatedSize {
         let url = URL(fileURLWithPath: path)
-        if let values = (try? url.resourceValues(forKeys: Set([.isRegularFileKey, .totalFileAllocatedSizeKey]))) {
+        if let values = (try? url.resourceValues(forKeys: Set([.isRegularFileKey, .fileAllocatedSizeKey]))) {
             if values.isRegularFile ?? false {
-                if let fileSize = values.totalFileAllocatedSize {
+                if let fileSize = values.fileAllocatedSize {
                     return Int64(fileSize)
                 }
             }
@@ -1380,22 +1380,20 @@ private func findHigherResolutionFileForAdaptation(itemDirectoryPath: String, ba
             let fileName = url.lastPathComponent
             if fileName.hasPrefix(baseName) {
                 let scanner = Scanner(string: fileName)
-                guard scanner.scanString(baseName, into: nil) else {
+                guard scanner.scanString(baseName) != nil else {
                     continue
                 }
-                var itemWidth: Int = 0
-                guard scanner.scanInt(&itemWidth) else {
+                guard let itemWidth = scanner.scanInt() else {
                     continue
                 }
-                guard scanner.scanString("x", into: nil) else {
+                guard scanner.scanString("x") != nil else {
                     continue
                 }
-                var itemHeight: Int = 0
-                guard scanner.scanInt(&itemHeight) else {
+                guard let itemHeight = scanner.scanInt() else {
                     continue
                 }
                 if !baseSuffix.isEmpty {
-                    guard scanner.scanString(baseSuffix, into: nil) else {
+                    guard scanner.scanString(baseSuffix) != nil else {
                         continue
                     }
                 }

@@ -27,7 +27,7 @@ private extension ListMessageItemInteraction {
         }, openInstantPage: { message, data in
             controllerInteraction.openInstantPage(message, data)
         }, longTap: { action, message in
-            controllerInteraction.longTap(action, message)
+            controllerInteraction.longTap(action, ChatControllerInteraction.LongTapParams(message: message))
         }, getHiddenMedia: {
             return controllerInteraction.hiddenMedia
         })
@@ -196,7 +196,7 @@ public final class ChatHistorySearchContainerNode: SearchDisplayControllerConten
             if let strongSelf = self {
                 let signal: Signal<([ChatHistorySearchEntry], [MessageId: Message])?, NoError>
                 if let query = query, !query.isEmpty {
-                    let foundRemoteMessages: Signal<[Message], NoError> = context.engine.messages.searchMessages(location: .peer(peerId: peerId, fromId: nil, tags: tagMask, threadId: threadId, minDate: nil, maxDate: nil), query: query, state: nil, inactiveSecretChatPeerIds: context.currentInactiveSecretChatPeerIds.with { $0 })
+                    let foundRemoteMessages: Signal<[Message], NoError> = context.engine.messages.searchMessages(location: .peer(peerId: peerId, fromId: nil, tags: tagMask, reactions: nil, threadId: threadId, minDate: nil, maxDate: nil), query: query, state: nil, inactiveSecretChatPeerIds: context.currentInactiveSecretChatPeerIds.with { $0 })
                     |> map { $0.0.messages }
                     |> delay(0.2, queue: Queue.concurrentDefaultQueue())
                     

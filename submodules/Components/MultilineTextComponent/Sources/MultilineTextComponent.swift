@@ -18,10 +18,12 @@ public final class MultilineTextComponent: Component {
     public let lineSpacing: CGFloat
     public let cutout: TextNodeCutout?
     public let insets: UIEdgeInsets
+    public let tintColor: UIColor?
     public let textShadowColor: UIColor?
     public let textShadowBlur: CGFloat?
     public let textStroke: (UIColor, CGFloat)?
     public let highlightColor: UIColor?
+    public let highlightInset: UIEdgeInsets
     public let highlightAction: (([NSAttributedString.Key: Any]) -> NSAttributedString.Key?)?
     public let tapAction: (([NSAttributedString.Key: Any], Int) -> Void)?
     public let longTapAction: (([NSAttributedString.Key: Any], Int) -> Void)?
@@ -35,10 +37,12 @@ public final class MultilineTextComponent: Component {
         lineSpacing: CGFloat = 0.0,
         cutout: TextNodeCutout? = nil,
         insets: UIEdgeInsets = UIEdgeInsets(),
+        tintColor: UIColor? = nil,
         textShadowColor: UIColor? = nil,
         textShadowBlur: CGFloat? = nil,
         textStroke: (UIColor, CGFloat)? = nil,
         highlightColor: UIColor? = nil,
+        highlightInset: UIEdgeInsets = .zero,
         highlightAction: (([NSAttributedString.Key: Any]) -> NSAttributedString.Key?)? = nil,
         tapAction: (([NSAttributedString.Key: Any], Int) -> Void)? = nil,
         longTapAction: (([NSAttributedString.Key: Any], Int) -> Void)? = nil
@@ -51,10 +55,12 @@ public final class MultilineTextComponent: Component {
         self.lineSpacing = lineSpacing
         self.cutout = cutout
         self.insets = insets
+        self.tintColor = tintColor
         self.textShadowColor = textShadowColor
         self.textShadowBlur = textShadowBlur
         self.textStroke = textStroke
         self.highlightColor = highlightColor
+        self.highlightInset = highlightInset
         self.highlightAction = highlightAction
         self.tapAction = tapAction
         self.longTapAction = longTapAction
@@ -85,7 +91,9 @@ public final class MultilineTextComponent: Component {
         if lhs.insets != rhs.insets {
             return false
         }
-        
+        if lhs.tintColor != rhs.tintColor {
+            return false
+        }
         if let lhsTextShadowColor = lhs.textShadowColor, let rhsTextShadowColor = rhs.textShadowColor {
             if !lhsTextShadowColor.isEqual(rhsTextShadowColor) {
                 return false
@@ -116,11 +124,15 @@ public final class MultilineTextComponent: Component {
             return false
         }
         
+        if lhs.highlightInset != rhs.highlightInset {
+            return false
+        }
+        
         return true
     }
     
     public final class View: ImmediateTextView {
-        public func update(component: MultilineTextComponent, availableSize: CGSize, transition: Transition) -> CGSize {
+        public func update(component: MultilineTextComponent, availableSize: CGSize, transition: ComponentTransition) -> CGSize {
             let attributedString: NSAttributedString
             switch component.text {
             case let .plain(string):
@@ -143,6 +155,7 @@ public final class MultilineTextComponent: Component {
             self.textShadowBlur = component.textShadowBlur
             self.textStroke = component.textStroke
             self.linkHighlightColor = component.highlightColor
+            self.linkHighlightInset = component.highlightInset
             self.highlightAttributeAction = component.highlightAction
             self.tapAttributeAction = component.tapAction
             self.longTapAttributeAction = component.longTapAction
@@ -161,6 +174,12 @@ public final class MultilineTextComponent: Component {
             
             let size = self.updateLayout(availableSize)
                  
+            if let tintColor = component.tintColor {
+                transition.setTintColor(layer: self.layer, color: tintColor)
+            } else {
+                self.layer.layerTintColor = nil
+            }
+            
             return size
         }
     }
@@ -169,7 +188,7 @@ public final class MultilineTextComponent: Component {
         return View()
     }
     
-    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, transition: transition)
     }
 }

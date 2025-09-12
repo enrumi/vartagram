@@ -7,6 +7,7 @@ public enum EngineOutgoingMessageContent {
     case text(String, [MessageTextEntity])
     case file(FileMediaReference)
     case contextResult(ChatContextResultCollection, ChatContextResult)
+    case preparedInlineMessage(PreparedInlineMessage)
 }
 
 public final class StoryPreloadInfo {
@@ -18,7 +19,6 @@ public final class StoryPreloadInfo {
     public let peer: PeerReference
     public let storyId: Int32
     public let media: EngineMedia
-    public let alternativeMedia: EngineMedia?
     public let reactions: [MessageReaction.Reaction]
     public let priority: Priority
     
@@ -26,16 +26,44 @@ public final class StoryPreloadInfo {
         peer: PeerReference,
         storyId: Int32,
         media: EngineMedia,
-        alternativeMedia: EngineMedia?,
         reactions: [MessageReaction.Reaction],
         priority: Priority
     ) {
         self.peer = peer
         self.storyId = storyId
         self.media = media
-        self.alternativeMedia = alternativeMedia
         self.reactions = reactions
         self.priority = priority
+    }
+}
+
+public final class TelegramGlobalPostSearchState: Codable, Equatable {
+    public let totalFreeSearches: Int32
+    public let remainingFreeSearches: Int32
+    public let price: StarsAmount
+    public let unlockTimestamp: Int32?
+
+    public init(totalFreeSearches: Int32, remainingFreeSearches: Int32, price: StarsAmount, unlockTimestamp: Int32?) {
+        self.totalFreeSearches = totalFreeSearches
+        self.remainingFreeSearches = remainingFreeSearches
+        self.price = price
+        self.unlockTimestamp = unlockTimestamp
+    }
+
+    public static func ==(lhs: TelegramGlobalPostSearchState, rhs: TelegramGlobalPostSearchState) -> Bool {
+        if lhs.totalFreeSearches != rhs.totalFreeSearches {
+            return false
+        }
+        if lhs.remainingFreeSearches != rhs.remainingFreeSearches {
+            return false
+        }
+        if lhs.price != rhs.price {
+            return false
+        }
+        if lhs.unlockTimestamp != rhs.unlockTimestamp {
+            return false
+        }
+        return true
     }
 }
 
@@ -75,8 +103,16 @@ public extension TelegramEngine {
             return _internal_acceptMessageActionUrlAuth(account: self.account, subject: subject, allowWriteAccess: allowWriteAccess)
         }
 
-        public func searchMessages(location: SearchMessagesLocation, query: String, state: SearchMessagesState?, limit: Int32 = 100, inactiveSecretChatPeerIds: Set<PeerId>) -> Signal<(SearchMessagesResult, SearchMessagesState), NoError> {
-            return _internal_searchMessages(account: self.account, location: location, query: query, state: state, limit: limit, inactiveSecretChatPeerIds: inactiveSecretChatPeerIds)
+        public func searchMessages(location: SearchMessagesLocation, query: String, state: SearchMessagesState?, centerId: MessageId? = nil, limit: Int32 = 100, inactiveSecretChatPeerIds: Set<PeerId>) -> Signal<(SearchMessagesResult, SearchMessagesState), NoError> {
+            return _internal_searchMessages(account: self.account, location: location, query: query, state: state, centerId: centerId, limit: limit)
+        }
+
+        public func getSearchMessageCount(location: SearchMessagesLocation, query: String) -> Signal<Int?, NoError> {
+            return _internal_getSearchMessageCount(account: self.account, location: location, query: query)
+        }
+
+        public func searchHashtagPosts(hashtag: String, state: SearchMessagesState?, limit: Int32 = 100) -> Signal<(SearchMessagesResult, SearchMessagesState), NoError> {
+            return _internal_searchHashtagPosts(account: self.account, hashtag: hashtag, state: state, limit: limit, inactiveSecretChatPeerIds: inactiveSecretChatPeerIds)
         }
 
         public func downloadMessage(messageId: MessageId) -> Signal<Message?, NoError> {
@@ -129,12 +165,12 @@ public extension TelegramEngine {
             return _internal_clearAuthorHistory(account: self.account, peerId: peerId, memberId: memberId)
         }
 
-        public func requestEditMessage(messageId: MessageId, text: String, media: RequestEditMessageMedia, entities: TextEntitiesMessageAttribute?, inlineStickers: [MediaId: Media], webpagePreviewAttribute: WebpagePreviewMessageAttribute? = nil, disableUrlPreview: Bool = false, scheduleTime: Int32? = nil) -> Signal<RequestEditMessageResult, RequestEditMessageError> {
-            return _internal_requestEditMessage(account: self.account, messageId: messageId, text: text, media: media, entities: entities, inlineStickers: inlineStickers, webpagePreviewAttribute: webpagePreviewAttribute, disableUrlPreview: disableUrlPreview, scheduleTime: scheduleTime)
+        public func requestEditMessage(messageId: MessageId, text: String, media: RequestEditMessageMedia, entities: TextEntitiesMessageAttribute?, inlineStickers: [MediaId: Media], webpagePreviewAttribute: WebpagePreviewMessageAttribute? = nil, invertMediaAttribute: InvertMediaMessageAttribute? = nil, disableUrlPreview: Bool = false, scheduleTime: Int32? = nil) -> Signal<RequestEditMessageResult, RequestEditMessageError> {
+            return _internal_requestEditMessage(account: self.account, messageId: messageId, text: text, media: media, entities: entities, inlineStickers: inlineStickers, webpagePreviewAttribute: webpagePreviewAttribute, disableUrlPreview: disableUrlPreview, scheduleTime: scheduleTime, invertMediaAttribute: invertMediaAttribute)
         }
 
-        public func requestEditLiveLocation(messageId: MessageId, stop: Bool, coordinate: (latitude: Double, longitude: Double, accuracyRadius: Int32?)?, heading: Int32?, proximityNotificationRadius: Int32?) -> Signal<Void, NoError> {
-            return _internal_requestEditLiveLocation(postbox: self.account.postbox, network: self.account.network, stateManager: self.account.stateManager, messageId: messageId, stop: stop, coordinate: coordinate, heading: heading, proximityNotificationRadius: proximityNotificationRadius)
+        public func requestEditLiveLocation(messageId: MessageId, stop: Bool, coordinate: (latitude: Double, longitude: Double, accuracyRadius: Int32?)?, heading: Int32?, proximityNotificationRadius: Int32?, extendPeriod: Int32?) -> Signal<Void, NoError> {
+            return _internal_requestEditLiveLocation(postbox: self.account.postbox, network: self.account.network, stateManager: self.account.stateManager, messageId: messageId, stop: stop, coordinate: coordinate, heading: heading, proximityNotificationRadius: proximityNotificationRadius, extendPeriod: extendPeriod)
         }
 
         public func addSecretChatMessageScreenshot(peerId: PeerId) -> Signal<Never, NoError> {
@@ -198,6 +234,14 @@ public extension TelegramEngine {
             return PollResultsContext(account: self.account, messageId: messageId, poll: poll)
         }
 
+        public func requestUpdateTodoMessageItems(messageId: MessageId, completedIds: [Int32], incompletedIds: [Int32]) -> Signal<Never, RequestUpdateTodoMessageError> {
+            return _internal_requestUpdateTodoMessageItems(account: self.account, messageId: messageId, completedIds: completedIds, incompletedIds: incompletedIds)
+        }
+
+        public func appendTodoMessageItems(messageId: MessageId, items: [TelegramMediaTodo.Item]) -> Signal<Never, AppendTodoMessageError> {
+            return _internal_appendTodoMessageItems(account: self.account, messageId: messageId, items: items)
+        }
+
         public func earliestUnseenPersonalMentionMessage(peerId: PeerId, threadId: Int64?) -> Signal<EarliestUnseenPersonalMentionMessageResult, NoError> {
             let account = self.account
             return _internal_earliestUnseenPersonalMentionMessage(account: self.account, peerId: peerId, threadId: threadId)
@@ -241,11 +285,14 @@ public extension TelegramEngine {
             storyId: StoryId? = nil,
             content: EngineOutgoingMessageContent,
             silentPosting: Bool = false,
-            scheduleTime: Int32? = nil
+            scheduleTime: Int32? = nil,
+            sendPaidMessageStars: StarsAmount? = nil
         ) -> Signal<[MessageId?], NoError> {
             var message: EnqueueMessage?
-            if case let .contextResult(results, result) = content {
-                message = self.outgoingMessageWithChatContextResult(to: peerId, threadId: nil, botId: results.botId, result: result, replyToMessageId: replyToMessageId, replyToStoryId: storyId, hideVia: true, silentPosting: silentPosting, scheduleTime: scheduleTime, correlationId: nil)
+            if case let .preparedInlineMessage(preparedInlineMessage) = content {
+                message = self.outgoingMessageWithChatContextResult(to: peerId, threadId: nil, botId: preparedInlineMessage.botId, result: preparedInlineMessage.result, replyToMessageId: replyToMessageId, replyToStoryId: storyId, hideVia: true, silentPosting: silentPosting, scheduleTime: scheduleTime, sendPaidMessageStars: sendPaidMessageStars, postpone: false, correlationId: nil)
+            } else if case let .contextResult(results, result) = content {
+                message = self.outgoingMessageWithChatContextResult(to: peerId, threadId: nil, botId: results.botId, result: result, replyToMessageId: replyToMessageId, replyToStoryId: storyId, hideVia: true, silentPosting: silentPosting, scheduleTime: scheduleTime, sendPaidMessageStars: sendPaidMessageStars, postpone: false, correlationId: nil)
             } else {
                 var attributes: [MessageAttribute] = []
                 if silentPosting {
@@ -254,7 +301,10 @@ public extension TelegramEngine {
                 if let scheduleTime = scheduleTime {
                      attributes.append(OutgoingScheduleInfoMessageAttribute(scheduleTime: scheduleTime))
                 }
-                
+                if let sendPaidMessageStars {
+                    attributes.append(PaidStarsMessageAttribute(stars: sendPaidMessageStars, postponeSending: false))
+                }
+
                 var text: String = ""
                 var mediaReference: AnyMediaReference?
                 switch content {
@@ -293,25 +343,60 @@ public extension TelegramEngine {
             )
         }
 
-        public func enqueueOutgoingMessageWithChatContextResult(to peerId: PeerId, threadId: Int64?, botId: PeerId, result: ChatContextResult, replyToMessageId: EngineMessageReplySubject? = nil, replyToStoryId: StoryId? = nil, hideVia: Bool = false, silentPosting: Bool = false, scheduleTime: Int32? = nil, correlationId: Int64? = nil) -> Bool {
-            return _internal_enqueueOutgoingMessageWithChatContextResult(account: self.account, to: peerId, threadId: threadId, botId: botId, result: result, replyToMessageId: replyToMessageId, replyToStoryId: replyToStoryId, hideVia: hideVia, silentPosting: silentPosting, scheduleTime: scheduleTime, correlationId: correlationId)
+        public func enqueueOutgoingMessageWithChatContextResult(to peerId: PeerId, threadId: Int64?, botId: PeerId, result: ChatContextResult, replyToMessageId: EngineMessageReplySubject? = nil, replyToStoryId: StoryId? = nil, hideVia: Bool = false, silentPosting: Bool = false, scheduleTime: Int32? = nil, sendPaidMessageStars: StarsAmount?, postpone: Bool = false, correlationId: Int64? = nil) -> Bool {
+            return _internal_enqueueOutgoingMessageWithChatContextResult(account: self.account, to: peerId, threadId: threadId, botId: botId, result: result, replyToMessageId: replyToMessageId, replyToStoryId: replyToStoryId, hideVia: hideVia, silentPosting: silentPosting, scheduleTime: scheduleTime, sendPaidMessageStars: sendPaidMessageStars, postpone: postpone, correlationId: correlationId)
         }
         
-        public func outgoingMessageWithChatContextResult(to peerId: PeerId, threadId: Int64?, botId: PeerId, result: ChatContextResult, replyToMessageId: EngineMessageReplySubject?, replyToStoryId: StoryId?, hideVia: Bool, silentPosting: Bool, scheduleTime: Int32?, correlationId: Int64?) -> EnqueueMessage? {
-            return _internal_outgoingMessageWithChatContextResult(to: peerId, threadId: threadId, botId: botId, result: result, replyToMessageId: replyToMessageId, replyToStoryId: replyToStoryId, hideVia: hideVia, silentPosting: silentPosting, scheduleTime: scheduleTime, correlationId: correlationId)
+        public func outgoingMessageWithChatContextResult(to peerId: PeerId, threadId: Int64?, botId: PeerId, result: ChatContextResult, replyToMessageId: EngineMessageReplySubject?, replyToStoryId: StoryId?, hideVia: Bool, silentPosting: Bool, scheduleTime: Int32?, sendPaidMessageStars: StarsAmount?, postpone: Bool, correlationId: Int64?) -> EnqueueMessage? {
+            return _internal_outgoingMessageWithChatContextResult(to: peerId, threadId: threadId, botId: botId, result: result, replyToMessageId: replyToMessageId, replyToStoryId: replyToStoryId, hideVia: hideVia, silentPosting: silentPosting, scheduleTime: scheduleTime, sendPaidMessageStars: sendPaidMessageStars, postpone: postpone, correlationId: correlationId)
         }
         
         public func setMessageReactions(
-            id: EngineMessage.Id,
+            ids: [EngineMessage.Id],
             reactions: [UpdateMessageReaction]
         ) {
             let _ = updateMessageReactionsInteractively(
                 account: self.account,
-                messageId: id,
+                messageIds: ids,
                 reactions: reactions,
                 isLarge: false,
-                storeAsRecentlyUsed: false
+                storeAsRecentlyUsed: false,
+                add: false
             ).start()
+        }
+
+        public func addMessageReactions(
+            ids: [EngineMessage.Id],
+            reactions: [UpdateMessageReaction]
+        ) {
+            let _ = updateMessageReactionsInteractively(
+                account: self.account,
+                messageIds: ids,
+                reactions: reactions,
+                isLarge: false,
+                storeAsRecentlyUsed: false,
+                add: true
+            ).startStandalone()
+        }
+
+        public func sendStarsReaction(id: EngineMessage.Id, count: Int, privacy: TelegramPaidReactionPrivacy?) -> Signal<TelegramPaidReactionPrivacy, NoError> {
+            return _internal_sendStarsReactionsInteractively(account: self.account, messageId: id, count: count, privacy: privacy)
+        }
+
+        public func cancelPendingSendStarsReaction(id: EngineMessage.Id) {
+            let _ = cancelPendingSendStarsReactionInteractively(account: self.account, messageId: id).startStandalone()
+        }
+
+        public func forceSendPendingSendStarsReaction(id: EngineMessage.Id) {
+            let _ = _internal_forceSendPendingSendStarsReaction(account: self.account, messageId: id).startStandalone()
+        }
+
+        public func forceSendPostponedPaidMessage(peerId: EnginePeer.Id) {
+            let _ = _internal_forceSendPostponedPaidMessage(account: self.account, peerId: peerId).startStandalone()
+        }
+
+        public func updateStarsReactionPrivacy(id: EngineMessage.Id, privacy: TelegramPaidReactionPrivacy) -> Signal<Never, NoError> {
+            return _internal_updateStarsReactionPrivacy(account: self.account, messageId: id, privacy: privacy)
         }
 
         public func requestChatContextResults(botId: PeerId, peerId: PeerId, query: String, location: Signal<(Double, Double)?, NoError> = .single(nil), offset: String, incompleteResults: Bool = false, staleCachedResults: Bool = false) -> Signal<RequestChatContextResultsResult?, RequestChatContextResultsError> {
@@ -331,9 +416,10 @@ public extension TelegramEngine {
         }
 
         public func chatList(group: EngineChatList.Group, count: Int, inactiveSecretChatPeerIds: Signal<Set<PeerId>, NoError>) -> Signal<EngineChatList, NoError> {
+            let accountPeerId = self.account.peerId
             return self.account.postbox.tailChatListView(groupId: group._asGroup(), count: count, summaryComponents: ChatListEntrySummaryComponents(), inactiveSecretChatPeerIds: inactiveSecretChatPeerIds)
             |> map { view -> EngineChatList in
-                return EngineChatList(view.0)
+                return EngineChatList(view.0, accountPeerId: accountPeerId)
             }
         }
 
@@ -359,12 +445,20 @@ public extension TelegramEngine {
             }
         }
 
-        public func adMessages(peerId: PeerId) -> AdMessagesHistoryContext {
-            return AdMessagesHistoryContext(account: self.account, peerId: peerId)
+        public func adMessages(peerId: PeerId, messageId: EngineMessage.Id? = nil, activateManually: Bool = false) -> AdMessagesHistoryContext {
+            return AdMessagesHistoryContext(account: self.account, peerId: peerId, messageId: messageId, activateManually: activateManually)
         }
 
         public func messageReadStats(id: MessageId) -> Signal<MessageReadStats?, NoError> {
             return _internal_messageReadStats(account: self.account, id: id)
+        }
+
+        public func getPreparedInlineMessage(botId: EnginePeer.Id, id: String) -> Signal<PreparedInlineMessage?, NoError> {
+            return _internal_getPreparedInlineMessage(account: self.account, botId: botId, id: id)
+        }
+
+        public func checkBotDownload(botId: EnginePeer.Id, fileName: String, url: String) -> Signal<Bool, NoError> {
+            return _internal_checkBotDownload(account: self.account, botId: botId, fileName: fileName, url: url)
         }
 
         public func requestCancelLiveLocation(ids: [MessageId]) -> Signal<Never, NoError> {
@@ -379,10 +473,10 @@ public extension TelegramEngine {
                         let timestamp = Int32(CFAbsoluteTimeGetCurrent() + kCFAbsoluteTimeIntervalSince1970)
                         for i in 0 ..< updatedMedia.count {
                             if let media = updatedMedia[i] as? TelegramMediaMap, let _ = media.liveBroadcastingTimeout {
-                                updatedMedia[i] = TelegramMediaMap(latitude: media.latitude, longitude: media.longitude, heading: media.heading, accuracyRadius: media.accuracyRadius, geoPlace: media.geoPlace, venue: media.venue, liveBroadcastingTimeout: max(0, timestamp - currentMessage.timestamp - 1), liveProximityNotificationRadius: nil)
+                                updatedMedia[i] = TelegramMediaMap(latitude: media.latitude, longitude: media.longitude, heading: media.heading, accuracyRadius: media.accuracyRadius, venue: media.venue, liveBroadcastingTimeout: max(0, timestamp - currentMessage.timestamp - 1), liveProximityNotificationRadius: nil)
                             }
                         }
-                        return .update(StoreMessage(id: currentMessage.id, globallyUniqueId: currentMessage.globallyUniqueId, groupingKey: currentMessage.groupingKey, threadId: currentMessage.threadId, timestamp: currentMessage.timestamp, flags: StoreMessageFlags(currentMessage.flags), tags: currentMessage.tags, globalTags: currentMessage.globalTags, localTags: currentMessage.localTags, forwardInfo: storeForwardInfo, authorId: currentMessage.author?.id, text: currentMessage.text, attributes: currentMessage.attributes, media: updatedMedia))
+                        return .update(StoreMessage(id: currentMessage.id, customStableId: nil, globallyUniqueId: currentMessage.globallyUniqueId, groupingKey: currentMessage.groupingKey, threadId: currentMessage.threadId, timestamp: currentMessage.timestamp, flags: StoreMessageFlags(currentMessage.flags), tags: currentMessage.tags, globalTags: currentMessage.globalTags, localTags: currentMessage.localTags, forwardInfo: storeForwardInfo, authorId: currentMessage.author?.id, text: currentMessage.text, attributes: currentMessage.attributes, media: updatedMedia))
                     })
                 }
             }
@@ -405,24 +499,23 @@ public extension TelegramEngine {
             return SparseMessageList(account: self.account, peerId: peerId, threadId: threadId, messageTag: tag)
         }
 
-        public func sparseMessageCalendar(peerId: EnginePeer.Id, threadId: Int64?, tag: EngineMessage.Tags) -> SparseMessageCalendar {
-            return SparseMessageCalendar(account: self.account, peerId: peerId, threadId: threadId, messageTag: tag)
+        public func sparseMessageCalendar(peerId: EnginePeer.Id, threadId: Int64?, tag: EngineMessage.Tags, displayMedia: Bool) -> SparseMessageCalendar {
+            return SparseMessageCalendar(account: self.account, peerId: peerId, threadId: threadId, messageTag: tag, displayMedia: displayMedia)
         }
-
-        /*public func sparseMessageScrollingContext(peerId: EnginePeer.Id) -> SparseMessageScrollingContext {
-            return SparseMessageScrollingContext(account: self.account, peerId: peerId)
-        }*/
 
         public func refreshMessageTagStats(peerId: EnginePeer.Id, threadId: Int64?, tags: [EngineMessage.Tags]) -> Signal<Never, NoError> {
             let account = self.account
             return self.account.postbox.transaction { transaction -> (Api.InputPeer?, Api.InputPeer?) in
+                let chatPeer = transaction.getPeer(peerId)
                 var inputSavedPeer: Api.InputPeer?
-                if let threadId = threadId {
+                if let threadId {
                     if peerId == account.peerId {
+                        inputSavedPeer = transaction.getPeer(PeerId(threadId)).flatMap(apiInputPeer)
+                    } else if let channel = chatPeer as? TelegramChannel, channel.isMonoForum {
                         inputSavedPeer = transaction.getPeer(PeerId(threadId)).flatMap(apiInputPeer)
                     }
                 }
-                return (transaction.getPeer(peerId).flatMap(apiInputPeer), inputSavedPeer)
+                return (chatPeer.flatMap(apiInputPeer), inputSavedPeer)
             }
             |> mapToSignal { inputPeer, inputSavedPeer -> Signal<Never, NoError> in
                 guard let inputPeer = inputPeer else {
@@ -437,8 +530,8 @@ public extension TelegramEngine {
                     
                     var flags: Int32 = 0
                     var topMsgId: Int32?
-                    if let threadId = threadId {
-                        if peerId == account.peerId {
+                    if let threadId {
+                        if peerId == account.peerId || inputSavedPeer != nil {
                             if inputSavedPeer != nil {
                                 flags |= (1 << 2)
                             }
@@ -448,10 +541,10 @@ public extension TelegramEngine {
                         }
                     }
                     
-                    signals.append(self.account.network.request(Api.functions.messages.search(flags: flags, peer: inputPeer, q: "", fromId: nil, savedPeerId: inputSavedPeer, topMsgId: topMsgId, filter: filter, minDate: 0, maxDate: 0, offsetId: 0, addOffset: 0, limit: 1, maxId: 0, minId: 0, hash: 0))
+                    signals.append(self.account.network.request(Api.functions.messages.search(flags: flags, peer: inputPeer, q: "", fromId: nil, savedPeerId: inputSavedPeer, savedReaction: nil, topMsgId: topMsgId, filter: filter, minDate: 0, maxDate: 0, offsetId: 0, addOffset: 0, limit: 1, maxId: 0, minId: 0, hash: 0))
                     |> map { result -> (count: Int32?, topId: Int32?) in
                         switch result {
-                        case let .messagesSlice(_, count, _, _, messages, _, _):
+                        case let .messagesSlice(_, count, _, _, _, messages, _, _):
                             return (count, messages.first?.id(namespace: Namespaces.Message.Cloud)?.id)
                         case let .channelMessages(_, _, count, _, messages, _, _, _):
                             return (count, messages.first?.id(namespace: Namespaces.Message.Cloud)?.id)
@@ -479,9 +572,9 @@ public extension TelegramEngine {
                                         maxId = max(maxId, message.id.id)
                                         return true
                                     })
-                                    transaction.replaceMessageTagSummary(peerId: peerId, threadId: threadId, tagMask: tags[i], namespace: Namespaces.Message.Cloud, count: Int32(localCount), maxId: maxId)
+                                    transaction.replaceMessageTagSummary(peerId: peerId, threadId: threadId, tagMask: tags[i], namespace: Namespaces.Message.Cloud, customTag: nil, count: Int32(localCount), maxId: maxId)
                                 } else {
-                                    transaction.replaceMessageTagSummary(peerId: peerId, threadId: threadId, tagMask: tags[i], namespace: Namespaces.Message.Cloud, count: count, maxId: maxId ?? 1)
+                                    transaction.replaceMessageTagSummary(peerId: peerId, threadId: threadId, tagMask: tags[i], namespace: Namespaces.Message.Cloud, customTag: nil, count: count, maxId: maxId ?? 1)
                                 }
                             }
                         }
@@ -495,12 +588,16 @@ public extension TelegramEngine {
             return EngineMessageReactionListContext(account: self.account, message: message, readStats: readStats, reaction: reaction)
         }
         
-        public func translate(text: String, toLang: String) -> Signal<String?, TranslationError> {
-            return _internal_translate(network: self.account.network, text: text, toLang: toLang)
+        public func translate(text: String, toLang: String, entities: [MessageTextEntity] = []) -> Signal<(String, [MessageTextEntity])?, TranslationError> {
+            return _internal_translate(network: self.account.network, text: text, toLang: toLang, entities: entities)
+        }
+
+        public func translate(texts: [(String, [MessageTextEntity])], toLang: String) -> Signal<[(String, [MessageTextEntity])], TranslationError> {
+            return _internal_translate_texts(network: self.account.network, texts: texts, toLang: toLang)
         }
         
-        public func translateMessages(messageIds: [EngineMessage.Id], toLang: String) -> Signal<Void, TranslationError> {
-            return _internal_translateMessages(account: self.account, messageIds: messageIds, toLang: toLang)
+        public func translateMessages(messageIds: [EngineMessage.Id], fromLang: String?, toLang: String, enableLocalIfPossible: Bool) -> Signal<Never, TranslationError> {
+            return _internal_translateMessages(account: self.account, messageIds: messageIds, fromLang: fromLang, toLang: toLang, enableLocalIfPossible: enableLocalIfPossible)
         }
         
         public func togglePeerMessagesTranslationHidden(peerId: EnginePeer.Id, hidden: Bool) -> Signal<Never, NoError> {
@@ -519,7 +616,7 @@ public extension TelegramEngine {
                     
                     attributes.append(AudioTranscriptionMessageAttribute(id: 0, text: text, isPending: !isFinal, didRate: false, error: error))
                     
-                    return .update(StoreMessage(id: currentMessage.id, globallyUniqueId: currentMessage.globallyUniqueId, groupingKey: currentMessage.groupingKey, threadId: currentMessage.threadId, timestamp: currentMessage.timestamp, flags: StoreMessageFlags(currentMessage.flags), tags: currentMessage.tags, globalTags: currentMessage.globalTags, localTags: currentMessage.localTags, forwardInfo: storeForwardInfo, authorId: currentMessage.author?.id, text: currentMessage.text, attributes: attributes, media: currentMessage.media))
+                    return .update(StoreMessage(id: currentMessage.id, customStableId: nil, globallyUniqueId: currentMessage.globallyUniqueId, groupingKey: currentMessage.groupingKey, threadId: currentMessage.threadId, timestamp: currentMessage.timestamp, flags: StoreMessageFlags(currentMessage.flags), tags: currentMessage.tags, globalTags: currentMessage.globalTags, localTags: currentMessage.localTags, forwardInfo: storeForwardInfo, authorId: currentMessage.author?.id, text: currentMessage.text, attributes: attributes, media: currentMessage.media))
                 })
             }
             |> ignoreValues
@@ -535,7 +632,29 @@ public extension TelegramEngine {
                         attributes.append(DerivedDataMessageAttribute(data: data))
                     }
                     
-                    return .update(StoreMessage(id: currentMessage.id, globallyUniqueId: currentMessage.globallyUniqueId, groupingKey: currentMessage.groupingKey, threadId: currentMessage.threadId, timestamp: currentMessage.timestamp, flags: StoreMessageFlags(currentMessage.flags), tags: currentMessage.tags, globalTags: currentMessage.globalTags, localTags: currentMessage.localTags, forwardInfo: storeForwardInfo, authorId: currentMessage.author?.id, text: currentMessage.text, attributes: attributes, media: currentMessage.media))
+                    return .update(StoreMessage(id: currentMessage.id, customStableId: nil, globallyUniqueId: currentMessage.globallyUniqueId, groupingKey: currentMessage.groupingKey, threadId: currentMessage.threadId, timestamp: currentMessage.timestamp, flags: StoreMessageFlags(currentMessage.flags), tags: currentMessage.tags, globalTags: currentMessage.globalTags, localTags: currentMessage.localTags, forwardInfo: storeForwardInfo, authorId: currentMessage.author?.id, text: currentMessage.text, attributes: attributes, media: currentMessage.media))
+                })
+            }
+            |> ignoreValues
+        }
+
+        public func updateLocallyDerivedData(messageId: MessageId, update: @escaping ([String: CodableEntry]) -> [String: CodableEntry]) -> Signal<Never, NoError> {
+            return self.account.postbox.transaction { transaction -> Void in
+                transaction.updateMessage(messageId, update: { currentMessage in
+                    let storeForwardInfo = currentMessage.forwardInfo.flatMap(StoreMessageForwardInfo.init)
+                    var attributes = currentMessage.attributes
+                    var data: [String: CodableEntry] = [:]
+                    if let index = attributes.firstIndex(where: { $0 is DerivedDataMessageAttribute }) {
+                        data = (attributes[index] as? DerivedDataMessageAttribute)?.data ?? [:]
+                        attributes.remove(at: index)
+                    }
+                    data = update(data)
+
+                    if !data.isEmpty {
+                        attributes.append(DerivedDataMessageAttribute(data: data))
+                    }
+
+                    return .update(StoreMessage(id: currentMessage.id, customStableId: nil, globallyUniqueId: currentMessage.globallyUniqueId, groupingKey: currentMessage.groupingKey, threadId: currentMessage.threadId, timestamp: currentMessage.timestamp, flags: StoreMessageFlags(currentMessage.flags), tags: currentMessage.tags, globalTags: currentMessage.globalTags, localTags: currentMessage.localTags, forwardInfo: storeForwardInfo, authorId: currentMessage.author?.id, text: currentMessage.text, attributes: attributes, media: currentMessage.media))
                 })
             }
             |> ignoreValues
@@ -549,12 +668,16 @@ public extension TelegramEngine {
             return _internal_requestWebView(postbox: self.account.postbox, network: self.account.network, stateManager: self.account.stateManager, peerId: peerId, botId: botId, url: url, payload: payload, themeParams: themeParams, fromMenu: fromMenu, replyToMessageId: replyToMessageId, threadId: threadId)
         }
         
-        public func requestSimpleWebView(botId: PeerId, url: String?, source: RequestSimpleWebViewSource, themeParams: [String: Any]?) -> Signal<String, RequestSimpleWebViewError> {
+        public func requestSimpleWebView(botId: PeerId, url: String?, source: RequestSimpleWebViewSource, themeParams: [String: Any]?) -> Signal<RequestWebViewResult, RequestWebViewError> {
             return _internal_requestSimpleWebView(postbox: self.account.postbox, network: self.account.network, botId: botId, url: url, source: source, themeParams: themeParams)
         }
         
-        public func requestAppWebView(peerId: PeerId, appReference: BotAppReference, payload: String?, themeParams: [String: Any]?, allowWrite: Bool) -> Signal<String, RequestAppWebViewError> {
-            return _internal_requestAppWebView(postbox: self.account.postbox, network: self.account.network, stateManager: self.account.stateManager, peerId: peerId, appReference: appReference, payload: payload, themeParams: themeParams, allowWrite: allowWrite)
+        public func requestMainWebView(peerId: PeerId, botId: PeerId, source: RequestSimpleWebViewSource, themeParams: [String: Any]?) -> Signal<RequestWebViewResult, RequestWebViewError> {
+            return _internal_requestMainWebView(postbox: self.account.postbox, network: self.account.network, peerId: peerId, botId: botId, source: source, themeParams: themeParams)
+        }
+
+        public func requestAppWebView(peerId: PeerId, appReference: BotAppReference, payload: String?, themeParams: [String: Any]?, compact: Bool, fullscreen: Bool, allowWrite: Bool) -> Signal<RequestWebViewResult, RequestWebViewError> {
+            return _internal_requestAppWebView(postbox: self.account.postbox, network: self.account.network, stateManager: self.account.stateManager, peerId: peerId, appReference: appReference, payload: payload, themeParams: themeParams, compact: compact, fullscreen: fullscreen, allowWrite: allowWrite)
         }
                 
         public func sendWebViewData(botId: PeerId, buttonText: String, data: String) -> Signal<Never, SendWebViewDataError> {
@@ -667,6 +790,13 @@ public extension TelegramEngine {
             |> ignoreValues
         }
         
+        public func togglePeerUnreadMarkInteractively(peerId: EnginePeer.Id, threadId: Int64, setToValue: Bool?) -> Signal<Never, NoError> {
+            return self.account.postbox.transaction { transaction -> Void in
+                _internal_toggleForumThreadUnreadMarkInteractively(transaction: transaction, network: self.account.network, viewTracker: self.account.viewTracker, peerId: peerId, threadId: threadId, setToValue: setToValue)
+            }
+            |> ignoreValues
+        }
+
         public func markForumThreadAsRead(peerId: EnginePeer.Id, threadId: Int64) -> Signal<Never, NoError> {
             return self.account.postbox.transaction { transaction -> Void in
                 _internal_markForumThreadAsReadInteractively(transaction: transaction, network: self.account.network, viewTracker: self.account.viewTracker, peerId: peerId, threadId: threadId)
@@ -687,6 +817,18 @@ public extension TelegramEngine {
             return _internal_searchForumTopics(account: self.account, peerId: peerId, query: query)
         }
         
+        public func editMessageFactCheck(messageId: EngineMessage.Id, text: String, entities: [MessageTextEntity]) -> Signal<Never, NoError> {
+            return _internal_editMessageFactCheck(account: self.account, messageId: messageId, text: text, entities: entities)
+        }
+
+        public func deleteMessageFactCheck(messageId: EngineMessage.Id) -> Signal<Never, NoError> {
+            return _internal_deleteMessageFactCheck(account: self.account, messageId: messageId)
+        }
+
+        public func getMessagesFactCheck(messageIds: [EngineMessage.Id]) -> Signal<Never, NoError> {
+            return _internal_getMessagesFactCheck(account: self.account, messageIds: messageIds)
+        }
+
         public func debugAddHoles() -> Signal<Never, NoError> {
             return self.account.postbox.transaction { transaction -> Void in
                 transaction.addHolesEverywhere(peerNamespaces: [Namespaces.Peer.CloudUser, Namespaces.Peer.CloudGroup, Namespaces.Peer.CloudChannel], holeNamespace: Namespaces.Message.Cloud)
@@ -694,6 +836,13 @@ public extension TelegramEngine {
             |> ignoreValues
         }
         
+        public func debugResetTagHoles() -> Signal<Never, NoError> {
+            return self.account.postbox.transaction { transaction -> Void in
+                transaction.resetCustomTagHoles()
+            }
+            |> ignoreValues
+        }
+
         public func debugReindexUnreadCounters() -> Signal<Never, NoError> {
             return self.account.postbox.transaction { transaction -> Void in
                 transaction.reindexUnreadCounters()
@@ -705,7 +854,12 @@ public extension TelegramEngine {
             return managedSynchronizeMessageHistoryTagSummaries(postbox: self.account.postbox, network: self.account.network, stateManager: self.account.stateManager, peerId: peerId, threadId: threadId)
             |> ignoreValues
         }
-        
+
+        public func keepMessageCountersSyncrhonized(peerId: EnginePeer.Id) -> Signal<Never, NoError> {
+            return managedSynchronizeMessageHistoryTagSummaries(postbox: self.account.postbox, network: self.account.network, stateManager: self.account.stateManager, peerId: peerId, threadId: nil)
+            |> ignoreValues
+        }
+
         public func getSynchronizeAutosaveItemOperations() -> Signal<[(index: Int32, message: Message, mediaId: MediaId)], NoError> {
             return self.account.postbox.transaction { transaction -> [(index: Int32, message: Message, mediaId: MediaId)] in
                 return _internal_getSynchronizeAutosaveItemOperations(transaction: transaction)
@@ -1062,16 +1216,19 @@ public extension TelegramEngine {
             }
         }
         
-        public func preloadStorySubscriptions(isHidden: Bool) -> Signal<[EngineMedia.Id: StoryPreloadInfo], NoError> {
+        public func preloadStorySubscriptions(isHidden: Bool, preferHighQuality: Signal<Bool, NoError>) -> Signal<[EngineMedia.Id: StoryPreloadInfo], NoError> {
             let basicPeerKey = PostboxViewKey.basicPeer(self.account.peerId)
             let subscriptionsKey: PostboxStorySubscriptionsKey = isHidden ? .hidden : .filtered
             let storySubscriptionsKey = PostboxViewKey.storySubscriptions(key: subscriptionsKey)
-            return self.account.postbox.combinedView(keys: [
-                basicPeerKey,
-                storySubscriptionsKey,
-                PostboxViewKey.storiesState(key: .subscriptions(subscriptionsKey))
-            ])
-            |> mapToSignal { views -> Signal<[EngineMedia.Id: StoryPreloadInfo], NoError> in
+            return combineLatest(
+                self.account.postbox.combinedView(keys: [
+                    basicPeerKey,
+                    storySubscriptionsKey,
+                    PostboxViewKey.storiesState(key: .subscriptions(subscriptionsKey))
+                ]),
+                preferHighQuality
+            )
+            |> mapToSignal { views, preferHighQuality -> Signal<[EngineMedia.Id: StoryPreloadInfo], NoError> in
                 guard let basicPeerView = views.views[basicPeerKey] as? BasicPeerView, let accountPeer = basicPeerView.peer else {
                     return .single([:])
                 }
@@ -1178,11 +1335,17 @@ public extension TelegramEngine {
                             }
                         }
                         
+                        var selectedMedia: EngineMedia
+                        if let alternativeMediaValue = itemAndPeer.item.alternativeMediaList.first.flatMap(EngineMedia.init), (!preferHighQuality && !itemAndPeer.item.isMy) {
+                            selectedMedia = alternativeMediaValue
+                        } else {
+                            selectedMedia = EngineMedia(media)
+                        }
+
                         resultResources[mediaId] = StoryPreloadInfo(
                             peer: peerReference,
                             storyId: itemAndPeer.item.id,
-                            media: EngineMedia(media),
-                            alternativeMedia: itemAndPeer.item.alternativeMedia.flatMap(EngineMedia.init),
+                            media: selectedMedia,
                             reactions: reactions,
                             priority: .top(position: nextPriority)
                         )
@@ -1215,7 +1378,7 @@ public extension TelegramEngine {
                                     timestamp: item.timestamp,
                                     expirationTimestamp: item.expirationTimestamp,
                                     media: item.media,
-                                    alternativeMedia: item.alternativeMedia,
+                                    alternativeMediaList: item.alternativeMediaList,
                                     mediaAreas: item.mediaAreas,
                                     text: item.text,
                                     entities: item.entities,
@@ -1231,7 +1394,9 @@ public extension TelegramEngine {
                                     isEdited: item.isEdited,
                                     isMy: item.isMy,
                                     myReaction: item.myReaction,
-                                    forwardInfo: item.forwardInfo
+                                    forwardInfo: item.forwardInfo,
+                                    authorId: item.authorId,
+                                    folderIds: item.folderIds
                                 ))
                                 if let entry = CodableEntry(updatedItem) {
                                     currentItems[i] = StoryItemsTableEntry(value: entry, id: updatedItem.id, expirationTimestamp: updatedItem.expirationTimestamp, isCloseFriends: updatedItem.isCloseFriends)
@@ -1245,8 +1410,8 @@ public extension TelegramEngine {
             }
         }
         
-        public func uploadStory(target: Stories.PendingTarget, media: EngineStoryInputMedia, mediaAreas: [MediaArea], text: String, entities: [MessageTextEntity], pin: Bool, privacy: EngineStoryPrivacy, isForwardingDisabled: Bool, period: Int, randomId: Int64, forwardInfo: Stories.PendingForwardInfo?) -> Signal<Int32, NoError> {
-            return _internal_uploadStory(account: self.account, target: target, media: media, mediaAreas: mediaAreas, text: text, entities: entities, pin: pin, privacy: privacy, isForwardingDisabled: isForwardingDisabled, period: period, randomId: randomId, forwardInfo: forwardInfo)
+        public func uploadStory(target: Stories.PendingTarget, media: EngineStoryInputMedia, mediaAreas: [MediaArea], text: String, entities: [MessageTextEntity], pin: Bool, privacy: EngineStoryPrivacy, isForwardingDisabled: Bool, period: Int, randomId: Int64, forwardInfo: Stories.PendingForwardInfo?, folders: [Int64], uploadInfo: StoryUploadInfo? = nil) -> Signal<Int32, NoError> {
+            return _internal_uploadStory(account: self.account, target: target, media: media, mediaAreas: mediaAreas, text: text, entities: entities, pin: pin, privacy: privacy, isForwardingDisabled: isForwardingDisabled, period: period, randomId: randomId, forwardInfo: forwardInfo, folders: folders, uploadInfo: uploadInfo)
         }
         
         public func allStoriesUploadEvents() -> Signal<(Int32, Int32), NoError> {
@@ -1302,6 +1467,10 @@ public extension TelegramEngine {
             return _internal_updateStoriesArePinned(account: self.account, peerId: peerId, ids: ids, isPinned: isPinned)
         }
         
+        public func updatePinnedToTopStories(peerId: EnginePeer.Id, ids: [Int32]) -> Signal<Never, NoError> {
+            return _internal_updatePinnedToTopStories(account: self.account, peerId: peerId, ids: ids)
+        }
+
         public func storyViewList(peerId: EnginePeer.Id, id: Int32, views: EngineStoryItem.Views, listMode: EngineStoryViewListContext.ListMode, sortMode: EngineStoryViewListContext.SortMode, searchQuery: String? = nil, parentSource: EngineStoryViewListContext? = nil) -> EngineStoryViewListContext {
             return EngineStoryViewListContext(account: self.account, peerId: peerId, storyId: id, views: views, listMode: listMode, sortMode: sortMode, searchQuery: searchQuery, parentSource: parentSource)
         }
@@ -1322,10 +1491,26 @@ public extension TelegramEngine {
             return _internal_getStoryById(accountPeerId: self.account.peerId, postbox: self.account.postbox, network: self.account.network, peerId: peerId, id: id)
         }
         
+        public func deleteBotPreviews(peerId: EnginePeer.Id, language: String?, media: [Media]) -> Signal<Never, NoError> {
+            return _internal_deleteBotPreviews(account: self.account, peerId: peerId, language: language, media: media)
+        }
+
+        public func deleteBotPreviewsLanguage(peerId: EnginePeer.Id, language: String, media: [Media]) -> Signal<Never, NoError> {
+            return _internal_deleteBotPreviewsLanguage(account: self.account, peerId: peerId, language: language, media: media)
+        }
+
         public func synchronouslyIsMessageDeletedInteractively(ids: [EngineMessage.Id]) -> [EngineMessage.Id] {
             return self.account.stateManager.synchronouslyIsMessageDeletedInteractively(ids: ids)
         }
         
+        public func synchronouslyIsMessageDeletedRemotely(ids: [EngineMessage.Id]) -> [EngineMessage.Id] {
+            return self.account.stateManager.synchronouslyIsMessageDeletedRemotely(ids: ids)
+        }
+
+        public func synchronouslyLookupCorrelationId(correlationId: Int64) -> EngineMessage.Id? {
+            return self.account.pendingMessageManager.synchronouslyLookupCorrelationId(correlationId: correlationId)
+        }
+
         public func savedMessagesPeerListHead() -> Signal<EnginePeer.Id?, NoError> {
             return self.account.postbox.combinedView(keys: [.savedMessagesIndex(peerId: self.account.peerId)])
             |> map { views -> EnginePeer.Id? in
@@ -1341,6 +1526,21 @@ public extension TelegramEngine {
             }
         }
         
+        public func savedMessagesHasPeersOtherThanSaved() -> Signal<Bool, NoError> {
+            return self.account.postbox.combinedView(keys: [.savedMessagesIndex(peerId: self.account.peerId)])
+            |> map { views -> Bool in
+                //TODO:api optimize
+                guard let view = views.views[.savedMessagesIndex(peerId: self.account.peerId)] as? MessageHistorySavedMessagesIndexView else {
+                    return false
+                }
+                if view.isLoading {
+                    return false
+                } else {
+                    return view.items.contains(where: { $0.peer?.id != self.account.peerId })
+                }
+            }
+        }
+
         public func savedMessagesPeersStats() -> Signal<Int?, NoError> {
             return self.account.postbox.combinedView(keys: [.savedMessagesStats(peerId: self.account.peerId)])
             |> map { views -> Int? in
@@ -1357,6 +1557,134 @@ public extension TelegramEngine {
         
         public func searchLocalSavedMessagesPeers(query: String, indexNameMapping: [EnginePeer.Id: [PeerIndexNameRepresentation]]) -> Signal<[EnginePeer], NoError> {
             return _internal_searchLocalSavedMessagesPeers(account: self.account, query: query, indexNameMapping: indexNameMapping)
+        }
+
+        public func internalReindexSavedMessagesCustomTagsIfNeeded(threadId: Int64?, tag: MemoryBuffer) {
+            let _ = self.account.postbox.transaction({ transaction in
+                transaction.reindexSavedMessagesCustomTagsWithTagsIfNeeded(peerId: self.account.peerId, threadId: threadId, tag: tag)
+            }).startStandalone()
+        }
+
+        public func reportAdMessage(opaqueId: Data, option: Data?) -> Signal<ReportAdMessageResult, ReportAdMessageError> {
+            return _internal_reportAdMessage(account: self.account, opaqueId: opaqueId, option: option)
+        }
+
+        public func reportContent(subject: ReportContentSubject, option: Data?, message: String?) -> Signal<ReportContentResult, ReportContentError> {
+            return _internal_reportContent(account: self.account, subject: subject, option: option, message: message)
+        }
+
+        public func updateExtendedMedia(messageIds: [EngineMessage.Id]) -> Signal<Never, NoError> {
+            return _internal_updateExtendedMedia(account: self.account, messageIds: messageIds)
+        }
+
+        public func markAdAction(opaqueId: Data, media: Bool, fullscreen: Bool) {
+            _internal_markAdAction(account: self.account, opaqueId: opaqueId, media: media, fullscreen: fullscreen)
+        }
+
+        public func markAdAsSeen(opaqueId: Data) {
+            _internal_markAdAsSeen(account: self.account, opaqueId: opaqueId)
+        }
+
+        public func getAllLocalChannels(count: Int) -> Signal<[EnginePeer.Id], NoError> {
+            return self.account.postbox.transaction { transaction -> [EnginePeer.Id] in
+                var result: [EnginePeer.Id] = []
+
+                var peerIds = Set<PeerId>()
+                for id in transaction.chatListGetAllPeerIds(groupId: .root) {
+                    if peerIds.contains(id) {
+                        continue
+                    }
+                    peerIds.insert(id)
+                    result.append(id)
+                }
+                for id in transaction.chatListGetAllPeerIds(groupId: Namespaces.PeerGroup.archive) {
+                    if peerIds.contains(id) {
+                        continue
+                    }
+                    peerIds.insert(id)
+                    result.append(id)
+                }
+
+                var filteredResult: [PeerId] = []
+                for id in result {
+                    if id.namespace != Namespaces.Peer.CloudChannel {
+                        continue
+                    }
+                    guard let peer = transaction.getPeer(id) else {
+                        continue
+                    }
+                    guard let channel = peer as? TelegramChannel, case .broadcast = channel.info else {
+                        continue
+                    }
+                    filteredResult.append(id)
+
+                    if filteredResult.count >= count {
+                        break
+                    }
+                }
+
+                return filteredResult
+            }
+        }
+
+        public func requestMessageAuthor(id: EngineMessage.Id) -> Signal<EnginePeer?, NoError> {
+            return _internal_requestMessageAuthor(account: self.account, id: id)
+        }
+
+        public enum MonoforumSuggestedPostAction {
+            case approve(timestamp: Int32?)
+            case reject(comment: String?)
+        }
+
+        public func monoforumPerformSuggestedPostAction(id: EngineMessage.Id, action: MonoforumSuggestedPostAction) -> Signal<Never, NoError> {
+            return _internal_monoforumPerformSuggestedPostAction(account: self.account, id: id, action: action)
+        }
+
+        public func refreshGlobalPostSearchState() -> Signal<Never, NoError> {
+            return _internal_refreshGlobalPostSearchState(account: self.account)
+        }
+    }
+}
+
+func _internal_monoforumPerformSuggestedPostAction(account: Account, id: EngineMessage.Id, action: TelegramEngine.Messages.MonoforumSuggestedPostAction) -> Signal<Never, NoError> {
+    return account.postbox.transaction { transaction -> Api.InputPeer? in
+        return transaction.getPeer(id.peerId).flatMap(apiInputPeer)
+    }
+    |> mapToSignal { inputPeer -> Signal<Never, NoError> in
+        guard let inputPeer else {
+            return .complete()
+        }
+        if id.namespace != Namespaces.Message.Cloud {
+            return .complete()
+        }
+
+        var flags: Int32 = 0
+        var timestamp: Int32?
+        var rejectComment: String?
+        switch action {
+        case let .approve(timestampValue):
+            timestamp = timestampValue
+            if timestamp != nil {
+                flags |= 1 << 0
+            }
+        case let .reject(commentValue):
+            flags |= 1 << 1
+            rejectComment = commentValue
+            if rejectComment != nil {
+                flags |= 1 << 2
+            }
+        }
+        return account.network.request(Api.functions.messages.toggleSuggestedPostApproval(flags: flags, peer: inputPeer, msgId: id.id, scheduleDate: timestamp, rejectComment: rejectComment))
+        |> map(Optional.init)
+        |> `catch` { _ -> Signal<Api.Updates?, NoError> in
+            return .single(nil)
+        }
+        |> mapToSignal { updates -> Signal<Never, NoError> in
+            if let updates {
+                account.stateManager.addUpdates(updates)
+            }
+
+            return .complete()
         }
     }
 }

@@ -11,8 +11,10 @@ import Speak
 import ComponentFlow
 import ViewControllerComponent
 import MultilineTextComponent
+import MultilineTextWithEntitiesComponent
 import BundleIconComponent
 import UndoUI
+import SwiftUI
 
 private func generateExpandBackground(size: CGSize, color: UIColor) -> UIImage {
     return generateImage(size, rotatedContext: { size, context in
@@ -35,15 +37,17 @@ private final class TranslateScreenComponent: CombinedComponent {
     
     let context: AccountContext
     let text: String
+    let entities: [MessageTextEntity]
     let fromLanguage: String?
     let toLanguage: String
     let copyTranslation: ((String) -> Void)?
     let changeLanguage: (String, String, @escaping (String, String) -> Void) -> Void
     let expand: () -> Void
     
-    init(context: AccountContext, text: String, fromLanguage: String?, toLanguage: String, copyTranslation: ((String) -> Void)?, changeLanguage: @escaping (String, String, @escaping (String, String) -> Void) -> Void, expand: @escaping () -> Void) {
+    init(context: AccountContext, text: String, entities: [MessageTextEntity], fromLanguage: String?, toLanguage: String, copyTranslation: ((String) -> Void)?, changeLanguage: @escaping (String, String, @escaping (String, String) -> Void) -> Void, expand: @escaping () -> Void) {
         self.context = context
         self.text = text
+        self.entities = entities
         self.fromLanguage = fromLanguage
         self.toLanguage = toLanguage
         self.copyTranslation = copyTranslation
@@ -56,6 +60,9 @@ private final class TranslateScreenComponent: CombinedComponent {
             return false
         }
         if lhs.text != rhs.text {
+            return false
+        }
+        if lhs.entities != rhs.entities {
             return false
         }
         if lhs.fromLanguage != rhs.fromLanguage {
@@ -88,6 +95,8 @@ private final class TranslateScreenComponent: CombinedComponent {
         
         fileprivate var moreBackgroundImage: (CGSize, UIImage, UIColor)?
         
+        private let useAlternativeTranslation: Bool
+        
         init(context: AccountContext, fromLanguage: String?, text: String, toLanguage: String, expand: @escaping () -> Void) {
             self.context = context
             self.text = text
@@ -96,13 +105,23 @@ private final class TranslateScreenComponent: CombinedComponent {
             self.expand = expand
             self.availableSpeakLanguages = supportedSpeakLanguages()
             
+            let translationConfiguration = TranslationConfiguration.with(appConfiguration: context.currentAppConfiguration.with { $0 })
+            var useAlternativeTranslation = false
+            switch translationConfiguration.manual {
+            case .alternative:
+                useAlternativeTranslation = true
+            default:
+                break
+            }
+            self.useAlternativeTranslation = useAlternativeTranslation
+            
             super.init()
                         
-            self.translationDisposable.set((context.engine.messages.translate(text: text, toLang: toLanguage) |> deliverOnMainQueue).start(next: { [weak self] text in
+            self.translationDisposable.set((self.translate(text: text, fromLang: fromLanguage, toLang: toLanguage) |> deliverOnMainQueue).start(next: { [weak self] text in
                 guard let strongSelf = self else {
                     return
                 }
-                strongSelf.translatedText = text
+                strongSelf.translatedText = text?.0
                 strongSelf.updated(transition: .immediate)
             }, error: { error in
                 
@@ -114,6 +133,14 @@ private final class TranslateScreenComponent: CombinedComponent {
             self.translationDisposable.dispose()
         }
         
+        func translate(text: String, fromLang: String?, toLang: String) -> Signal<(String, [MessageTextEntity])?, TranslationError> {
+            if self.useAlternativeTranslation {
+                return alternativeTranslateText(text: text, fromLang: fromLang, toLang: toLang)
+            } else {
+                return self.context.engine.messages.translate(text: text, toLang: toLang)
+            }
+        }
+        
         func changeLanguage(fromLanguage: String, toLanguage: String) {
             guard self.fromLanguage != fromLanguage || self.toLanguage != toLanguage else {
                 return
@@ -123,11 +150,11 @@ private final class TranslateScreenComponent: CombinedComponent {
             self.translatedText = nil
             self.updated(transition: .immediate)
             
-            self.translationDisposable.set((self.context.engine.messages.translate(text: text, toLang: toLanguage) |> deliverOnMainQueue).start(next: { [weak self] text in
+            self.translationDisposable.set((self.translate(text: text, fromLang: fromLanguage, toLang: toLanguage) |> deliverOnMainQueue).start(next: { [weak self] text in
                 guard let strongSelf = self else {
                     return
                 }
-                strongSelf.translatedText = text
+                strongSelf.translatedText = text?.0
                 strongSelf.updated(transition: .immediate)
             }, error: { error in
                 
@@ -506,7 +533,7 @@ private final class TranslateScreenComponent: CombinedComponent {
 }
 
 public class TranslateScreen: ViewController {
-    final class Node: ViewControllerTracingNode, UIScrollViewDelegate, UIGestureRecognizerDelegate {
+    final class Node: ViewControllerTracingNode, ASScrollViewDelegate, ASGestureRecognizerDelegate {
         private var presentationData: PresentationData
         private weak var controller: TranslateScreen?
         
@@ -549,7 +576,7 @@ public class TranslateScreen: ViewController {
             
             super.init()
             
-            self.scrollView.delegate = self
+            self.scrollView.delegate = self.wrappedScrollViewDelegate
             self.scrollView.showsVerticalScrollIndicator = false
             
             self.containerView.clipsToBounds = true
@@ -567,7 +594,7 @@ public class TranslateScreen: ViewController {
             super.didLoad()
             
             let panRecognizer = UIPanGestureRecognizer(target: self, action: #selector(self.panGesture(_:)))
-            panRecognizer.delegate = self
+            panRecognizer.delegate = self.wrappedGestureRecognizerDelegate
             panRecognizer.delaysTouchesBegan = false
             panRecognizer.cancelsTouchesInView = true
             self.panGestureRecognizer = panRecognizer
@@ -635,7 +662,7 @@ public class TranslateScreen: ViewController {
             }
         }
                 
-        func containerLayoutUpdated(layout: ContainerViewLayout, navigationHeight: CGFloat, transition: Transition) {
+        func containerLayoutUpdated(layout: ContainerViewLayout, navigationHeight: CGFloat, transition: ComponentTransition) {
             self.currentLayout = (layout, navigationHeight)
             
             if let controller = self.controller, let navigationBar = controller.navigationBar, navigationBar.view.superview !== self.wrappingView {
@@ -720,9 +747,11 @@ public class TranslateScreen: ViewController {
                 statusBarHeight: 0.0,
                 navigationHeight: navigationHeight,
                 safeInsets: UIEdgeInsets(top: layout.intrinsicInsets.top + layout.safeInsets.top, left: layout.safeInsets.left, bottom: layout.intrinsicInsets.bottom + layout.safeInsets.bottom, right: layout.safeInsets.right),
+                additionalInsets: layout.additionalInsets,
                 inputHeight: layout.inputHeight ?? 0.0,
                 metrics: layout.metrics,
                 deviceMetrics: layout.deviceMetrics,
+                orientation: layout.metrics.orientation,
                 isVisible: self.currentIsVisible,
                 theme: self.theme ?? self.presentationData.theme,
                 strings: self.presentationData.strings,
@@ -921,11 +950,11 @@ public class TranslateScreen: ViewController {
                             let initialVelocity: CGFloat = distance.isZero ? 0.0 : abs(velocity.y / distance)
                             let transition = ContainedViewLayoutTransition.animated(duration: 0.45, curve: .customSpring(damping: 124.0, initialVelocity: initialVelocity))
 
-                            self.containerLayoutUpdated(layout: layout, navigationHeight: navigationHeight, transition: Transition(transition))
+                            self.containerLayoutUpdated(layout: layout, navigationHeight: navigationHeight, transition: ComponentTransition(transition))
                         } else {
                             self.isExpanded = true
                             
-                            self.containerLayoutUpdated(layout: layout, navigationHeight: navigationHeight, transition: Transition(.animated(duration: 0.3, curve: .easeInOut)))
+                            self.containerLayoutUpdated(layout: layout, navigationHeight: navigationHeight, transition: ComponentTransition(.animated(duration: 0.3, curve: .easeInOut)))
                         }
                     } else if (velocity.y < -300.0 || offset < topInset / 2.0) {
                         if velocity.y > -2200.0 && velocity.y < -300.0, let listNode = listNode {
@@ -938,7 +967,7 @@ public class TranslateScreen: ViewController {
                         let transition = ContainedViewLayoutTransition.animated(duration: 0.45, curve: .customSpring(damping: 124.0, initialVelocity: initialVelocity))
                         self.isExpanded = true
                        
-                        self.containerLayoutUpdated(layout: layout, navigationHeight: navigationHeight, transition: Transition(transition))
+                        self.containerLayoutUpdated(layout: layout, navigationHeight: navigationHeight, transition: ComponentTransition(transition))
                     } else {
                         if let listNode = listNode {
                             listNode.scroller.setContentOffset(CGPoint(), animated: false)
@@ -946,7 +975,7 @@ public class TranslateScreen: ViewController {
                             scrollView.setContentOffset(CGPoint(x: 0.0, y: -scrollView.contentInset.top), animated: false)
                         }
                         
-                        self.containerLayoutUpdated(layout: layout, navigationHeight: navigationHeight, transition: Transition(.animated(duration: 0.3, curve: .easeInOut)))
+                        self.containerLayoutUpdated(layout: layout, navigationHeight: navigationHeight, transition: ComponentTransition(.animated(duration: 0.3, curve: .easeInOut)))
                     }
                     
                     if !dismissing {
@@ -959,7 +988,7 @@ public class TranslateScreen: ViewController {
                 case .cancelled:
                     self.panGestureArguments = nil
                     
-                    self.containerLayoutUpdated(layout: layout, navigationHeight: navigationHeight, transition: Transition(.animated(duration: 0.3, curve: .easeInOut)))
+                    self.containerLayoutUpdated(layout: layout, navigationHeight: navigationHeight, transition: ComponentTransition(.animated(duration: 0.3, curve: .easeInOut)))
                 default:
                     break
             }
@@ -974,7 +1003,7 @@ public class TranslateScreen: ViewController {
             guard let (layout, navigationHeight) = self.currentLayout else {
                 return
             }
-            self.containerLayoutUpdated(layout: layout, navigationHeight: navigationHeight, transition: Transition(transition))
+            self.containerLayoutUpdated(layout: layout, navigationHeight: navigationHeight, transition: ComponentTransition(transition))
         }
     }
     
@@ -994,7 +1023,7 @@ public class TranslateScreen: ViewController {
     
     public var wasDismissed: (() -> Void)?
     
-    public convenience init(context: AccountContext, forceTheme: PresentationTheme? = nil, text: String, canCopy: Bool, fromLanguage: String?, toLanguage: String? = nil, isExpanded: Bool = false, ignoredLanguages: [String]? = nil) {
+    public convenience init(context: AccountContext, forceTheme: PresentationTheme? = nil, text: String, entities: [MessageTextEntity] = [], canCopy: Bool, fromLanguage: String?, toLanguage: String? = nil, isExpanded: Bool = false, ignoredLanguages: [String]? = nil) {
         let presentationData = context.sharedContext.currentPresentationData.with { $0 }
         
         var baseLanguageCode = presentationData.strings.baseLanguageCode
@@ -1014,16 +1043,12 @@ public class TranslateScreen: ViewController {
             }
         }
         
-        if toLanguage == "nb" {
-            toLanguage = "no"
-        } else if toLanguage == "pt-br" {
-            toLanguage = "pt"
-        }
+        toLanguage = normalizeTranslationLanguage(toLanguage)
         
         var copyTranslationImpl: ((String) -> Void)?
         var changeLanguageImpl: ((String, String, @escaping (String, String) -> Void) -> Void)?
         var expandImpl: (() -> Void)?
-        self.init(context: context, component: TranslateScreenComponent(context: context, text: text, fromLanguage: fromLanguage, toLanguage: toLanguage, copyTranslation: !canCopy ? nil : { text in
+        self.init(context: context, component: TranslateScreenComponent(context: context, text: text, entities: entities, fromLanguage: fromLanguage, toLanguage: toLanguage, copyTranslation: !canCopy ? nil : { text in
             copyTranslationImpl?(text)
         }, changeLanguage: { fromLang, toLang, completion in
             changeLanguageImpl?(fromLang, toLang, completion)
@@ -1147,7 +1172,7 @@ public class TranslateScreen: ViewController {
         
         layout.statusBarHeight = nil
         
-        self.applyNavigationBarLayout(layout, navigationLayout: navigationLayout, additionalBackgroundHeight: 0.0, transition: transition)
+        self.applyNavigationBarLayout(layout, navigationLayout: navigationLayout, additionalBackgroundHeight: 0.0, additionalCutout: nil, transition: transition)
     }
     
     override open func containerLayoutUpdated(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
@@ -1156,6 +1181,88 @@ public class TranslateScreen: ViewController {
         
         let navigationHeight: CGFloat = 56.0
         
-        self.node.containerLayoutUpdated(layout: layout, navigationHeight: navigationHeight, transition: Transition(transition))
+        self.node.containerLayoutUpdated(layout: layout, navigationHeight: navigationHeight, transition: ComponentTransition(transition))
+    }
+}
+
+public func presentTranslateScreen(
+    context: AccountContext,
+    text: String,
+    entities: [MessageTextEntity] = [],
+    canCopy: Bool,
+    fromLanguage: String?,
+    toLanguage: String? = nil,
+    isExpanded: Bool = false,
+    ignoredLanguages: [String]? = nil,
+    pushController: @escaping (ViewController) -> Void = { _ in },
+    presentController: @escaping (ViewController) -> Void = { _ in },
+    wasDismissed: (() -> Void)? = nil,
+    display: (ViewController) -> Void
+) {
+    let translationConfiguration = TranslationConfiguration.with(appConfiguration: context.currentAppConfiguration.with { $0 })
+    var useSystemTranslation = false
+    switch translationConfiguration.manual {
+    case .system:
+        if #available(iOS 18.0, *) {
+            useSystemTranslation = true
+        }
+    default:
+        break
+    }
+    
+    if useSystemTranslation {
+        presentSystemTranslateScreen(context: context, text: text)
+    } else {
+        let controller = TranslateScreen(context: context, text: text, canCopy: canCopy, fromLanguage: fromLanguage, toLanguage: toLanguage, isExpanded: isExpanded, ignoredLanguages: ignoredLanguages)
+        controller.pushController = pushController
+        controller.presentController = presentController
+        controller.wasDismissed = wasDismissed
+        display(controller)
+    }
+}
+
+private func presentSystemTranslateScreen(context: AccountContext, text: String) {
+    if #available(iOS 18.0, *), let rootViewController = context.sharedContext.mainWindow?.viewController?.view.window?.rootViewController {
+        var dismissImpl: (() -> Void)?
+        let pickerView = TranslateScreenHostingView(text: text, completionHandler: { [weak rootViewController] in
+            DispatchQueue.main.async(execute: {
+                guard let presentedController = rootViewController?.presentedViewController, presentedController.isBeingDismissed == false else { return }
+                dismissImpl?()
+            })
+        })
+        let hostingController = UIHostingController(rootView: pickerView)
+        hostingController.view.isHidden = true
+        hostingController.modalPresentationStyle = .overCurrentContext
+        rootViewController.present(hostingController, animated: true)
+        dismissImpl = { [weak hostingController] in
+            Queue.mainQueue().after(0.4, {
+                hostingController?.dismiss(animated: false)
+            })
+        }
+    }
+}
+
+@available(iOS 18.0, *)
+struct TranslateScreenHostingView: View {
+    @State var presented = true
+    var text: String
+    var handler: () -> Void
+    
+    init(text: String, completionHandler: @escaping () -> Void) {
+        self.text = text
+        self.handler = completionHandler
+    }
+    
+    var body: some View {
+        Spacer()
+            .translationPresentation(
+                isPresented: $presented,
+                text: text
+            )
+            .onChange(of: presented) { newValue in
+                if newValue == false {
+                    handler()
+                }
+            }
     }
 }

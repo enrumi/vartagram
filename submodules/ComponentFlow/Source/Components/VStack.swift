@@ -1,22 +1,38 @@
 import Foundation
 import UIKit
 
+public enum VStackAlignment {
+    case left
+    case center
+    case right
+}
+
 public final class VStack<ChildEnvironment: Equatable>: CombinedComponent {
     public typealias EnvironmentType = ChildEnvironment
 
     private let items: [AnyComponentWithIdentity<ChildEnvironment>]
+    private let alignment: VStackAlignment
     private let spacing: CGFloat
+    private let fillWidth: Bool
 
-    public init(_ items: [AnyComponentWithIdentity<ChildEnvironment>], spacing: CGFloat) {
+    public init(_ items: [AnyComponentWithIdentity<ChildEnvironment>], alignment: VStackAlignment = .center, spacing: CGFloat, fillWidth: Bool = false) {
         self.items = items
+        self.alignment = alignment
         self.spacing = spacing
+        self.fillWidth = fillWidth
     }
 
     public static func ==(lhs: VStack<ChildEnvironment>, rhs: VStack<ChildEnvironment>) -> Bool {
         if lhs.items != rhs.items {
             return false
         }
+        if lhs.alignment != rhs.alignment {
+            return false
+        }
         if lhs.spacing != rhs.spacing {
+            return false
+        }
+        if lhs.fillWidth != rhs.fillWidth {
             return false
         }
         return true
@@ -37,6 +53,9 @@ public final class VStack<ChildEnvironment: Equatable>: CombinedComponent {
             }
 
             var size = CGSize(width: 0.0, height: 0.0)
+            if context.component.fillWidth {
+                size.width = context.availableSize.width
+            }
             for child in updatedChildren {
                 size.height += child.size.height
                 size.width = max(size.width, child.size.width)
@@ -45,8 +64,17 @@ public final class VStack<ChildEnvironment: Equatable>: CombinedComponent {
             
             var nextY = 0.0
             for child in updatedChildren {
+                let childFrame: CGRect
+                switch context.component.alignment {
+                case .left:
+                    childFrame = CGRect(origin: CGPoint(x: 0.0, y: nextY), size: child.size)
+                case .center:
+                    childFrame = CGRect(origin: CGPoint(x: floor((size.width - child.size.width) * 0.5), y: nextY), size: child.size)
+                case .right:
+                    childFrame = CGRect(origin: CGPoint(x: size.width - child.size.width, y: nextY), size: child.size)
+                }
                 context.add(child
-                    .position(child.size.centered(in: CGRect(origin: CGPoint(x: floor((size.width - child.size.width) * 0.5), y: nextY), size: child.size)).center)
+                    .position(childFrame.center)
                     .appear(.default(scale: true, alpha: true))
                     .disappear(.default(scale: true, alpha: true))
                 )

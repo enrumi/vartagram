@@ -151,7 +151,7 @@ public final class ChatBotInfoItemNode: ListViewItemNode {
             continuePlayingWithoutSoundOnLostAudioSession: false,
             storeAfterDownload: nil
         )
-        let videoNode = UniversalVideoNode(postbox: context.account.postbox, audioSession: context.sharedContext.mediaManager.audioSession, manager: context.sharedContext.mediaManager.universalVideoManager, decoration: VideoDecoration(), content: videoContent, priority: .embedded, sourceAccountId: context.account.id)
+        let videoNode = UniversalVideoNode(context: context, postbox: context.account.postbox, audioSession: context.sharedContext.mediaManager.audioSession, manager: context.sharedContext.mediaManager.universalVideoManager, decoration: VideoDecoration(), content: videoContent, priority: .embedded, sourceAccountId: context.account.id)
         videoNode.canAttachContent = true
         self.videoNode = videoNode
         
@@ -175,7 +175,7 @@ public final class ChatBotInfoItemNode: ListViewItemNode {
                     break
                 case .ignore:
                     return .fail
-                case .url, .peerMention, .textMention, .botCommand, .hashtag, .instantPage, .wallpaper, .theme, .call, .openMessage, .timecode, .bankCard, .tooltip, .openPollResults, .copy, .largeEmoji, .customEmoji:
+                case .url, .phone, .peerMention, .textMention, .botCommand, .hashtag, .instantPage, .wallpaper, .theme, .call, .conferenceCall, .openMessage, .timecode, .bankCard, .tooltip, .openPollResults, .copy, .largeEmoji, .customEmoji, .custom:
                     return .waitForSingleTap
                 }
             }
@@ -363,7 +363,7 @@ public final class ChatBotInfoItemNode: ListViewItemNode {
         self.layer.animateAlpha(from: 0.0, to: 1.0, duration: duration * 0.5)
     }
     
-    override public func animateInsertion(_ currentTimestamp: Double, duration: Double, short: Bool) {
+    override public func animateInsertion(_ currentTimestamp: Double, duration: Double, options: ListViewItemAnimationOptions) {
         self.layer.animateAlpha(from: 0.0, to: 1.0, duration: duration * 0.5)
     }
     
@@ -481,15 +481,15 @@ public final class ChatBotInfoItemNode: ListViewItemNode {
                                 case .none, .ignore:
                                     break
                                 case let .url(url):
-                                    item.controllerInteraction.longTap(.url(url.url), nil)
+                                    item.controllerInteraction.longTap(.url(url.url), ChatControllerInteraction.LongTapParams())
                                 case let .peerMention(peerId, mention, _):
-                                    item.controllerInteraction.longTap(.peerMention(peerId, mention), nil)
+                                    item.controllerInteraction.longTap(.peerMention(peerId, mention), ChatControllerInteraction.LongTapParams())
                                 case let .textMention(name):
-                                    item.controllerInteraction.longTap(.mention(name), nil)
+                                    item.controllerInteraction.longTap(.mention(name), ChatControllerInteraction.LongTapParams())
                                 case let .botCommand(command):
-                                    item.controllerInteraction.longTap(.command(command), nil)
+                                    item.controllerInteraction.longTap(.command(command), ChatControllerInteraction.LongTapParams())
                                 case let .hashtag(_, hashtag):
-                                    item.controllerInteraction.longTap(.hashtag(hashtag), nil)
+                                    item.controllerInteraction.longTap(.hashtag(hashtag), ChatControllerInteraction.LongTapParams())
                                 default:
                                     break
                                 }
@@ -511,7 +511,7 @@ private final class VideoDecoration: UniversalVideoDecoration {
     
     private var contentNode: (ASDisplayNode & UniversalVideoContentNode)?
     
-    private var validLayoutSize: CGSize?
+    private var validLayout: (size: CGSize, actualSize: CGSize)?
     
     public init() {
         self.contentContainerNode = ASDisplayNode()
@@ -531,9 +531,9 @@ private final class VideoDecoration: UniversalVideoDecoration {
             if let contentNode = contentNode {
                 if contentNode.supernode !== self.contentContainerNode {
                     self.contentContainerNode.addSubnode(contentNode)
-                    if let validLayoutSize = self.validLayoutSize {
-                        contentNode.frame = CGRect(origin: CGPoint(), size: validLayoutSize)
-                        contentNode.updateLayout(size: validLayoutSize, transition: .immediate)
+                    if let validLayout = self.validLayout {
+                        contentNode.frame = CGRect(origin: CGPoint(), size: validLayout.size)
+                        contentNode.updateLayout(size: validLayout.size, actualSize: validLayout.actualSize, transition: .immediate)
                     }
                 }
             }
@@ -591,8 +591,8 @@ private final class VideoDecoration: UniversalVideoDecoration {
     public func updateContentNodeSnapshot(_ snapshot: UIView?) {
     }
     
-    public func updateLayout(size: CGSize, transition: ContainedViewLayoutTransition) {
-        self.validLayoutSize = size
+    public func updateLayout(size: CGSize, actualSize: CGSize, transition: ContainedViewLayoutTransition) {
+        self.validLayout = (size, actualSize)
         
         let bounds = CGRect(origin: CGPoint(), size: size)
         if let backgroundNode = self.backgroundNode {
@@ -607,7 +607,7 @@ private final class VideoDecoration: UniversalVideoDecoration {
         }
         if let contentNode = self.contentNode {
             transition.updateFrame(node: contentNode, frame: CGRect(origin: CGPoint(), size: size))
-            contentNode.updateLayout(size: size, transition: transition)
+            contentNode.updateLayout(size: size, actualSize: actualSize, transition: transition)
         }
     }
     

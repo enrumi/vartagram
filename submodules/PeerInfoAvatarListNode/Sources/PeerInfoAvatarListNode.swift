@@ -19,6 +19,7 @@ import AvatarVideoNode
 import ComponentFlow
 import ComponentDisplayAdapters
 import StorySetIndicatorComponent
+import HierarchyTrackingLayer
 
 private class PeerInfoAvatarListLoadingStripNode: ASImageNode {
     private var currentInHierarchy = false
@@ -224,7 +225,9 @@ public final class PeerInfoAvatarListItemNode: ASDisplayNode {
     private var progress: Signal<Float?, NoError>?
     private var loadingProgressDisposable = MetaDisposable()
     private var hasProgress = false
-    
+
+    private let hierarchyTrackingLayer = HierarchyTrackingLayer()
+
     public let isReady = Promise<Bool>()
     private var didSetReady: Bool = false
     
@@ -312,6 +315,20 @@ public final class PeerInfoAvatarListItemNode: ASDisplayNode {
                 })
             }
         }))
+
+        self.hierarchyTrackingLayer.isInHierarchyUpdated = { [weak self] value in
+            guard let self else {
+                return
+            }
+            if value {
+                self.setupVideoPlayback()
+            } else {
+                self.videoNode?.removeFromSupernode()
+                self.videoNode = nil
+                self.videoContent = nil
+            }
+        }
+        self.layer.addSublayer(self.hierarchyTrackingLayer)
     }
     
     deinit {
@@ -364,9 +381,12 @@ public final class PeerInfoAvatarListItemNode: ASDisplayNode {
         guard let videoContent = self.videoContent, let isCentral = self.isCentral, isCentral, self.videoNode == nil else {
             return
         }
-        
+        if !self.hierarchyTrackingLayer.isInHierarchy {
+            return
+        }
+
         let mediaManager = self.context.sharedContext.mediaManager
-        let videoNode = UniversalVideoNode(postbox: self.context.account.postbox, audioSession: mediaManager.audioSession, manager: mediaManager.universalVideoManager, decoration: GalleryVideoDecoration(), content: videoContent, priority: .secondaryOverlay, sourceAccountId: self.context.account.id)
+        let videoNode = UniversalVideoNode(context: self.context, postbox: self.context.account.postbox, audioSession: mediaManager.audioSession, manager: mediaManager.universalVideoManager, decoration: GalleryVideoDecoration(), content: videoContent, priority: .secondaryOverlay, sourceAccountId: self.context.account.id)
         videoNode.isUserInteractionEnabled = false
         videoNode.canAttachContent = true
         videoNode.isHidden = true
@@ -515,7 +535,7 @@ public final class PeerInfoAvatarListItemNode: ASDisplayNode {
                 self.isReady.set(.single(true))
             }
         } else if let video = videoRepresentations.last, let peerReference = PeerReference(self.peer._asPeer()) {
-            let videoFileReference = FileMediaReference.avatarList(peer: peerReference, media: TelegramMediaFile(fileId: EngineMedia.Id(namespace: Namespaces.Media.LocalFile, id: 0), partialReference: nil, resource: video.representation.resource, previewRepresentations: representations.map { $0.representation }, videoThumbnails: [], immediateThumbnailData: immediateThumbnailData, mimeType: "video/mp4", size: nil, attributes: [.Animated, .Video(duration: 0, size: video.representation.dimensions, flags: [], preloadSize: nil)]))
+            let videoFileReference = FileMediaReference.avatarList(peer: peerReference, media: TelegramMediaFile(fileId: EngineMedia.Id(namespace: Namespaces.Media.LocalFile, id: 0), partialReference: nil, resource: video.representation.resource, previewRepresentations: representations.map { $0.representation }, videoThumbnails: [], immediateThumbnailData: immediateThumbnailData, mimeType: "video/mp4", size: nil, attributes: [.Animated, .Video(duration: 0, size: video.representation.dimensions, flags: [], preloadSize: nil, coverTime: nil, videoCodec: nil)], alternativeRepresentations: []))
             let videoContent = NativeVideoContent(id: .profileVideo(id, nil), userLocation: .other, fileReference: videoFileReference, streamVideo: isMediaStreamable(resource: video.representation.resource) ? .conservative : .none, loopVideo: true, enableSound: false, fetchAutomatically: true, onlyFullSizeThumbnail: fullSizeOnly, useLargeThumbnail: true, autoFetchFullSizeThumbnail: true, startTimestamp: video.representation.startTimestamp, continuePlayingWithoutSoundOnLostAudioSession: false, placeholderColor: .clear, storeAfterDownload: nil)
             
             if videoContent.id != self.videoContent?.id {
@@ -1504,7 +1524,7 @@ public final class PeerInfoAvatarListContainerNode: ASDisplayNode {
         self.updateItems(size: size, transition: transition, stripTransition: transition)
         
         if let storyParams = self.storyParams {
-            var indicatorTransition = Transition(transition)
+            var indicatorTransition = ComponentTransition(transition)
             let expandedStorySetIndicator: ComponentView<Empty>
             if let current = self.expandedStorySetIndicator {
                 expandedStorySetIndicator = current
@@ -1519,8 +1539,8 @@ public final class PeerInfoAvatarListContainerNode: ASDisplayNode {
                 component: AnyComponent(StorySetIndicatorComponent(
                     context: self.context,
                     strings: self.context.sharedContext.currentPresentationData.with({ $0 }).strings,
-                    peer: storyParams.peer,
-                    items: storyParams.items,
+                    items: storyParams.items.map { StorySetIndicatorComponent.Item(storyItem: $0, peer: storyParams.peer) },
+                    displayAvatars: false,
                     hasUnseen: storyParams.hasUnseen,
                     hasUnseenPrivate: storyParams.hasUnseenPrivate,
                     totalCount: storyParams.count,

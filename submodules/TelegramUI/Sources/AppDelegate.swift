@@ -24,7 +24,6 @@ import OverlayStatusController
 import UndoUI
 import LegacyUI
 import PassportUI
-import WatchBridge
 import SettingsUI
 import AppBundle
 import UrlHandling
@@ -47,6 +46,7 @@ import MediaEditor
 import TelegramUIDeclareEncodables
 import ContextMenuScreen
 import MetalEngine
+import RecaptchaEnterprise
 
 #if canImport(AppCenter)
 import AppCenter
@@ -88,38 +88,35 @@ private func isKeyboardViewContainer(view: NSObject) -> Bool {
 }
 
 private class ApplicationStatusBarHost: StatusBarHost {
-    private let application = UIApplication.shared
+    private weak var scene: UIWindowScene?
+
+    init(scene: UIWindowScene?) {
+        self.scene = scene
+    }
     
     var isApplicationInForeground: Bool {
-        switch self.application.applicationState {
+        guard let scene = self.scene else {
+            return false
+        }
+        switch scene.activationState {
+        case .unattached:
+            return false
+        case .foregroundActive:
+            return true
+        case .foregroundInactive:
+            return true
         case .background:
             return false
-        default:
-            return true
+        @unknown default:
+            return false
         }
     }
     
     var statusBarFrame: CGRect {
-        return self.application.statusBarFrame
-    }
-    var statusBarStyle: UIStatusBarStyle {
-        get {
-            return self.application.statusBarStyle
-        } set(value) {
-            self.setStatusBarStyle(value, animated: false)
+        guard let scene = self.scene else {
+            return CGRect()
         }
-    }
-    
-    func setStatusBarStyle(_ style: UIStatusBarStyle, animated: Bool) {
-        if self.shouldChangeStatusBarStyle?(style) ?? true {
-            self.application.internalSetStatusBarStyle(style, animated: animated)
-        }
-    }
-    
-    var shouldChangeStatusBarStyle: ((UIStatusBarStyle) -> Bool)?
-    
-    func setStatusBarHidden(_ value: Bool, animated: Bool) {
-        self.application.internalSetStatusBarHidden(value, animation: animated ? .fade : .none)
+        return scene.statusBarManager?.statusBarFrame ?? CGRect()
     }
     
     var keyboardWindow: UIWindow? {
@@ -162,16 +159,12 @@ protocol SupportedStartCallIntent {
     var contacts: [INPerson]? { get }
 }
 
-@available(iOS 10.0, *)
-extension INStartAudioCallIntent: SupportedStartCallIntent {}
+extension INStartCallIntent: SupportedStartCallIntent {}
 
 protocol SupportedStartVideoCallIntent {
     @available(iOS 10.0, *)
     var contacts: [INPerson]? { get }
 }
-
-@available(iOS 10.0, *)
-extension INStartVideoCallIntent: SupportedStartVideoCallIntent {}
 
 private enum QueuedWakeup: Int32 {
     case call
@@ -183,7 +176,8 @@ final class SharedApplicationContext {
     let notificationManager: SharedNotificationManager
     let wakeupManager: SharedWakeupManager
     let overlayMediaController: ViewController & OverlayMediaController
-    
+    var minimizedContainer: [AccountRecordId: MinimizedContainer] = [:]
+
     init(sharedContext: SharedAccountContextImpl, notificationManager: SharedNotificationManager, wakeupManager: SharedWakeupManager) {
         self.sharedContext = sharedContext
         self.notificationManager = notificationManager
@@ -244,7 +238,6 @@ extension UserDefaults {
     let hasActiveAudioSession = Promise<Bool>(false)
     
     private let sharedContextPromise = Promise<SharedApplicationContext>()
-    //private let watchCommunicationManagerPromise = Promise<WatchCommunicationManager?>()
 
     private var accountManager: AccountManager<TelegramAccountManagerTypes>?
     private var accountManagerState: AccountManagerState?
@@ -277,7 +270,7 @@ extension UserDefaults {
     private let voipTokenPromise = Promise<Data>()
     
     private var reindexCacheDisposable: Disposable?
-    
+
     private var firebaseSecrets: [String: String] = [:] {
         didSet {
             if self.firebaseSecrets != oldValue {
@@ -287,6 +280,15 @@ extension UserDefaults {
     }
     private let firebaseSecretStream = Promise<[String: String]>([:])
     
+    private var firebaseRequestVerificationSecrets: [String: String] = [:] {
+        didSet {
+            if self.firebaseRequestVerificationSecrets != oldValue {
+                self.firebaseRequestVerificationSecretStream.set(.single(self.firebaseRequestVerificationSecrets))
+            }
+        }
+    }
+    private let firebaseRequestVerificationSecretStream = Promise<[String: String]>([:])
+
     private var urlSessions: [URLSession] = []
     private func urlSession(identifier: String) -> URLSession {
         if let existingSession = self.urlSessions.first(where: { $0.configuration.identifier == identifier }) {
@@ -323,20 +325,26 @@ extension UserDefaults {
     
     private var alertActions: (primary: (() -> Void)?, other: (() -> Void)?)?
     
-    private let deviceToken = Promise<Data?>(nil)
+    private let voipDeviceToken = Promise<Data?>(nil)
+    private let regularDeviceToken = Promise<Data?>(nil)
+
+    private var recaptchaClientsBySiteKey: [String: Promise<RecaptchaClient>] = [:]
         
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         precondition(!testIsLaunched)
         testIsLaunched = true
         
         let _ = voipTokenPromise.get().start(next: { token in
-            self.deviceToken.set(.single(token))
+            self.voipDeviceToken.set(.single(token))
+        })
+        let _ = notificationTokenPromise.get().start(next: { token in
+            self.regularDeviceToken.set(.single(token))
         })
         
         let launchStartTime = CFAbsoluteTimeGetCurrent()
-        
-        let statusBarHost = ApplicationStatusBarHost()
+
         let (window, hostView) = nativeWindowHostView()
+        let statusBarHost = ApplicationStatusBarHost(scene: window.windowScene)
         self.mainWindow = Window1(hostView: hostView, statusBarHost: statusBarHost)
         if let traitCollection = window.rootViewController?.traitCollection {
             if #available(iOS 13.0, *) {
@@ -360,8 +368,7 @@ extension UserDefaults {
         if !UIDevice.current.isBatteryMonitoringEnabled {
             UIDevice.current.isBatteryMonitoringEnabled = true
         }
-        
-        
+
         let clearNotificationsManager = ClearNotificationsManager(getNotificationIds: { completion in
             if #available(iOS 10.0, *) {
                 UNUserNotificationCenter.current().getDeliveredNotifications(completionHandler: { notifications in
@@ -496,21 +503,84 @@ extension UserDefaults {
         
         let networkArguments = NetworkInitializationArguments(apiId: apiId, apiHash: apiHash, languagesCategory: languagesCategory, appVersion: appVersion, voipMaxLayer: PresentationCallManagerImpl.voipMaxLayer, voipVersions: PresentationCallManagerImpl.voipVersions(includeExperimental: true, includeReference: false).map { version, supportsVideo -> CallSessionManagerImplementationVersion in
             CallSessionManagerImplementationVersion(version: version, supportsVideo: supportsVideo)
-        }, appData: self.deviceToken.get()
+        }, appData: self.regularDeviceToken.get()
         |> map { token in
-            let data = buildConfig.bundleData(withAppToken: token, signatureDict: signatureDict)
+            let tokenEnvironment: String
+            #if DEBUG
+            tokenEnvironment = "sandbox"
+            #else
+            tokenEnvironment = "production"
+            #endif
+
+            let data = buildConfig.bundleData(withAppToken: token, tokenType: "apns", tokenEnvironment: tokenEnvironment, signatureDict: signatureDict)
             if let data = data, let _ = String(data: data, encoding: .utf8) {
             } else {
                 Logger.shared.log("data", "can't deserialize")
             }
             return data
+        }, externalRequestVerificationStream: self.firebaseRequestVerificationSecretStream.get(), externalRecaptchaRequestVerification: { method, siteKey in
+            return Signal { subscriber in
+                let recaptchaClient: Promise<RecaptchaClient>
+                if let current = self.recaptchaClientsBySiteKey[siteKey] {
+                    recaptchaClient = current
+                } else {
+                    recaptchaClient = Promise<RecaptchaClient>()
+                    self.recaptchaClientsBySiteKey[siteKey] = recaptchaClient
+
+                    Recaptcha.fetchClient(withSiteKey: siteKey) { client, error in
+                        Queue.mainQueue().async {
+                            guard let client else {
+                                Logger.shared.log("App \(self.episodeId)", "RecaptchaClient creation error: \(String(describing: error)).")
+                                return
+                            }
+                            recaptchaClient.set(.single(client))
+                        }
+                    }
+                }
+
+                return (recaptchaClient.get()
+                |> take(1)
+                |> mapToSignal { recaptchaClient -> Signal<String?, NoError> in
+                    return Signal { subscriber in
+                        var recaptchaAction: RecaptchaAction?
+                        switch method {
+                        case "signup":
+                            recaptchaAction = RecaptchaAction.signup
+                        default:
+                            break
+                        }
+
+                        guard let recaptchaAction else {
+                            subscriber.putNext(nil)
+                            subscriber.putCompletion()
+
+                            return EmptyDisposable
+                        }
+                        recaptchaClient.execute(withAction: recaptchaAction) { token, error in
+                            if let token {
+                                subscriber.putNext(token)
+                                Logger.shared.log("App \(self.episodeId)", "RecaptchaClient executed successfully")
+                            } else {
+                                subscriber.putNext(nil)
+                                Logger.shared.log("App \(self.episodeId)", "RecaptchaClient execute error: \(String(describing: error))")
+                            }
+                            subscriber.putCompletion()
+                        }
+
+                        return ActionDisposable {
+                        }
+                    }
+                    |> runOn(Queue.mainQueue())
+                }).startStandalone(next: subscriber.putNext, error: subscriber.putError, completed: subscriber.putCompletion)
+            }
+            |> runOn(Queue.mainQueue())
         }, autolockDeadine: autolockDeadine, encryptionProvider: OpenSSLEncryptionProvider(), deviceModelName: nil, useBetaFeatures: !buildConfig.isAppStoreBuild, isICloudEnabled: buildConfig.isICloudEnabled)
         
         guard let appGroupUrl = maybeAppGroupUrl else {
             self.mainWindow?.presentNative(UIAlertController(title: nil, message: "Error 2", preferredStyle: .alert))
             return true
         }
-        
+
         let rootPath = rootPathForBasePath(appGroupUrl.path)
         performAppGroupUpgrades(appGroupPath: appGroupUrl.path, rootPath: rootPath)
         
@@ -574,7 +644,7 @@ extension UserDefaults {
             Logger.shared.shortLog("ManagedAudioSession", s)
         })
         #endif
-        
+
         if let contents = try? FileManager.default.contentsOfDirectory(at: URL(fileURLWithPath: rootPath + "/accounts-metadata"), includingPropertiesForKeys: nil, options: [.skipsSubdirectoryDescendants]) {
             for url in contents {
                 Logger.shared.log("App \(self.episodeId)", "metadata: \(url.path)")
@@ -897,7 +967,7 @@ extension UserDefaults {
             |> filter { $0 }
             |> take(1)
         }
-        
+
         let checkTimeoutInPtgSecretPasscodes: Signal<Void, NoError>
         if let data = try? Data(contentsOf: URL(fileURLWithPath: appLockStatePath(rootPath: rootPath))), let state = try? JSONDecoder().decode(LockState.self, from: data) {
             checkTimeoutInPtgSecretPasscodes = updatePtgSecretPasscodes(accountManager, { current in
@@ -908,12 +978,12 @@ extension UserDefaults {
         } else {
             checkTimeoutInPtgSecretPasscodes = .complete()
         }
-        
+
         let initialPresentationDataAndSettingsPromise = Promise<InitialPresentationDataAndSettings>()
         let _ = checkTimeoutInPtgSecretPasscodes.start(completed: {
             initialPresentationDataAndSettingsPromise.set(currentPresentationDataAndSettings(accountManager: accountManager, systemUserInterfaceStyle: systemUserInterfaceStyle))
         })
-        
+
         let sharedContextSignal = initialPresentationDataAndSettingsPromise.get()
         |> take(1)
         |> map { initialPresentationDataAndSettings -> (AccountManager, InitialPresentationDataAndSettings) in
@@ -933,8 +1003,8 @@ extension UserDefaults {
             var setPresentationCall: ((PresentationCall?) -> Void)?
             let sharedContext = SharedAccountContextImpl(mainWindow: self.mainWindow, sharedContainerPath: legacyBasePath, basePath: rootPath, encryptionParameters: encryptionParameters, accountManager: accountManager, appLockContext: appLockContext, notificationController: nil, applicationBindings: applicationBindings, initialPresentationDataAndSettings: initialPresentationDataAndSettings, networkArguments: networkArguments, hasInAppPurchases: buildConfig.isAppStoreBuild && buildConfig.apiId == 1, rootPath: rootPath, legacyBasePath: legacyBasePath, apsNotificationToken: self.notificationTokenPromise.get() |> map(Optional.init), voipNotificationToken: self.voipTokenPromise.get() |> map(Optional.init), firebaseSecretStream: self.firebaseSecretStream.get(), setNotificationCall: { call in
                 setPresentationCall?(call)
-            }, navigateToChat: { accountId, peerId, messageId in
-                self.openChatWhenReady(accountId: accountId, peerId: peerId, threadId: nil, messageId: messageId, storyId: nil)
+            }, navigateToChat: { accountId, peerId, messageId, alwaysKeepMessageId in
+                self.openChatWhenReady(accountId: accountId, peerId: peerId, threadId: nil, messageId: messageId, storyId: nil, alwaysKeepMessageId: alwaysKeepMessageId)
             }, displayUpgradeProgress: { progress in
                 if let progress = progress {
                     if self.dataImportSplash == nil {
@@ -979,7 +1049,7 @@ extension UserDefaults {
             }
             
             appLockContext.sharedContext = sharedContext
-            
+
             let notificationManager = SharedNotificationManager(episodeId: self.episodeId, application: application, clearNotificationsManager: clearNotificationsManager, inForeground: applicationBindings.applicationInForeground, accounts: sharedContext.activeAccountContexts |> map { primary, accounts, _, _ in accounts.map({ ($0.1.account, $0.1.account.id == primary?.account.id) }) }, pollLiveLocationOnce: { accountId in
                 let _ = (self.context.get()
                 |> filter {
@@ -1018,26 +1088,7 @@ extension UserDefaults {
                     return .single(nil)
                 }
             }
-            /*let watchTasks = self.context.get()
-            |> mapToSignal { context -> Signal<AccountRecordId?, NoError> in
-                if let context = context, let watchManager = context.context.watchManager {
-                    let accountId = context.context.account.id
-                    let runningTasks: Signal<WatchRunningTasks?, NoError> = .single(nil)
-                    |> then(watchManager.runningTasks)
-                    return runningTasks
-                    |> distinctUntilChanged
-                    |> map { value -> AccountRecordId? in
-                        if let value = value, value.running {
-                            return accountId
-                        } else {
-                            return nil
-                        }
-                    }
-                    |> distinctUntilChanged
-                } else {
-                    return .single(nil)
-                }
-            }*/
+
             let wakeupManager = SharedWakeupManager(beginBackgroundTask: { name, expiration in
                 let id = application.beginBackgroundTask(withName: name, expirationHandler: expiration)
                 Logger.shared.log("App \(self.episodeId)", "Begin background task \(name): \(id)")
@@ -1067,9 +1118,7 @@ extension UserDefaults {
             
             return .single(sharedApplicationContext)
         })
-        
-        //let watchManagerArgumentsPromise = Promise<WatchManagerArguments?>()
-            
+
         self.context.set(self.sharedContextPromise.get()
         |> deliverOnMainQueue
         |> mapToSignal { sharedApplicationContext -> Signal<AuthorizedApplicationContext?, NoError> in
@@ -1107,7 +1156,7 @@ extension UserDefaults {
             |> deliverOnMainQueue
             |> map { accountAndSettings -> AuthorizedApplicationContext? in
                 return accountAndSettings.flatMap { context, callListSettings in
-                    return AuthorizedApplicationContext(sharedApplicationContext: sharedApplicationContext, mainWindow: self.mainWindow, watchManagerArguments: .single(nil), context: context as! AccountContextImpl, accountManager: sharedApplicationContext.sharedContext.accountManager, showCallsTab: callListSettings.showTab, reinitializedNotificationSettings: {
+                    return AuthorizedApplicationContext(sharedApplicationContext: sharedApplicationContext, mainWindow: self.mainWindow, context: context as! AccountContextImpl, accountManager: sharedApplicationContext.sharedContext.accountManager, showCallsTab: callListSettings.showTab, reinitializedNotificationSettings: {
                         let _ = (self.context.get()
                         |> take(1)
                         |> deliverOnMainQueue).start(next: { context in
@@ -1217,7 +1266,7 @@ extension UserDefaults {
                             }
                         }
                     }
-                    
+
                     self.mainWindow.debugAction = nil
                     if let previousViewController = self.mainWindow.viewController {
                         previousViewController.view.endEditingWithoutAnimation()
@@ -1225,7 +1274,7 @@ extension UserDefaults {
                     self.mainWindow.viewController = context.rootController
                     
                     context.isReadyAndPresented.set(context.isReady.get())
-                    
+
                     if firstTime {
                         let layer = context.rootController.view.layer
                         layer.allowsGroupOpacity = true
@@ -1367,25 +1416,7 @@ extension UserDefaults {
                 return updated
             }).start()
         }))
-        
-        /*if buildConfig.isWatchEnabled {
-            self.watchCommunicationManagerPromise.set(watchCommunicationManager(context: self.context.get() |> flatMap { WatchCommunicationManagerContext(context: $0.context) }, allowBackgroundTimeExtension: { timeout in
-                let _ = (self.sharedContextPromise.get()
-                |> take(1)).start(next: { sharedContext in
-                    sharedContext.wakeupManager.allowBackgroundTimeExtension(timeout: timeout)
-                })
-            }))
-        } else {
-            self.watchCommunicationManagerPromise.set(.single(nil))
-        }
-        let _ = self.watchCommunicationManagerPromise.get().start(next: { manager in
-            if let manager = manager {
-                watchManagerArgumentsPromise.set(.single(manager.arguments))
-            } else {
-                watchManagerArgumentsPromise.set(.single(nil))
-            }
-        })*/
-        
+
         self.resetBadge()
         
         if #available(iOS 9.1, *) {
@@ -1452,7 +1483,7 @@ extension UserDefaults {
         } else if application.applicationState == .inactive {
             self.isInForegroundValue = true
             self.isInForegroundPromise.set(true)
-            
+
             self.runForegroundTasks()
         }
         
@@ -1463,9 +1494,9 @@ extension UserDefaults {
             }
         }
         
-        if UIApplication.shared.isStatusBarHidden {
+        /*if UIApplication.shared.isStatusBarHidden {
             UIApplication.shared.internalSetStatusBarHidden(false, animation: .none)
-        }
+        }*/
         
         /*if #available(iOS 13.0, *) {
             BGTaskScheduler.shared.register(forTaskWithIdentifier: baseAppBundleId + ".refresh", using: nil, launchHandler: { task in
@@ -1502,18 +1533,18 @@ extension UserDefaults {
             let taskId = "\(baseAppBundleId).cleanup"
             
             var scheduleCleanupTask: (() -> Void)?
-            
+
             BGTaskScheduler.shared.register(forTaskWithIdentifier: taskId, using: DispatchQueue.main) { task in
                 Logger.shared.log("App \(self.episodeId)", "Executing cleanup task")
                 
                 let disposable = MetaDisposable()
-                
+
                 let _ = (self.sharedContextPromise.get()
                 |> take(1)
                 |> deliverOnMainQueue).start(next: { sharedApplicationContext in
                     // ensure wakeupManager does not suspend postbox transactions by calling postbox.setCanBeginTransactions(false)
                     sharedApplicationContext.wakeupManager.bgTaskSchedulerTaskBegan(taskId)
-                    
+
                     disposable.set(self.runCacheReindexTasks(lowImpact: false, completion: {
                         Logger.shared.log("App \(self.episodeId)", "Completed cleanup task")
                         sharedApplicationContext.wakeupManager.bgTaskSchedulerTaskEnded(taskId)
@@ -1525,7 +1556,7 @@ extension UserDefaults {
                 task.expirationHandler = {
                     Logger.shared.log("App \(self.episodeId)", "Cleanup task expired")
                     disposable.dispose()
-                    
+
                     let _ = (self.sharedContextPromise.get()
                     |> take(1)
                     |> deliverOnMainQueue).start(next: { sharedApplicationContext in
@@ -1545,13 +1576,13 @@ extension UserDefaults {
                     let request = BGProcessingTaskRequest(identifier: taskId)
                     request.requiresExternalPower = true
                     request.requiresNetworkConnectivity = false
-                    
+
                     let timestamp = Int(CFAbsoluteTimeGetCurrent())
                     let minInterval = 18 * 60 * 60
                     if let indexTimestamp = UserDefaults.standard.object(forKey: "TelegramCacheIndexTimestamp") as? NSNumber, indexTimestamp.intValue >= timestamp - minInterval {
                         request.earliestBeginDate = Date(timeIntervalSinceNow: Double(min(minInterval, indexTimestamp.intValue - (timestamp - minInterval))))
                     }
-                    
+
                     do {
                         try BGTaskScheduler.shared.submit(request)
                     } catch let e {
@@ -1559,17 +1590,19 @@ extension UserDefaults {
                     }
                 })
             }
-            
+
             scheduleCleanupTask?()
         }
-        
+
         let reindexCacheOnce = Signal<Never, NoError> { subscriber in
             let timestamp = Int(CFAbsoluteTimeGetCurrent())
             let minReindexTimestamp = timestamp - 3 * 24 * 60 * 60
-            if let indexTimestamp = UserDefaults.standard.object(forKey: "TelegramCacheIndexTimestamp") as? NSNumber, indexTimestamp.intValue >= minReindexTimestamp, indexTimestamp.intValue < timestamp + 24 * 60 * 60 {
+            if let indexTimestamp = UserDefaults.standard.object(forKey: "TelegramCacheIndexTimestamp_v2") as? NSNumber, indexTimestamp.intValue >= minReindexTimestamp, indexTimestamp.intValue < timestamp + 24 * 60 * 60 {
                 subscriber.putCompletion()
                 return EmptyDisposable
             } else {
+            UserDefaults.standard.set(timestamp as NSNumber, forKey: "TelegramCacheIndexTimestamp_v2")
+            
                 Logger.shared.log("App \(self.episodeId)", "Executing low-impact cache reindex in foreground")
                 return self.runCacheReindexTasks(lowImpact: true, completion: {
                     Logger.shared.log("App \(self.episodeId)", "Executing low-impact cache reindex in foreground — done")
@@ -1577,7 +1610,7 @@ extension UserDefaults {
                 })
             }
         }
-        
+
         let reindexCacheFirstTime = reindexCacheOnce
         |> delay(20.0, queue: Queue.concurrentDefaultQueue())
         let reindexCacheRepeatedly = (
@@ -1587,9 +1620,9 @@ extension UserDefaults {
         |> restart
         let reindexCache = reindexCacheFirstTime
         |> then(reindexCacheRepeatedly)
-        
+
         self.reindexCacheDisposable = reindexCache.start()
-        
+
         if #available(iOS 12.0, *) {
             UIApplication.shared.registerForRemoteNotifications()
         }
@@ -1598,9 +1631,9 @@ extension UserDefaults {
         
         if let appGroupUserDefaults = UserDefaults(suiteName: appGroupName) {
             appGroupUserDefaults.removeObject(forKey: "suppressedNotificationForAccounId")
-            
+
             var suppressedNotificationForAccounIdObserver: NSKeyValueObservation?
-            
+
             let _ = self.isInForegroundPromise.get().start(next: { isInForeground in
                 if isInForeground {
                     // using UserDefaults KVO to be notified by Notification Service Extension about suppressed notifications in hidable accounts and secret chats
@@ -1612,7 +1645,7 @@ extension UserDefaults {
                             appGroupUserDefaults.removeObject(forKey: "suppressedNotificationForAccounId")
                         }
                     })
-                    
+
                     let _ = (self.sharedContextPromise.get()
                     |> take(1)
                     |> deliverOnMainQueue).start(next: { sharedApplicationContext in
@@ -1632,25 +1665,25 @@ extension UserDefaults {
                 }
             })
         }
-        
+
         // handle incoming calls and update unread counter badge right after previously hidden account is revealed
         let _ = (self.sharedContextPromise.get()
         |> take(1)
         |> deliverOnMainQueue).start(next: { sharedApplicationContext in
             var lastInactiveAccountIds = Set<AccountRecordId>()
-            
+
             let _ = (sharedApplicationContext.sharedContext.activeAccountContexts
             |> deliverOnMainQueue).start(next: { activeAccounts in
                 let inactiveAccountsIds = Set(activeAccounts.inactiveAccounts.map({ $0.0 }))
                 let newlyRevealedAccountIds = lastInactiveAccountIds.subtracting(inactiveAccountsIds)
                 lastInactiveAccountIds = inactiveAccountsIds
-                
+
                 if !newlyRevealedAccountIds.isEmpty && sharedApplicationContext.sharedContext.currentInAppNotificationSettings.with({ $0.displayNotificationsFromAllAccounts }) {
                     self.checkIncomingCallAndRefreshUnreadCountOfNonCurrentAccounts(newlyRevealedAccountIds)
                 }
             })
         })
-        
+
         self.mainWindow?.hostView.motionShakeImpl = { [weak self] in
             guard let strongSelf = self else {
                 return
@@ -1662,18 +1695,18 @@ extension UserDefaults {
                 }
             })
         }
-        
+
         setupForeignAgentNoticeRemovalCache()
-        
+
         // exclude from backup folders that may reveal hidden secrets
         let libraryPath = NSSearchPathForDirectoriesInDomains(.libraryDirectory, .userDomainMask, true)[0]
         excludePathFromBackup(libraryPath + "/Cookies")
         excludePathFromBackup(libraryPath + "/WebKit")
-        
+
         Queue.concurrentBackgroundQueue().async { [weak self] in
             let _ = self?.cleanTmpFolderRecursively(path: NSTemporaryDirectory())
         }
-        
+
         #if TEST_BUILD
         var previousReportedMemoryConsumption = 0
         let _ = Foundation.Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true, block: { _ in
@@ -1719,13 +1752,57 @@ extension UserDefaults {
             }
         })
         #endif
-        
+
+        //self.addBackgroundDownloadTask()
+
+        let reflectorBenchmarkDisposable = MetaDisposable()
+        let runReflectorBenchmarkDisposable = MetaDisposable()
+        let _ = (self.context.get()
+        |> deliverOnMainQueue).startStandalone(next: { context in
+            reflectorBenchmarkDisposable.set(nil)
+            runReflectorBenchmarkDisposable.set(nil)
+
+            guard let context = context?.context else {
+                return
+            }
+            var defaultAutoBenchmarkReflectors = false
+            if case .internal = context.sharedContext.applicationBindings.appBuildType {
+                defaultAutoBenchmarkReflectors = true
+            }
+            if context.sharedContext.immediateExperimentalUISettings.autoBenchmarkReflectors ?? defaultAutoBenchmarkReflectors {
+                reflectorBenchmarkDisposable.set((context.sharedContext.applicationBindings.applicationInForeground
+                |> distinctUntilChanged
+                |> deliverOnMainQueue).startStrict(next: { value in
+                    if value {
+                        let signal: Signal<ReflectorBenchmark.Results, NoError> = Signal { subscriber in
+                            var reflectorBenchmark: ReflectorBenchmark? = ReflectorBenchmark(address: "91.108.13.35", port: 599)
+                            reflectorBenchmark?.start(completion: { results in
+                                subscriber.putNext(results)
+                                subscriber.putCompletion()
+                            })
+
+                            return ActionDisposable {
+                                reflectorBenchmark = nil
+                            }
+                        }
+                        |> runOn(.mainQueue())
+                        |> delay(Double.random(in: 1.0 ..< 5.0), queue: Queue.mainQueue())
+                        runReflectorBenchmarkDisposable.set(signal.startStrict(next: { results in
+                            print("Reflector banchmark:\nBandwidth: \(results.bandwidthBytesPerSecond * 8 / 1024) kbit/s (expected \(results.expectedBandwidthBytesPerSecond * 8 / 1024) kbit/s)\nAvg latency: \(Int(results.averageDelay * 1000.0)) ms")
+                        }))
+                    } else {
+                        runReflectorBenchmarkDisposable.set(nil)
+                    }
+                }))
+            }
+        })
+
         return true
     }
     
     private func cleanTmpFolderRecursively(path: String) -> Bool {
         var folderIsEmpty = true
-        
+
         if let contents = try? FileManager.default.contentsOfDirectory(at: URL(fileURLWithPath: path), includingPropertiesForKeys: [.isDirectoryKey, .creationDateKey], options: []) {
             for url in contents {
                 var createdRecently = true
@@ -1734,7 +1811,7 @@ extension UserDefaults {
                         createdRecently = false
                     }
                 }
-                
+
                 if (try? url.resourceValues(forKeys: Set([.isDirectoryKey])))?.isDirectory ?? false {
                     if cleanTmpFolderRecursively(path: url.path) && !createdRecently {
                         try? FileManager.default.removeItem(at: url)
@@ -1750,10 +1827,10 @@ extension UserDefaults {
                 }
             }
         }
-        
+
         return folderIsEmpty
     }
-    
+
     private var backgroundSessionSourceDataDisposables: [String: Disposable] = [:]
     private var backgroundUploadResultSubscribers: [String: Bag<(String?) -> Void>] = [:]
     
@@ -1884,8 +1961,22 @@ extension UserDefaults {
         let task = session.uploadTask(with: request, fromFile: URL(fileURLWithPath: uploadFilePath))
         task.resume()
     }
-    
+
+    private func addBackgroundDownloadTask() {
+        let baseAppBundleId = Bundle.main.bundleIdentifier!
+        let session = self.urlSession(identifier: "\(baseAppBundleId).backroundSession")
+
+        var request = URLRequest(url: URL(string: "https://example.com/\(UInt64.random(in: 0 ... UInt64.max))")!)
+        request.httpMethod = "GET"
+
+        let task = session.downloadTask(with: request)
+        Logger.shared.log("App \(self.episodeId)", "adding download task \(String(describing: request.url))")
+        task.earliestBeginDate = Date(timeIntervalSinceNow: 30.0)
+        task.resume()
+    }
+
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        Logger.shared.log("App \(self.episodeId)", "completed download task \(String(describing: task.originalRequest?.url)) error: \(String(describing: error))")
         if let response = task.response as? HTTPURLResponse {
             if let originalRequest = task.originalRequest {
                 if let requestResourceId = originalRequest.value(forHTTPHeaderField: "tresource") {
@@ -1913,12 +2004,12 @@ extension UserDefaults {
                 for (_, context, _) in activeAccounts.accounts + activeAccounts.inactiveAccounts {
                     signals = signals |> then(context.account.cleanupTasks(lowImpact: lowImpact))
                 }
-                
+
                 signals = signals |> then (
                     sharedApplicationContext.sharedContext.accountManager.optimizeAllStorages(minFreePagesFraction: 0.2)
                     |> (lowImpact ? runOn(.concurrentBackgroundQueue()) : identity)
                 )
-                
+
                 // not touching inactive accounts
                 for (_, context, _) in activeAccounts.accounts {
                     signals = signals |> then (
@@ -1952,7 +2043,7 @@ extension UserDefaults {
             if resetOnce {
                 resetOnce = false
                 if count == 0 {
-                    UIApplication.shared.applicationIconBadgeNumber = 1
+                    //UIApplication.shared.applicationIconBadgeNumber = 1
                 }
             }
             UIApplication.shared.applicationIconBadgeNumber = Int(count)
@@ -1960,7 +2051,7 @@ extension UserDefaults {
     }
 
     private var lastResignActiveUptime: Int32?
-    
+
     func applicationWillResignActive(_ application: UIApplication) {
         self.isActiveValue = false
         self.isActivePromise.set(false)
@@ -1986,7 +2077,7 @@ extension UserDefaults {
             }
             return true
         })
-        
+
         self.lastResignActiveUptime = getDeviceUptimeSeconds(nil)
     }
 
@@ -2004,6 +2095,14 @@ extension UserDefaults {
                 extendNow = false
             }
             sharedApplicationContext.wakeupManager.allowBackgroundTimeExtension(timeout: 2.0, extendNow: extendNow)
+
+            let _ = (sharedApplicationContext.sharedContext.activeAccountContexts
+             |> take(1)
+             |> deliverOnMainQueue).start(next: { activeAccounts in
+                for (_, context, _) in activeAccounts.accounts {
+                    context.account.postbox.clearCaches()
+                }
+            })
         })
         
         self.isInForegroundValue = false
@@ -2011,18 +2110,23 @@ extension UserDefaults {
         self.isActiveValue = false
         self.isActivePromise.set(false)
         
-        var taskId: UIBackgroundTaskIdentifier?
-        taskId = application.beginBackgroundTask(withName: "lock", expirationHandler: {
-            if let taskId = taskId {
+        final class TaskIdHolder {
+            var taskId: UIBackgroundTaskIdentifier?
+        }
+
+        let taskIdHolder = TaskIdHolder()
+
+        taskIdHolder.taskId = application.beginBackgroundTask(withName: "lock", expirationHandler: {
+            if let taskId = taskIdHolder.taskId {
                 UIApplication.shared.endBackgroundTask(taskId)
             }
         })
         DispatchQueue.main.asyncAfter(deadline: DispatchTime.now() + 5.0, execute: {
-            if let taskId = taskId {
+            if let taskId = taskIdHolder.taskId {
                 UIApplication.shared.endBackgroundTask(taskId)
             }
         })
-        
+
         self.mainWindow.dismissSensitiveViewControllers()
         self.lastResignActiveUptime = nil
     }
@@ -2044,7 +2148,7 @@ extension UserDefaults {
         Queue.mainQueue().after(0.5, {
             self.runForegroundTasks()
         })
-        
+
         SharedDisplayLinkDriver.shared.updateForegroundState(self.isActiveValue)
     }
     
@@ -2066,7 +2170,7 @@ extension UserDefaults {
         if let lastResignActiveUptime = self.lastResignActiveUptime, getDeviceUptimeSeconds(nil) - lastResignActiveUptime >= 10 {
             self.mainWindow.dismissSensitiveViewControllers()
         }
-        
+
         self.isInForegroundValue = true
         self.isInForegroundPromise.set(true)
         self.isActiveValue = true
@@ -2078,8 +2182,24 @@ extension UserDefaults {
         #if canImport(AppCenter)
         self.maybeCheckForUpdates()
         #endif
-        
+
         SharedDisplayLinkDriver.shared.updateForegroundState(self.isActiveValue)
+
+        func cancelWindowPanGestures(view: UIView) {
+            if let gestureRecognizers = view.gestureRecognizers {
+                for recognizer in gestureRecognizers {
+                    if let recognizer = recognizer as? WindowPanRecognizer {
+                        recognizer.cancel()
+                    }
+                }
+            }
+
+            for subview in view.subviews {
+                cancelWindowPanGestures(view: subview)
+            }
+        }
+
+        //cancelWindowPanGestures(view: self.mainWindow.hostView.containerView)
     }
     
     func applicationWillTerminate(_ application: UIApplication) {
@@ -2100,7 +2220,7 @@ extension UserDefaults {
         |> take(1)
         |> deliverOnMainQueue).start(next: { sharedApplicationContext in
             sharedApplicationContext.wakeupManager.allowBackgroundTimeExtension(timeout: 2.0)
-            
+
             // take a chance to deactivate secret passcodes if app was waken up to process push-notification
             sharedApplicationContext.sharedContext.appLockContext.secretPasscodesTimeoutCheck(completion: nil)
         })
@@ -2140,6 +2260,15 @@ extension UserDefaults {
             return
         }
 
+        if let nonce = redactedPayload["verify_nonce"] as? String, let secret = redactedPayload["verify_secret"] as? String {
+            var firebaseRequestVerificationSecrets = self.firebaseRequestVerificationSecrets
+            firebaseRequestVerificationSecrets[nonce] = secret
+            self.firebaseRequestVerificationSecrets = firebaseRequestVerificationSecrets
+
+            completionHandler(.newData)
+            return
+        }
+
         if userInfo["p"] == nil {
             completionHandler(.noData)
             return
@@ -2154,12 +2283,6 @@ extension UserDefaults {
             sharedApplicationContext.notificationManager.addNotification(userInfo)
         })
     }
-    
-    /*func application(_ application: UIApplication, didReceive notification: UILocalNotification) {
-        if (application.applicationState == .inactive) {
-            Logger.shared.log("App \(self.episodeId)", "tap local notification \(String(describing: notification.userInfo)), applicationState \(application.applicationState)")
-        }
-    }*/
 
     public func pushRegistry(_ registry: PKPushRegistry, didUpdate credentials: PKPushCredentials, for type: PKPushType) {
         if #available(iOS 9.0, *) {
@@ -2261,42 +2384,166 @@ extension UserDefaults {
             return
         }
         
-        Logger.shared.log("App \(self.episodeId) PushRegistry", "decrypted payload: \(payloadJson)")
-        
-        guard var updateString = payloadJson["updates"] as? String else {
-            Logger.shared.log("App \(self.episodeId) PushRegistry", "updates is nil")
-            Logger.shared.sync()
-            completion()
-            return
-        }
+        let phoneNumber = payloadJson["phoneNumber"] as? String
 
-        updateString = updateString.replacingOccurrences(of: "-", with: "+")
-        updateString = updateString.replacingOccurrences(of: "_", with: "/")
-        while updateString.count % 4 != 0 {
-            updateString.append("=")
-        }
-        guard let updateData = Data(base64Encoded: updateString) else {
-            Logger.shared.log("App \(self.episodeId) PushRegistry", "Couldn't decode updateData")
-            Logger.shared.sync()
-            completion()
-            return
-        }
-        guard let callUpdate = AccountStateManager.extractIncomingCallUpdate(data: updateData) else {
-            Logger.shared.log("App \(self.episodeId) PushRegistry", "Couldn't extract call update")
-            Logger.shared.sync()
-            completion()
-            return
-        }
-        
+        if let fromIdString = payloadJson["from_id"] as? String, let fromId = Int64(fromIdString), let groupCallIdString = payloadJson["group_call_id"] as? String, let groupCallId = Int64(groupCallIdString), let messageIdString = payloadJson["msg_id"] as? String, let messageId = Int32(messageIdString), let fromTitle = payloadJson["from_title"] as? String {
+            guard let callKitIntegration = CallKitIntegration.shared else {
+                Logger.shared.log("App \(self.episodeId) PushRegistry", "CallKitIntegration is not available")
+                completion()
+                return
+            }
+
+            var isVideo = false
+            if let isVideoString = payloadJson["video"] as? String, let isVideoValue = Int32(isVideoString) {
+                isVideo = isVideoValue != 0
+            } else if let isVideoString = payloadJson["video"] as? String, let isVideoValue = Bool(isVideoString) {
+                isVideo = isVideoValue
+            }
+
+            let fromPeerId = PeerId(namespace: Namespaces.Peer.CloudUser, id: PeerId.Id._internalFromInt64Value(fromId))
+            let messageId = MessageId(peerId: fromPeerId, namespace: Namespaces.Message.Cloud, id: messageId)
+
+            let internalId = CallSessionManager.getStableIncomingUUID(peerId: fromPeerId.id._internalGetInt64Value(), messageId: messageId.id)
+
+            var strings: PresentationStrings = defaultPresentationStrings
+            let _ = (self.sharedContextPromise.get()
+            |> take(1)
+            |> deliverOnMainQueue).start(next: { sharedApplicationContext in
+                strings = sharedApplicationContext.sharedContext.currentPresentationData.with { $0.strings }
+            })
+
+            let displayTitle: String
+            if let memberCountString = payloadJson["member_count"] as? String, let memberCount = Int(memberCountString) {
+                displayTitle = strings.Call_IncomingGroupCallTitle_Multiple(Int32(memberCount)).replacingOccurrences(of: "{}", with: fromTitle)
+            } else {
+                displayTitle = strings.Call_IncomingGroupCallTitle_Single(fromTitle).string
+            }
+
+            callKitIntegration.reportIncomingCall(
+                uuid: internalId,
+                stableId: groupCallId,
+                handle: "\(fromPeerId.id._internalGetInt64Value())",
+                phoneNumber: phoneNumber.flatMap(formatPhoneNumber),
+                isVideo: isVideo,
+                displayTitle: displayTitle,
+                completion: { error in
+                    if let error = error {
+                        if error.domain == "com.apple.CallKit.error.incomingcall" && (error.code == -3 || error.code == 3) {
+                            Logger.shared.log("PresentationCall", "reportIncomingCall device in DND mode")
+                        } else {
+                            Logger.shared.log("PresentationCall", "reportIncomingCall error \(error)")
+                            /*Queue.mainQueue().async {
+                             if let strongSelf = self {
+                             strongSelf.callSessionManager.drop(internalId: strongSelf.internalId, reason: .hangUp, debugLog: .single(nil))
+                             }
+                             }*/
+                        }
+                    }
+                }
+            )
+
+            let _ = (self.sharedContextPromise.get()
+            |> take(1)
+            |> deliverOnMainQueue).start(next: { sharedApplicationContext in
+                let _ = (sharedApplicationContext.sharedContext.activeAccountContexts
+                |> take(1)
+                |> deliverOnMainQueue).start(next: { activeAccounts in
+                    var processed = false
+                    for (_, context, _) in activeAccounts.accounts {
+                        if context.account.id == accountId {
+                            context.account.callSessionManager.addConferenceInvitationMessages(ids: [(messageId, IncomingConferenceTermporaryExternalInfo(callId: groupCallId, isVideo: isVideo))])
+
+                            let disposable = MetaDisposable()
+                            self.watchedCallsDisposables.add(disposable)
+
+                            if let callManager = context.sharedContext.callManager {
+                                let signal = combineLatest(queue: .mainQueue(), context.account.callSessionManager.ringingStates()
+                                    |> map { ringingStates -> Bool in
+                                        for state in ringingStates {
+                                            if state.id == internalId {
+                                                return true
+                                            }
+                                        }
+                                        return false
+                                    },
+                                    callManager.currentGroupCallSignal
+                                    |> map { currentGroupCall -> Bool in
+                                        if case let .group(groupCall) = currentGroupCall {
+                                            if groupCall.internalId == internalId {
+                                                return true
+                                            }
+                                        }
+                                        return false
+                                    }
+                                )
+                                |> mapToSignal { exists0, exists1 -> Signal<Void, NoError> in
+                                    if !(exists0 || exists1) {
+                                        return .single(Void())
+                                        |> delay(1.0, queue: .mainQueue())
+                                    }
+                                    return .never()
+                                }
+
+                                disposable.set((signal
+                                |> take(1)
+                                |> deliverOnMainQueue).startStrict(next: { _ in
+                                    callKitIntegration.dropCall(uuid: internalId)
+                                }))
+                            }
+
+                            processed = true
+
+                            break
+                        }
+                    }
+
+                    if !processed {
+                        callKitIntegration.dropCall(uuid: internalId)
+                    }
+                })
+
+                sharedApplicationContext.wakeupManager.allowBackgroundTimeExtension(timeout: 2.0)
+
+                if case PKPushType.voIP = type {
+                    Logger.shared.log("App \(self.episodeId) PushRegistry", "pushRegistry payload: \(payload.dictionaryPayload)")
+                    sharedApplicationContext.notificationManager.addNotification(payload.dictionaryPayload)
+                }
+            })
+        } else {
+            guard var updateString = payloadJson["updates"] as? String else {
+                Logger.shared.log("App \(self.episodeId) PushRegistry", "updates is nil")
+                self.reportFailedIncomingCallKitCall()
+                completion()
+                return
+            }
+
+            updateString = updateString.replacingOccurrences(of: "-", with: "+")
+            updateString = updateString.replacingOccurrences(of: "_", with: "/")
+            while updateString.count % 4 != 0 {
+                updateString.append("=")
+            }
+            guard let updateData = Data(base64Encoded: updateString) else {
+                Logger.shared.log("App \(self.episodeId) PushRegistry", "Couldn't decode updateData")
+                self.reportFailedIncomingCallKitCall()
+                completion()
+                return
+            }
+            guard let callUpdate = AccountStateManager.extractIncomingCallUpdate(data: updateData) else {
+                Logger.shared.log("App \(self.episodeId) PushRegistry", "Couldn't extract call update")
+                self.reportFailedIncomingCallKitCall()
+                completion()
+                return
+            }
+
         let _ = (self.sharedContextPromise.get()
         |> take(1)
         |> deliverOnMainQueue).start(next: { sharedApplicationContext in
             sharedApplicationContext.wakeupManager.allowBackgroundTimeExtension(timeout: 2.0)
-            
+
             // take a chance to deactivate secret passcodes if app was waken up to process push-notification
             sharedApplicationContext.sharedContext.appLockContext.secretPasscodesTimeoutCheck(completion: nil)
         })
-        
+
         let useCallKitIntegration: Signal<Bool, NoError>
         if #available(iOS 13.0, *) {
             useCallKitIntegration = .single(true)
@@ -2310,7 +2557,7 @@ extension UserDefaults {
                 return voiceCallSettings.enableSystemIntegration
             }
         }
-        
+
         let _ = (useCallKitIntegration
         |> take(1)
         |> deliverOnMainQueue).start(next: { useCallKitIntegration in
@@ -2326,15 +2573,13 @@ extension UserDefaults {
                 completion()
                 return
             }
-            
+
             guard let callKitIntegration = CallKitIntegration.shared else {
                 Logger.shared.log("App \(self.episodeId) PushRegistry", "CallKitIntegration is not available")
                 Logger.shared.sync()
                 completion()
                 return
             }
-            
-            let phoneNumber = payloadJson["phoneNumber"] as? String
 
             callKitIntegration.reportIncomingCall(
                 uuid: CallSessionManager.getStableIncomingUUID(stableId: callUpdate.callId),
@@ -2358,7 +2603,7 @@ extension UserDefaults {
                     }
                 }
             )
-            
+
             let _ = (self.sharedContextPromise.get()
             |> take(1)
             |> deliverOnMainQueue).start(next: { sharedApplicationContext in
@@ -2370,11 +2615,10 @@ extension UserDefaults {
                         if context.account.id == accountId {
                             context.account.stateManager.processIncomingCallUpdate(data: updateData, completion: { _ in
                             })
-                            
-                            //callUpdate.callId
+
                             let disposable = MetaDisposable()
                             self.watchedCallsDisposables.add(disposable)
-                            
+
                             disposable.set((context.account.callSessionManager.callState(internalId: CallSessionManager.getStableIncomingUUID(stableId: callUpdate.callId))
                             |> deliverOnMainQueue).start(next: { state in
                                 switch state.state {
@@ -2384,27 +2628,28 @@ extension UserDefaults {
                                     break
                                 }
                             }))
-                            
+
                             processed = true
-                            
+
                             break
                         }
                     }
-                    
+
                     if !processed {
                         callKitIntegration.dropCall(uuid: CallSessionManager.getStableIncomingUUID(stableId: callUpdate.callId))
                     }
                 })
-                
+
                 if case PKPushType.voIP = type {
                     Logger.shared.log("App \(self.episodeId) PushRegistry", "pushRegistry payload: \(payload.dictionaryPayload)")
                     sharedApplicationContext.notificationManager.addNotification(payload.dictionaryPayload)
                 }
             })
-            
+        }
+
             Logger.shared.log("App \(self.episodeId) PushRegistry", "Invoking completion handler")
             Logger.shared.sync()
-            
+
             completion()
         })
     }
@@ -2413,6 +2658,35 @@ extension UserDefaults {
         Logger.shared.log("App \(self.episodeId)", "invalidated token for \(type)")
     }
     
+    private func reportFailedIncomingCallKitCall() {
+        if #available(iOS 14.4, *) {
+            guard let callKitIntegration = CallKitIntegration.shared else {
+                return
+            }
+            let uuid = CallSessionInternalId()
+            callKitIntegration.reportIncomingCall(
+                uuid: uuid,
+                stableId: Int64.random(in: Int64.min ... Int64.max),
+                handle: "Unknown",
+                phoneNumber: nil,
+                isVideo: false,
+                displayTitle: "Unknown",
+                completion: { error in
+                    if let error = error {
+                        if error.domain == "com.apple.CallKit.error.incomingcall" && (error.code == -3 || error.code == 3) {
+                            Logger.shared.log("PresentationCall", "reportFailedIncomingCallKitCall device in DND mode")
+                        } else {
+                            Logger.shared.log("PresentationCall", "reportFailedIncomingCallKitCall error \(error)")
+                        }
+                    }
+                }
+            )
+            Queue.mainQueue().after(1.0, {
+                callKitIntegration.dropCall(uuid: uuid)
+            })
+        }
+    }
+
     private func authorizedContext() -> Signal<AuthorizedApplicationContext, NoError> {
         return self.context.get()
         |> mapToSignal { context -> Signal<AuthorizedApplicationContext, NoError> in
@@ -2460,13 +2734,13 @@ extension UserDefaults {
                 return (sharedApplicationContext.sharedContext, context, authContext)
             }
         }
-        |> deliverOnMainQueue).start(next: { _, context, authContext in
-            if let authContext = authContext, let confirmationCode = parseConfirmationCodeUrl(url) {
+        |> deliverOnMainQueue).start(next: { sharedContext, context, authContext in
+            if let authContext = authContext, let confirmationCode = parseConfirmationCodeUrl(sharedContext: sharedContext, url: url) {
                 authContext.rootController.applyConfirmationCode(confirmationCode)
             } else if let context = context {
                 context.openUrl(url)
             } else if let authContext = authContext {
-                if let proxyData = parseProxyUrl(url) {
+                if let proxyData = parseProxyUrl(sharedContext: sharedContext, url: url) {
                     authContext.rootController.view.endEditing(true)
                     let presentationData = authContext.sharedContext.currentPresentationData.with { $0 }
                     let controller = ProxyServerActionSheetController(presentationData: presentationData, accountManager: authContext.sharedContext.accountManager, postbox: authContext.account.postbox, network: authContext.account.network, server: proxyData, updatedPresentationData: nil)
@@ -2529,7 +2803,7 @@ extension UserDefaults {
                     |> take(1)
                     |> delay(0.1, queue: Queue.mainQueue()) // allow possible secret passcodes deactivations to be applied
                     |> deliverOnMainQueue).start(next: { _ in
-                    
+
                     let contactByIdentifier: Signal<EnginePeer?, NoError>
                     if let context = self.contextValue?.context, let contactIdentifier = contact.contactIdentifier {
                         contactByIdentifier = context.engine.contacts.findPeerByLocalContactIdentifier(identifier: contactIdentifier)
@@ -2589,7 +2863,7 @@ extension UserDefaults {
                     })
                     
                     })
-                    
+
                     return true
                 }
             } else if let sendMessageIntent = userActivity.interaction?.intent as? INSendMessageIntent {
@@ -2600,13 +2874,13 @@ extension UserDefaults {
                         |> take(1)
                         |> delay(0.1, queue: Queue.mainQueue()) // allow possible secret passcodes deactivations to be applied
                         |> deliverOnMainQueue).start(next: { _ in
-                        
+
                         guard PeerId(value).namespace == Namespaces.Peer.CloudUser else {
                             return
                         }
-                        
+
                         self.openChatWhenReady(accountId: nil, peerId: PeerId(value), threadId: nil, activateInput: true, storyId: nil)
-                        
+
                         })
                     }
                 }
@@ -2624,7 +2898,7 @@ extension UserDefaults {
                     guard peerId.namespace == Namespaces.Peer.CloudUser else {
                         return true
                     }
-                
+
                     let signal = self.sharedContextPromise.get()
                     |> take(1)
                     |> delay(0.1, queue: Queue.mainQueue()) // allow possible secret passcodes deactivations to be applied
@@ -2652,7 +2926,7 @@ extension UserDefaults {
                         if let primary = primary {
                             for context in contexts {
                                 if let context = context, context.account.id == primary {
-                                    self.openChatWhenReady(accountId: nil, peerId: peerId, threadId: nil, storyId: nil)
+                                    self.openChatWhenReady(accountId: nil, peerId: peerId, threadId: nil, storyId: nil, openAppIfAny: true)
                                     return
                                 }
                             }
@@ -2660,7 +2934,7 @@ extension UserDefaults {
                         
                         for context in contexts {
                             if let context = context {
-                                self.openChatWhenReady(accountId: context.account.id, peerId: peerId, threadId: nil, storyId: nil)
+                                self.openChatWhenReady(accountId: context.account.id, peerId: peerId, threadId: nil, storyId: nil, openAppIfAny: true)
                                 return
                             }
                         }
@@ -2698,6 +2972,8 @@ extension UserDefaults {
                                     context.switchAccount()
                                 case .hideAllSecrets:
                                     context.context.sharedContext.hideAllSecrets()
+                                case .appIcon:
+                                    context.openAppIcon()
                             }
                         }
                     }
@@ -2747,7 +3023,7 @@ extension UserDefaults {
         }))
     }
     
-    private func openChatWhenReady(accountId: AccountRecordId?, peerId: PeerId, threadId: Int64?, messageId: MessageId? = nil, activateInput: Bool = false, storyId: StoryId?) {
+    private func openChatWhenReady(accountId: AccountRecordId?, peerId: PeerId, threadId: Int64?, messageId: MessageId? = nil, activateInput: Bool = false, storyId: StoryId?, openAppIfAny: Bool = false, alwaysKeepMessageId: Bool = false) {
         let signal = self.sharedContextPromise.get()
         |> take(1)
         |> deliverOnMainQueue
@@ -2766,7 +3042,7 @@ extension UserDefaults {
         }
         self.openChatWhenReadyDisposable.set((signal
         |> deliverOnMainQueue).start(next: { context in
-            context.openChatWithPeerId(peerId: peerId, threadId: threadId, messageId: messageId, activateInput: activateInput, storyId: storyId)
+            context.openChatWithPeerId(peerId: peerId, threadId: threadId, messageId: messageId, activateInput: activateInput, storyId: storyId, openAppIfAny: openAppIfAny, alwaysKeepMessageId: alwaysKeepMessageId)
         }))
     }
     
@@ -2793,7 +3069,7 @@ extension UserDefaults {
                 sharedApplicationContext.wakeupManager.allowBackgroundTimeExtension(timeout: 2.0, extendNow: true)
             })
         }
-        
+
         let _ = (accountIdFromNotification(response.notification, sharedContext: self.sharedContextPromise.get())
         |> deliverOnMainQueue).start(next: { accountId in
             if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
@@ -2839,7 +3115,7 @@ extension UserDefaults {
                         if let threadId {
                             replyToMessageId = MessageId(peerId: peerId, namespace: Namespaces.Message.Cloud, id: Int32(clamping: threadId))
                         }
-                        return enqueueMessages(account: account, peerId: peerId, messages: [EnqueueMessage.message(text: text, attributes: [], inlineStickers: [:], mediaReference: nil, threadId: nil, replyToMessageId: replyToMessageId.flatMap { EngineMessageReplySubject(messageId: $0, quote: nil) }, replyToStoryId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])])
+                        return enqueueMessages(account: account, peerId: peerId, messages: [EnqueueMessage.message(text: text, attributes: [], inlineStickers: [:], mediaReference: nil, threadId: nil, replyToMessageId: replyToMessageId.flatMap { EngineMessageReplySubject(messageId: $0, quote: nil, todoItemId: nil) }, replyToStoryId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])])
                         |> map { messageIds -> MessageId? in
                             if messageIds.isEmpty {
                                 return nil
@@ -2896,11 +3172,11 @@ extension UserDefaults {
             return settings.displayNameOnLockscreen
         }
         |> deliverOnMainQueue).start(next: { displayNames in
-            self.registerForNotifications(replyString: presentationData.strings.Notification_Reply, messagePlaceholderString: presentationData.strings.Conversation_InputTextPlaceholder, hiddenContentString: presentationData.strings.Watch_MessageView_Title, hiddenReactionContentString: presentationData.strings.Notification_LockScreenReactionPlaceholder, hiddenStoryContentString: presentationData.strings.Notification_LockScreenStoryPlaceholder, includeNames: displayNames, authorize: authorize, completion: completion)
+            self.registerForNotifications(replyString: presentationData.strings.Notification_Reply, messagePlaceholderString: presentationData.strings.Conversation_InputTextPlaceholder, hiddenContentString: presentationData.strings.Watch_MessageView_Title, hiddenReactionContentString: presentationData.strings.Notification_LockScreenReactionPlaceholder, hiddenStoryContentString: presentationData.strings.Notification_LockScreenStoryPlaceholder, hiddenStoryReactionContentString: presentationData.strings.PUSH_REACT_STORY_HIDDEN, includeNames: displayNames, authorize: authorize, completion: completion)
         })
     }
 
-    private func registerForNotifications(replyString: String, messagePlaceholderString: String, hiddenContentString: String, hiddenReactionContentString: String, hiddenStoryContentString: String, includeNames: Bool, authorize: Bool = true, completion: @escaping (Bool) -> Void = { _ in }) {
+    private func registerForNotifications(replyString: String, messagePlaceholderString: String, hiddenContentString: String, hiddenReactionContentString: String, hiddenStoryContentString: String, hiddenStoryReactionContentString: String, includeNames: Bool, authorize: Bool = true, completion: @escaping (Bool) -> Void = { _ in }) {
         let notificationCenter = UNUserNotificationCenter.current()
         Logger.shared.log("App \(self.episodeId)", "register for notifications: get settings (authorize: \(authorize))")
         notificationCenter.getNotificationSettings(completionHandler: { settings in
@@ -2931,7 +3207,8 @@ extension UserDefaults {
                                 let channelMessageCategory: UNNotificationCategory
                                 let reactionMessageCategory: UNNotificationCategory
                                 let storyCategory: UNNotificationCategory
-                                
+                                let storyReactionCategory: UNNotificationCategory
+
                                 var options: UNNotificationCategoryOptions = []
                                 if includeNames {
                                     options.insert(.hiddenPreviewsShowTitle)
@@ -2951,7 +3228,8 @@ extension UserDefaults {
                                 channelMessageCategory = UNNotificationCategory(identifier: "c", actions: [], intentIdentifiers: [], hiddenPreviewsBodyPlaceholder: hiddenContentString, options: options)
                                 reactionMessageCategory = UNNotificationCategory(identifier: "t", actions: [], intentIdentifiers: [], hiddenPreviewsBodyPlaceholder: hiddenReactionContentString, options: options)
                                 storyCategory = UNNotificationCategory(identifier: "st", actions: [], intentIdentifiers: [], hiddenPreviewsBodyPlaceholder: hiddenStoryContentString, options: options)
-                                
+                                storyReactionCategory = UNNotificationCategory(identifier: "str", actions: [], intentIdentifiers: [], hiddenPreviewsBodyPlaceholder: hiddenStoryReactionContentString, options: options)
+
                                 UNUserNotificationCenter.current().setNotificationCategories([
                                     unknownMessageCategory,
                                     repliableMessageCategory,
@@ -2960,7 +3238,8 @@ extension UserDefaults {
                                     reactionMessageCategory,
                                     groupRepliableMessageCategory,
                                     groupRepliableMediaMessageCategory,
-                                    storyCategory
+                                    storyCategory,
+                                    storyReactionCategory
                                 ])
                                 
                                 Logger.shared.log("App \(self.episodeId)", "register for notifications: invoke registerForRemoteNotifications")
@@ -3008,7 +3287,7 @@ extension UserDefaults {
     
     private func checkIncomingCallAndRefreshUnreadCountOfNonCurrentAccounts(_ accountIds: Set<AccountRecordId>?) {
         Logger.shared.log("App \(self.episodeId)", "checkIncomingCallAndRefreshUnreadCountOfNonCurrentAccounts: \(accountIds ?? [])")
-        
+
         let _ = (self.sharedContextPromise.get()
         |> take(1)
         |> deliverOnMainQueue).start(next: { sharedApplicationContext in
@@ -3023,7 +3302,7 @@ extension UserDefaults {
             })
         })
     }
-    
+
     private var lastCheckForUpdatesTimestamp: Double?
     private let currentCheckForUpdatesDisposable = MetaDisposable()
     
@@ -3031,7 +3310,7 @@ extension UserDefaults {
     private func maybeCheckForUpdates() {
         #if targetEnvironment(simulator)
         #else
-        guard let buildConfig = self.buildConfig, !buildConfig.isAppStoreBuild, let appCenterId = buildConfig.appCenterId, !appCenterId.isEmpty else {
+        guard let buildConfig = self.buildConfig, let appCenterId = buildConfig.appCenterId, !appCenterId.isEmpty else {
             return
         }
         let timestamp = CFAbsoluteTimeGetCurrent()
@@ -3078,7 +3357,7 @@ extension UserDefaults {
         #endif
     }
     #endif
-    
+
     override var next: UIResponder? {
         if let context = self.contextValue, let controller = context.context.keyShortcutsController {
             return controller

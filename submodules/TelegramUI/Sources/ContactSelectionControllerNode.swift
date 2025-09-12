@@ -23,6 +23,7 @@ final class ContactSelectionControllerNode: ASDisplayNode {
     
     private let displayDeviceContacts: Bool
     private let displayCallIcons: Bool
+    private let allowChannelsInSearch: Bool
     private let filters: [ContactListFilter]
     
     let contactListNode: ContactListNode
@@ -36,10 +37,14 @@ final class ContactSelectionControllerNode: ASDisplayNode {
     var navigationBar: NavigationBar?
     
     var requestDeactivateSearch: (() -> Void)?
-    var requestOpenPeerFromSearch: ((ContactListPeer) -> Void)?
-    var requestMultipleAction: ((_ silent: Bool, _ scheduleTime: Int32?) -> Void)?
+    var requestOpenPeerFromSearch: ((ContactListPeer, ContactListAction) -> Void)?
+    var requestOpenDisabledPeerFromSearch: ((EnginePeer, ChatListDisabledPeerReason) -> Void)?
+    var requestMultipleAction: ((_ silent: Bool, _ scheduleTime: Int32?, _ parameters: ChatSendMessageActionSheetController.SendParameters?) -> Void)?
     var dismiss: (() -> Void)?
     var cancelSearch: (() -> Void)?
+    var openPeerMore: ((ContactListPeer, ASDisplayNode?, ContextGesture?) -> Void)?
+    
+    let isPeerEnabled: (ContactListPeer) -> Bool
     
     var presentationData: PresentationData {
         didSet {
@@ -54,20 +59,77 @@ final class ContactSelectionControllerNode: ASDisplayNode {
     
     var searchContainerNode: ContactsSearchContainerNode?
     
-    init(context: AccountContext, presentationData: PresentationData, options: [ContactListAdditionalOption], displayDeviceContacts: Bool, displayCallIcons: Bool, multipleSelection: Bool, requirePhoneNumbers: Bool) {
+    init(context: AccountContext, mode: ContactSelectionControllerMode, presentationData: PresentationData, options: Signal<[ContactListAdditionalOption], NoError>, displayDeviceContacts: Bool, displayCallIcons: Bool, multipleSelection: Bool, requirePhoneNumbers: Bool, allowChannelsInSearch: Bool, isPeerEnabled: @escaping (ContactListPeer) -> Bool) {
         self.context = context
         self.presentationData = presentationData
         self.displayDeviceContacts = displayDeviceContacts
         self.displayCallIcons = displayCallIcons
+        self.allowChannelsInSearch = allowChannelsInSearch
+        self.isPeerEnabled = isPeerEnabled
         
-        var filters: [ContactListFilter] = [.excludeSelf]
+        var excludeSelf = true
+        
+        let displayTopPeers: ContactListPresentation.TopPeers
+        if case let .starsGifting(birthdays, hasActions, showSelf, selfSubtitle) = mode {
+            if showSelf {
+                excludeSelf = false
+            }
+            if let birthdays {
+                let today = Calendar(identifier: .gregorian).component(.day, from: Date())
+                var sections: [(String, [EnginePeer.Id], Bool)] = []
+                var todayPeers: [EnginePeer.Id] = []
+                var yesterdayPeers: [EnginePeer.Id] = []
+                var tomorrowPeers: [EnginePeer.Id] = []
+                
+                for (peerId, birthday) in birthdays {
+                    if birthday.day == today {
+                        todayPeers.append(peerId)
+                    } else if birthday.day == today - 1 || birthday.day > today + 5 {
+                        yesterdayPeers.append(peerId)
+                    } else if birthday.day == today + 1 || birthday.day < today + 5 {
+                        tomorrowPeers.append(peerId)
+                    }
+                }
+                
+                if !todayPeers.isEmpty {
+                    sections.append((presentationData.strings.Premium_Gift_ContactSelection_BirthdayToday, todayPeers, hasActions))
+                }
+                if !yesterdayPeers.isEmpty {
+                    sections.append((presentationData.strings.Premium_Gift_ContactSelection_BirthdayYesterday, yesterdayPeers, hasActions))
+                }
+                if !tomorrowPeers.isEmpty {
+                    sections.append((presentationData.strings.Premium_Gift_ContactSelection_BirthdayTomorrow, tomorrowPeers, hasActions))
+                }
+                
+                displayTopPeers = .custom(showSelf: showSelf, selfSubtitle: selfSubtitle, sections: sections)
+            } else {
+                displayTopPeers = .recent
+            }
+        } else {
+            displayTopPeers = .none
+        }
+        
+        var filters: [ContactListFilter] = []
+        if excludeSelf {
+            filters.append(.excludeSelf)
+        }
         if requirePhoneNumbers {
             filters.append(.excludeWithoutPhoneNumbers)
         }
+        if case .starsGifting = mode {
+            filters.append(.excludeBots)
+        }
         self.filters = filters
         
+        let presentation: Signal<ContactListPresentation, NoError> = options
+        |> map { options in
+            return .natural(options: options, includeChatList: false, topPeers: displayTopPeers)
+        }
+        
         var contextActionImpl: ((EnginePeer, ASDisplayNode, ContextGesture?, CGPoint?) -> Void)?
-        self.contactListNode = ContactListNode(context: context, updatedPresentationData: (presentationData, self.presentationDataPromise.get()), presentation: .single(.natural(options: options, includeChatList: false, topPeers: false)), filters: filters, displayCallIcons: displayCallIcons, contextAction: multipleSelection ? { peer, node, gesture, _, _ in
+        self.contactListNode = ContactListNode(context: context, updatedPresentationData: (presentationData, self.presentationDataPromise.get()), presentation: presentation, filters: filters, onlyWriteable: false, isGroupInvitation: false, isPeerEnabled: { peer in
+            return isPeerEnabled(.peer(peer: peer._asPeer(), isGlobal: false, participantCount: nil))
+        }, displayCallIcons: displayCallIcons, contextAction: multipleSelection ? { peer, node, gesture, _, _ in
             contextActionImpl?(peer, node, gesture, nil)
         } : nil, multipleSelection: multipleSelection)
         
@@ -109,7 +171,7 @@ final class ContactSelectionControllerNode: ASDisplayNode {
         }
         
         shareImpl = { [weak self] in
-            self?.requestMultipleAction?(false, nil)
+            self?.requestMultipleAction?(false, nil, nil)
         }
         
         contextActionImpl = { [weak self] peer, node, gesture, _ in
@@ -192,8 +254,11 @@ final class ContactSelectionControllerNode: ASDisplayNode {
         } else {
             categories.insert(.global)
         }
+        if self.allowChannelsInSearch {
+            categories.insert(.channels)
+        }
         
-        let searchContainerNode = ContactsSearchContainerNode(context: self.context, updatedPresentationData: (self.presentationData, self.presentationDataPromise.get()), onlyWriteable: false, categories: categories, filters: self.filters, addContact: nil, openPeer: { [weak self] peer in
+        let searchContainerNode = ContactsSearchContainerNode(context: self.context, updatedPresentationData: (self.presentationData, self.presentationDataPromise.get()), onlyWriteable: false, categories: categories, filters: self.filters, displayCallIcons: self.displayCallIcons, isPeerEnabled: self.isPeerEnabled, addContact: nil, openPeer: { [weak self] peer, action in
             if let strongSelf = self {
                 var updated = false
                 strongSelf.contactListNode.updateSelectionState { state -> ContactListNodeGroupSelectionState? in
@@ -220,9 +285,23 @@ final class ContactSelectionControllerNode: ASDisplayNode {
                 if updated {
                     strongSelf.requestDeactivateSearch?()
                 } else {
-                    strongSelf.requestOpenPeerFromSearch?(peer)
+                    let mappedAction: ContactListAction
+                    switch action {
+                    case .generic:
+                        mappedAction = .generic
+                    case .voiceCall:
+                        mappedAction = .voiceCall
+                    case .videoCall:
+                        mappedAction = .videoCall
+                    }
+                    strongSelf.requestOpenPeerFromSearch?(peer, mappedAction)
                 }
             }
+        }, openDisabledPeer: { [weak self] peer, reason in
+            guard let self else {
+                return
+            }
+            self.requestOpenDisabledPeerFromSearch?(peer, reason)
         }, contextAction: nil)
         searchContainerNode.cancel = { [weak self] in
             self?.cancelSearch?()
@@ -256,7 +335,11 @@ final class ContactSelectionControllerNode: ASDisplayNode {
         } else {
             categories.insert(.global)
         }
-        self.searchDisplayController = SearchDisplayController(presentationData: self.presentationData, contentNode: ContactsSearchContainerNode(context: self.context, updatedPresentationData: (self.presentationData, self.presentationDataPromise.get()), onlyWriteable: false, categories: categories, addContact: nil, openPeer: { [weak self] peer in
+        if self.allowChannelsInSearch {
+            categories.insert(.channels)
+        }
+        
+        self.searchDisplayController = SearchDisplayController(presentationData: self.presentationData, contentNode: ContactsSearchContainerNode(context: self.context, updatedPresentationData: (self.presentationData, self.presentationDataPromise.get()), onlyWriteable: false, categories: categories, filters: self.filters, displayCallIcons: self.displayCallIcons, isPeerEnabled: self.isPeerEnabled, addContact: nil, openPeer: { [weak self] peer, action in
             if let strongSelf = self {
                 var updated = false
                 strongSelf.contactListNode.updateSelectionState { state -> ContactListNodeGroupSelectionState? in
@@ -283,9 +366,23 @@ final class ContactSelectionControllerNode: ASDisplayNode {
                 if updated {
                     strongSelf.requestDeactivateSearch?()
                 } else {
-                    strongSelf.requestOpenPeerFromSearch?(peer)
+                    let mappedAction: ContactListAction
+                    switch action {
+                    case .generic:
+                        mappedAction = .generic
+                    case .voiceCall:
+                        mappedAction = .voiceCall
+                    case .videoCall:
+                        mappedAction = .videoCall
+                    }
+                    strongSelf.requestOpenPeerFromSearch?(peer, mappedAction)
                 }
             }
+        }, openDisabledPeer: { [weak self] peer, reason in
+            guard let self else {
+                return
+            }
+            self.requestOpenDisabledPeerFromSearch?(peer, reason)
         }, contextAction: nil), cancel: { [weak self] in
             if let requestDeactivateSearch = self?.requestDeactivateSearch {
                 requestDeactivateSearch()

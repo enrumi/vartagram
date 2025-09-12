@@ -378,18 +378,18 @@ public final class ChatButtonKeyboardInputNode: ChatInputNode {
                     self.controllerInteraction.sendMessage(markupButton.title)
                     dismissIfOnce = true
                 case let .url(url):
-                self.controllerInteraction.openUrl(ChatControllerInteraction.OpenUrl(url: url, concealed: true))
+                    self.controllerInteraction.openUrl(ChatControllerInteraction.OpenUrl(url: url, concealed: true, progress: Promise()))
                 case .requestMap:
                     self.controllerInteraction.shareCurrentLocation()
                 case .requestPhone:
                     self.controllerInteraction.shareAccountContact()
                 case .openWebApp:
                     if let message = self.message {
-                        self.controllerInteraction.requestMessageActionCallback(message.id, nil, true, false)
+                        self.controllerInteraction.requestMessageActionCallback(message, nil, true, false, nil)
                     }
                 case let .callback(requiresPassword, data):
                     if let message = self.message {
-                        self.controllerInteraction.requestMessageActionCallback(message.id, data, false, requiresPassword)
+                        self.controllerInteraction.requestMessageActionCallback(message, data, false, requiresPassword, nil)
                     }
                 case let .switchInline(samePeer, query, _):
                     if let message = message {
@@ -438,6 +438,8 @@ public final class ChatButtonKeyboardInputNode: ChatInputNode {
                     if let message = self.message {
                         self.controllerInteraction.openRequestedPeerSelection(message.id, peerType, buttonId, maxQuantity)
                     }
+                case let .copyText(payload):
+                    self.controllerInteraction.copyText(payload)
             }
             if dismissIfOnce {
                 if let message = self.message {

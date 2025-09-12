@@ -44,6 +44,8 @@ swift_library(
         "//submodules/ComponentFlow",
         "//submodules/TooltipUI",
         "//submodules/UndoUI",
+        "//submodules/TelegramIntents",
+        "//submodules/ContextUI",
     ],
     visibility = [
         "//visibility:public",

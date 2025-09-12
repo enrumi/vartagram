@@ -12,9 +12,13 @@ import ContactListUI
 import SearchUI
 import AttachmentUI
 import SearchBarNode
+import ChatSendAudioMessageContextPreview
+import ChatSendMessageActionUI
+import ContextUI
 
 class ContactSelectionControllerImpl: ViewController, ContactSelectionController, PresentableController, AttachmentContainable {
     private let context: AccountContext
+    private let mode: ContactSelectionControllerMode
     private let autoDismiss: Bool
     
     fileprivate var contactsNode: ContactSelectionControllerNode {
@@ -33,12 +37,16 @@ class ContactSelectionControllerImpl: ViewController, ContactSelectionController
     
     private let index: PeerNameIndex = .lastNameFirst
     private let titleProducer: (PresentationStrings) -> String
-    private let options: [ContactListAdditionalOption]
+    private let options: Signal<[ContactListAdditionalOption], NoError>
     private let displayDeviceContacts: Bool
     private let displayCallIcons: Bool
-    private let multipleSelection: Bool
+    private let multipleSelection: ContactSelectionControllerParams.MultipleSelectionMode
     private let requirePhoneNumbers: Bool
-    
+    private let allowChannelsInSearch: Bool
+
+    private let openProfile: ((EnginePeer) -> Void)?
+    private let sendMessage: ((EnginePeer) -> Void)?
+
     private var _ready = Promise<Bool>()
     override var ready: Promise<Bool> {
         return self._ready
@@ -46,13 +54,14 @@ class ContactSelectionControllerImpl: ViewController, ContactSelectionController
     
     fileprivate var caption: NSAttributedString?
     
-    private let _result = Promise<([ContactListPeer], ContactListAction, Bool, Int32?, NSAttributedString?)?>()
-    var result: Signal<([ContactListPeer], ContactListAction, Bool, Int32?, NSAttributedString?)?, NoError> {
+    private let _result = Promise<([ContactListPeer], ContactListAction, Bool, Int32?, NSAttributedString?, ChatSendMessageActionSheetController.SendParameters?)?>()
+    var result: Signal<([ContactListPeer], ContactListAction, Bool, Int32?, NSAttributedString?, ChatSendMessageActionSheetController.SendParameters?)?, NoError> {
         return self._result.get()
     }
     private var resultIsSet = false
-    
+
     private let confirmation: (ContactListPeer) -> Signal<Bool, NoError>
+    private let isPeerEnabled: (ContactListPeer) -> Bool
     var dismissed: (() -> Void)?
     
     var presentScheduleTimePicker: (@escaping (Int32) -> Void) -> Void = { _ in }
@@ -79,22 +88,35 @@ class ContactSelectionControllerImpl: ViewController, ContactSelectionController
     
     var requestAttachmentMenuExpansion: () -> Void = {}
     var updateNavigationStack: (@escaping ([AttachmentContainable]) -> ([AttachmentContainable], AttachmentMediaPickerContext?)) -> Void = { _ in }
+    public var parentController: () -> ViewController? = {
+        return nil
+    }
     var updateTabBarAlpha: (CGFloat, ContainedViewLayoutTransition) -> Void = { _, _ in }
+    var updateTabBarVisibility: (Bool, ContainedViewLayoutTransition) -> Void = { _, _ in }
     var cancelPanGesture: () -> Void = { }
     var isContainerPanning: () -> Bool = { return false }
     var isContainerExpanded: () -> Bool = { return false }
-    
+    var isMinimized: Bool = false
+
+    var getCurrentSendMessageContextMediaPreview: (() -> ChatSendMessageContextScreenMediaPreview?)?
+
     init(_ params: ContactSelectionControllerParams) {
         self.context = params.context
+        self.mode = params.mode
         self.autoDismiss = params.autoDismiss
         self.titleProducer = params.title
         self.options = params.options
         self.displayDeviceContacts = params.displayDeviceContacts
         self.displayCallIcons = params.displayCallIcons
         self.confirmation = params.confirmation
+        self.isPeerEnabled = params.isPeerEnabled
         self.multipleSelection = params.multipleSelection
         self.requirePhoneNumbers = params.requirePhoneNumbers
-        
+        self.allowChannelsInSearch = params.allowChannelsInSearch
+
+        self.openProfile = params.openProfile
+        self.sendMessage = params.sendMessage
+
         self.presentationData = params.updatedPresentationData?.initial ?? params.context.sharedContext.currentPresentationData.with { $0 }
         
         super.init(navigationBarPresentationData: NavigationBarPresentationData(presentationData: self.presentationData))
@@ -132,15 +154,35 @@ class ContactSelectionControllerImpl: ViewController, ContactSelectionController
             }
         })
         
-        if !params.multipleSelection {
+        if self.multipleSelection != .always {
             self.searchContentNode = NavigationBarSearchContentNode(theme: self.presentationData.theme, placeholder: self.presentationData.strings.Common_Search, activate: { [weak self] in
                 self?.activateSearch()
             })
             self.navigationBar?.setContentNode(self.searchContentNode, animated: false)
         }
         
-        if params.multipleSelection {
+        if self.multipleSelection == .always {
             self.navigationItem.rightBarButtonItem = UIBarButtonItem(image: PresentationResourcesRootController.navigationCompactSearchIcon(self.presentationData.theme), style: .plain, target: self, action: #selector(self.beginSearch))
+        } else if self.multipleSelection == .possible {
+            self.navigationItem.rightBarButtonItem = UIBarButtonItem(title: self.presentationData.strings.Common_Select, style: .plain, target: self, action: #selector(self.beginSelection))
+        }
+
+        self.getCurrentSendMessageContextMediaPreview = { [weak self] in
+            guard let self else {
+                return nil
+            }
+
+            let selectedPeers = self.contactsNode.contactListNode.selectedPeers
+            if selectedPeers.isEmpty {
+                return nil
+            }
+
+            return ChatSendContactMessageContextPreview(
+                context: self.context,
+                presentationData: self.presentationData,
+                wallpaperBackgroundNode: nil,
+                contactPeers: selectedPeers
+            )
         }
     }
     
@@ -178,12 +220,12 @@ class ContactSelectionControllerImpl: ViewController, ContactSelectionController
         assert(!self.resultIsSet)
         self._result.set(.single(nil))
         self.resultIsSet = true
-        
+
         self.dismiss()
     }
     
     override func loadDisplayNode() {
-        self.displayNode = ContactSelectionControllerNode(context: self.context, presentationData: self.presentationData, options: self.options, displayDeviceContacts: self.displayDeviceContacts, displayCallIcons: self.displayCallIcons, multipleSelection: self.multipleSelection, requirePhoneNumbers: self.requirePhoneNumbers)
+        self.displayNode = ContactSelectionControllerNode(context: self.context, mode: self.mode, presentationData: self.presentationData, options: self.options, displayDeviceContacts: self.displayDeviceContacts, displayCallIcons: self.displayCallIcons, multipleSelection: self.multipleSelection == .always, requirePhoneNumbers: self.requirePhoneNumbers, allowChannelsInSearch: self.allowChannelsInSearch, isPeerEnabled: self.isPeerEnabled)
         self._ready.set(self.contactsNode.contactListNode.ready)
         
         self.contactsNode.navigationBar = self.navigationBar
@@ -192,16 +234,16 @@ class ContactSelectionControllerImpl: ViewController, ContactSelectionController
             self?.deactivateSearch()
         }
         
-        self.contactsNode.requestOpenPeerFromSearch = { [weak self] peer in
-            self?.openPeer(peer: peer, action: .generic)
+        self.contactsNode.requestOpenPeerFromSearch = { [weak self] peer, action in
+            self?.openPeer(peer: peer, action: action, node: nil, gesture: nil)
         }
         
         self.contactsNode.contactListNode.activateSearch = { [weak self] in
             self?.activateSearch()
         }
         
-        self.contactsNode.contactListNode.openPeer = { [weak self] peer, action in
-            self?.openPeer(peer: peer, action: action)
+        self.contactsNode.contactListNode.openPeer = { [weak self] peer, action, node, gesture in
+            self?.openPeer(peer: peer, action: action, node: node, gesture: gesture)
         }
                 
         self.contactsNode.contactListNode.suppressPermissionWarning = { [weak self] in
@@ -234,11 +276,11 @@ class ContactSelectionControllerImpl: ViewController, ContactSelectionController
             }
         }
 
-        self.contactsNode.requestMultipleAction = { [weak self] silent, scheduleTime in
+        self.contactsNode.requestMultipleAction = { [weak self] silent, scheduleTime, parameters in
             if let strongSelf = self {
                 let selectedPeers = strongSelf.contactsNode.contactListNode.selectedPeers
                 assert(!strongSelf.resultIsSet)
-                strongSelf._result.set(.single((selectedPeers, .generic, silent, scheduleTime, strongSelf.caption)))
+                strongSelf._result.set(.single((selectedPeers, .generic, silent, scheduleTime, strongSelf.caption, parameters)))
                 strongSelf.resultIsSet = true
                 if strongSelf.autoDismiss {
                     strongSelf.dismiss()
@@ -287,7 +329,7 @@ class ContactSelectionControllerImpl: ViewController, ContactSelectionController
         super.viewDidDisappear(animated)
         
         self.contactsNode.contactListNode.enableUpdates = false
-        
+
         if !self.resultIsSet {
             self._result.set(.single(nil))
             self.resultIsSet = true
@@ -305,7 +347,7 @@ class ContactSelectionControllerImpl: ViewController, ContactSelectionController
             if let searchContentNode = self.searchContentNode as? NavigationBarSearchContentNode {
                 self.contactsNode.activateSearch(placeholderNode: searchContentNode.placeholderNode)
                 self.setDisplayNavigationBar(false, transition: .animated(duration: 0.5, curve: .spring))
-            } else if self.multipleSelection {
+            } else if self.multipleSelection == .always {
                 let contentNode = ContactsSearchNavigationContentNode(presentationData: self.presentationData, dismissSearch: { [weak self] in
                     if let strongSelf = self, let navigationBar = strongSelf.navigationBar, let searchContentNode = strongSelf.searchContentNode as? ContactsSearchNavigationContentNode {
                         searchContentNode.deactivate()
@@ -338,13 +380,46 @@ class ContactSelectionControllerImpl: ViewController, ContactSelectionController
         }
     }
     
-    private func openPeer(peer: ContactListPeer, action: ContactListAction) {
+    private func openPeer(peer: ContactListPeer, action: ContactListAction, node: ASDisplayNode?, gesture: ContextGesture?) {
+        if case .more = action {
+            guard case let .peer(peer, _, _) = peer, let node = node as? ContextReferenceContentNode else {
+                return
+            }
+
+            let presentationData = self.presentationData
+
+            var items: [ContextMenuItem] = []
+            items.append(.action(ContextMenuActionItem(text: presentationData.strings.Premium_Gift_ContactSelection_SendMessage, icon: { theme in
+                return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/MessageBubble"), color: theme.contextMenu.primaryColor)
+            }, iconPosition: .left, action: { [weak self] _, a in
+                a(.default)
+
+                if let self {
+                    self.sendMessage?(EnginePeer(peer))
+                }
+            })))
+
+            items.append(.action(ContextMenuActionItem(text: presentationData.strings.Premium_Gift_ContactSelection_OpenProfile, icon: { theme in
+                return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/User"), color: theme.contextMenu.primaryColor)
+            }, iconPosition: .left, action: { [weak self] _, a in
+                a(.default)
+
+                if let self {
+                    self.openProfile?(EnginePeer(peer))
+                }
+            })))
+
+            let contextController = ContextController(presentationData: presentationData, source: .reference(ContactContextReferenceContentSource(controller: self, sourceNode: node)), items: .single(ContextController.Items(content: .list(items))), gesture: gesture)
+            self.present(contextController, in: .window(.root))
+            return
+        }
+
         self.contactsNode.contactListNode.listNode.clearHighlightAnimated(true)
         self.confirmationDisposable.set((self.confirmation(peer) |> deliverOnMainQueue).startStrict(next: { [weak self] value in
             if let strongSelf = self {
                 if value {
                     assert(!strongSelf.resultIsSet)
-                    strongSelf._result.set(.single(([peer], action, false, nil, nil)))
+                    strongSelf._result.set(.single(([peer], action, false, nil, nil, nil)))
                     strongSelf.resultIsSet = true
                     if strongSelf.autoDismiss {
                         strongSelf.dismiss()
@@ -438,19 +513,7 @@ final class ContactsPickerContext: AttachmentMediaPickerContext {
             return .single(0)
         }
     }
-    
-    var caption: Signal<NSAttributedString?, NoError> {
-        return .single(nil)
-    }
-    
-    public var loadingProgress: Signal<CGFloat?, NoError> {
-        return .single(nil)
-    }
-    
-    public var mainButtonState: Signal<AttachmentMainButtonState?, NoError> {
-        return .single(nil)
-    }
-        
+
     init(controller: ContactSelectionControllerImpl) {
         self.controller = controller
     }
@@ -459,16 +522,30 @@ final class ContactsPickerContext: AttachmentMediaPickerContext {
         self.controller?.caption = caption
     }
     
-    func send(mode: AttachmentMediaPickerSendMode, attachmentMode: AttachmentMediaPickerAttachmentMode) {
-        self.controller?.contactsNode.requestMultipleAction?(mode == .silently, mode == .whenOnline ? scheduleWhenOnlineTimestamp : nil)
+    func send(mode: AttachmentMediaPickerSendMode, attachmentMode: AttachmentMediaPickerAttachmentMode, parameters: ChatSendMessageActionSheetController.SendParameters?) {
+        self.controller?.contactsNode.requestMultipleAction?(mode == .silently, mode == .whenOnline ? scheduleWhenOnlineTimestamp : nil, parameters)
     }
     
-    func schedule() {
+    func schedule(parameters: ChatSendMessageActionSheetController.SendParameters?) {
         self.controller?.presentScheduleTimePicker ({ time in
-            self.controller?.contactsNode.requestMultipleAction?(false, time)
+            self.controller?.contactsNode.requestMultipleAction?(false, time, parameters)
         })
     }
     
     func mainButtonAction() {
+    }
+}
+
+private final class ContactContextReferenceContentSource: ContextReferenceContentSource {
+    private let controller: ViewController
+    private let sourceNode: ContextReferenceContentNode
+
+    init(controller: ViewController, sourceNode: ContextReferenceContentNode) {
+        self.controller = controller
+        self.sourceNode = sourceNode
+    }
+
+    func transitionInfo() -> ContextControllerReferenceViewInfo? {
+        return ContextControllerReferenceViewInfo(referenceView: self.sourceNode.view, contentAreaInScreenSpace: UIScreen.main.bounds)
     }
 }

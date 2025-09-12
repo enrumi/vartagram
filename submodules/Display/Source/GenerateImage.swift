@@ -330,7 +330,7 @@ public func generateTintedImage(image: UIImage?, color: UIColor, backgroundColor
     return tintedImage
 }
 
-public func generateGradientTintedImage(image: UIImage?, colors: [UIColor]) -> UIImage? {
+public func generateGradientTintedImage(image: UIImage?, colors: [UIColor], direction: GradientImageDirection = .vertical) -> UIImage? {
     guard let image = image else {
         return nil
     }
@@ -357,7 +357,24 @@ public func generateGradientTintedImage(image: UIImage?, colors: [UIColor]) -> U
             let colorSpace = DeviceGraphicsContextSettings.shared.colorSpace
             let gradient = CGGradient(colorsSpace: colorSpace, colors: gradientColors, locations: &locations)!
 
-            context.drawLinearGradient(gradient, start: CGPoint(x: 0.0, y: imageRect.height), end: CGPoint(x: 0.0, y: 0.0), options: CGGradientDrawingOptions())
+            let start: CGPoint
+            let end: CGPoint
+            switch direction {
+            case .horizontal:
+                start = .zero
+                end = CGPoint(x: imageRect.width, y: 0.0)
+            case .vertical:
+                start = CGPoint(x: 0.0, y: imageRect.height)
+                end = .zero
+            case .diagonal:
+                start = CGPoint(x: 0.0, y: 0.0)
+                end = CGPoint(x: imageRect.width, y: imageRect.height)
+            case .mirroredDiagonal:
+                start = CGPoint(x: imageRect.width, y: 0.0)
+                end = CGPoint(x: 0.0, y: imageRect.height)
+            }
+            
+            context.drawLinearGradient(gradient, start: start, end: end, options: CGGradientDrawingOptions())
         } else if !colors.isEmpty {
             context.setFillColor(colors[0].cgColor)
             context.fill(imageRect)
@@ -375,6 +392,8 @@ public func generateGradientTintedImage(image: UIImage?, colors: [UIColor]) -> U
 public enum GradientImageDirection {
     case vertical
     case horizontal
+    case diagonal
+    case mirroredDiagonal
 }
 
 public func generateGradientImage(size: CGSize, scale: CGFloat = 0.0, colors: [UIColor], locations: [CGFloat], direction: GradientImageDirection = .vertical) -> UIImage? {
@@ -398,18 +417,39 @@ public func generateGradientImage(size: CGSize, scale: CGFloat = 0.0, colors: [U
     return image
 }
 
-public func generateGradientFilledCircleImage(diameter: CGFloat, colors: NSArray) -> UIImage? {
+public func generateGradientFilledCircleImage(diameter: CGFloat, colors: NSArray, direction: GradientImageDirection = .vertical) -> UIImage? {
     return generateImage(CGSize(width: diameter, height: diameter), contextGenerator: { size, context in
         let bounds = CGRect(origin: CGPoint(), size: size)
         context.clear(bounds)
         context.addEllipse(in: bounds)
         context.clip()
         
-        var locations: [CGFloat] = [0.0, 1.0]
+        var locations: [CGFloat] = []
+        for i in 0 ..< colors.count {
+            let t = CGFloat(i) / CGFloat(colors.count - 1)
+            locations.append(t)
+        }
         let colorSpace = DeviceGraphicsContextSettings.shared.colorSpace
         let gradient = CGGradient(colorsSpace: colorSpace, colors: colors, locations: &locations)!
         
-        context.drawLinearGradient(gradient, start: CGPoint(), end: CGPoint(x: 0.0, y: bounds.size.height), options: CGGradientDrawingOptions())
+        let start: CGPoint
+        let end: CGPoint
+        switch direction {
+        case .horizontal:
+            start = .zero
+            end = CGPoint(x: size.width, y: 0.0)
+        case .vertical:
+            start = .zero
+            end = CGPoint(x: 0.0, y: size.height)
+        case .diagonal:
+            start = CGPoint(x: 0.0, y: 0.0)
+            end = CGPoint(x: size.width, y: size.height)
+        case .mirroredDiagonal:
+            start = CGPoint(x: size.width, y: 0.0)
+            end = CGPoint(x: 0.0, y: size.height)
+        }
+        
+        context.drawLinearGradient(gradient, start: start, end:end, options: CGGradientDrawingOptions())
     })
 }
 
@@ -436,6 +476,7 @@ public func generateSingleColorImage(size: CGSize, color: UIColor, scale: CGFloa
 
 public enum DrawingContextBltMode {
     case Alpha
+    case AlphaFromColor
 }
 
 public func getSharedDevideGraphicsContextSettings() -> DeviceGraphicsContextSettings {
@@ -460,7 +501,7 @@ public func getSharedDevideGraphicsContextSettings() -> DeviceGraphicsContextSet
             } else {
                 self.colorSpace = context.colorSpace!
             }
-            assert(self.rowAlignment == 32)
+            assert(self.rowAlignment == 32 || self.rowAlignment == 64)
             assert(self.bitsPerPixel == 32)
             assert(self.bitsPerComponent == 8)
         }
@@ -530,7 +571,8 @@ public struct DeviceGraphicsContextSettings {
 
     public func bytesPerRow(forWidth width: Int) -> Int {
         let baseValue = self.bitsPerPixel * width / 8
-        return (baseValue + 31) & ~0x1F
+        let alignmentMask = self.rowAlignment - 1
+        return (baseValue + alignmentMask) & ~alignmentMask
     }
 }
 
@@ -704,38 +746,64 @@ public class DrawingContext {
             let maxDstY = dstY + height
             
             switch mode {
-                case .Alpha:
-                    while dstY < maxDstY {
-                        let srcLine = other.bytes.advanced(by: max(0, srcY) * other.bytesPerRow).assumingMemoryBound(to: UInt32.self)
-                        let dstLine = self.bytes.advanced(by: max(0, dstY) * self.bytesPerRow).assumingMemoryBound(to: UInt32.self)
+            case .Alpha:
+                while dstY < maxDstY {
+                    let srcLine = other.bytes.advanced(by: max(0, srcY) * other.bytesPerRow).assumingMemoryBound(to: UInt32.self)
+                    let dstLine = self.bytes.advanced(by: max(0, dstY) * self.bytesPerRow).assumingMemoryBound(to: UInt32.self)
+                    
+                    var dx = dstX
+                    var sx = srcX
+                    while dx < maxDstX {
+                        let srcPixel = srcLine + sx
+                        let dstPixel = dstLine + dx
                         
-                        var dx = dstX
-                        var sx = srcX
-                        while dx < maxDstX {
-                            let srcPixel = srcLine + sx
-                            let dstPixel = dstLine + dx
-                            
-                            let baseColor = dstPixel.pointee
-                            let baseAlpha = (baseColor >> 24) & 0xff
-                            let baseR = (baseColor >> 16) & 0xff
-                            let baseG = (baseColor >> 8) & 0xff
-                            let baseB = baseColor & 0xff
-                            
-                            let alpha = min(baseAlpha, srcPixel.pointee >> 24)
-                            
-                            let r = (baseR * alpha) / 255
-                            let g = (baseG * alpha) / 255
-                            let b = (baseB * alpha) / 255
-                            
-                            dstPixel.pointee = (alpha << 24) | (r << 16) | (g << 8) | b
-                            
-                            dx += 1
-                            sx += 1
-                        }
+                        let baseColor = dstPixel.pointee
+                        let baseAlpha = (baseColor >> 24) & 0xff
+                        let baseR = (baseColor >> 16) & 0xff
+                        let baseG = (baseColor >> 8) & 0xff
+                        let baseB = baseColor & 0xff
                         
-                        dstY += 1
-                        srcY += 1
+                        let alpha = min(baseAlpha, srcPixel.pointee >> 24)
+                        
+                        let r = (baseR * alpha) / 255
+                        let g = (baseG * alpha) / 255
+                        let b = (baseB * alpha) / 255
+                        
+                        dstPixel.pointee = (alpha << 24) | (r << 16) | (g << 8) | b
+                        
+                        dx += 1
+                        sx += 1
                     }
+                    
+                    dstY += 1
+                    srcY += 1
+                }
+            case .AlphaFromColor:
+                while dstY < maxDstY {
+                    let srcLine = other.bytes.advanced(by: max(0, srcY) * other.bytesPerRow).assumingMemoryBound(to: UInt32.self)
+                    let dstLine = self.bytes.advanced(by: max(0, dstY) * self.bytesPerRow).assumingMemoryBound(to: UInt32.self)
+                    
+                    var dx = dstX
+                    var sx = srcX
+                    while dx < maxDstX {
+                        let srcPixel = srcLine + sx
+                        let dstPixel = dstLine + dx
+                        
+                        let alpha = (srcPixel.pointee >> 0) & 0xff
+                        
+                        let r = alpha
+                        let g = alpha
+                        let b = alpha
+                        
+                        dstPixel.pointee = (alpha << 24) | (r << 16) | (g << 8) | b
+                        
+                        dx += 1
+                        sx += 1
+                    }
+                    
+                    dstY += 1
+                    srcY += 1
+                }
             }
         }
     }

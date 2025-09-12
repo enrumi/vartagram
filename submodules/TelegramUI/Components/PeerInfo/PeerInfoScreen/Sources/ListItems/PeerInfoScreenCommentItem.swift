@@ -1,8 +1,13 @@
+import Foundation
+import UIKit
 import AsyncDisplayKit
 import Display
 import TelegramPresentationData
 import TextFormat
 import Markdown
+import AccountContext
+import TextNodeWithEntities
+import TextFormat
 
 final class PeerInfoScreenCommentItem: PeerInfoScreenItem {
     enum LinkAction {
@@ -11,11 +16,15 @@ final class PeerInfoScreenCommentItem: PeerInfoScreenItem {
     
     let id: AnyHashable
     let text: String
+    let attributedPrefix: NSAttributedString?
+    let useAccentLinkColor: Bool
     let linkAction: ((LinkAction) -> Void)?
     
-    init(id: AnyHashable, text: String, linkAction: ((LinkAction) -> Void)? = nil) {
+    init(id: AnyHashable, text: String, attributedPrefix: NSAttributedString? = nil, useAccentLinkColor: Bool = true, linkAction: ((LinkAction) -> Void)? = nil) {
         self.id = id
         self.text = text
+        self.attributedPrefix = attributedPrefix
+        self.useAccentLinkColor = useAccentLinkColor
         self.linkAction = linkAction
     }
     
@@ -25,15 +34,17 @@ final class PeerInfoScreenCommentItem: PeerInfoScreenItem {
 }
 
 private final class PeerInfoScreenCommentItemNode: PeerInfoScreenItemNode {
-    private let textNode: ImmediateTextNode
+    private let textNode: ImmediateTextNodeWithEntities
     private var linkHighlightingNode: LinkHighlightingNode?
     private let activateArea: AccessibilityAreaNode
     
     private var item: PeerInfoScreenCommentItem?
     private var presentationData: PresentationData?
     
+    private var chevronImage: UIImage?
+    
     override init() {
-        self.textNode = ImmediateTextNode()
+        self.textNode = ImmediateTextNodeWithEntities()
         self.textNode.displaysAsynchronously = false
         self.textNode.isUserInteractionEnabled = false
         
@@ -61,11 +72,12 @@ private final class PeerInfoScreenCommentItemNode: PeerInfoScreenItemNode {
         self.view.addGestureRecognizer(recognizer)
     }
     
-    override func update(width: CGFloat, safeInsets: UIEdgeInsets, presentationData: PresentationData, item: PeerInfoScreenItem, topItem: PeerInfoScreenItem?, bottomItem: PeerInfoScreenItem?, hasCorners: Bool, transition: ContainedViewLayoutTransition) -> CGFloat {
+    override func update(context: AccountContext, width: CGFloat, safeInsets: UIEdgeInsets, presentationData: PresentationData, item: PeerInfoScreenItem, topItem: PeerInfoScreenItem?, bottomItem: PeerInfoScreenItem?, hasCorners: Bool, transition: ContainedViewLayoutTransition) -> CGFloat {
         guard let item = item as? PeerInfoScreenCommentItem else {
             return 10.0
         }
         
+        let themeUpdated = self.presentationData?.theme !== presentationData.theme
         self.item = item
         self.presentationData = presentationData
         
@@ -73,15 +85,42 @@ private final class PeerInfoScreenCommentItemNode: PeerInfoScreenItemNode {
         let verticalInset: CGFloat = 7.0
         
         self.textNode.maximumNumberOfLines = 0
+        self.textNode.arguments = TextNodeWithEntities.Arguments(
+            context: context,
+            cache: context.animationCache,
+            renderer: context.animationRenderer,
+            placeholderColor: presentationData.theme.list.mediaPlaceholderColor,
+            attemptSynchronous: false
+        )
         
         let textFont = Font.regular(presentationData.listsFontSize.itemListBaseHeaderFontSize)
         let textColor = presentationData.theme.list.freeTextColor
         
-        let attributedText = parseMarkdownIntoAttributedString(item.text, attributes: MarkdownAttributes(body: MarkdownAttributeSet(font: textFont, textColor: textColor), bold: MarkdownAttributeSet(font: textFont, textColor: textColor), link: MarkdownAttributeSet(font: textFont, textColor: presentationData.theme.list.itemAccentColor), linkAttribute: { contents in
-            return (TelegramTextAttributes.URL, contents)
-        }))
+        var text = item.text
+        text = text.replacingOccurrences(of: " >]", with: "\u{00A0}>]")
         
+        let attributedText = parseMarkdownIntoAttributedString(text, attributes: MarkdownAttributes(body: MarkdownAttributeSet(font: textFont, textColor: textColor), bold: MarkdownAttributeSet(font: textFont, textColor: textColor), link: MarkdownAttributeSet(font: textFont, textColor: item.useAccentLinkColor ? presentationData.theme.list.itemAccentColor : textColor, additionalAttributes: item.useAccentLinkColor ? [:] : [NSAttributedString.Key.underlineStyle.rawValue: NSUnderlineStyle.single.rawValue as NSNumber]), linkAttribute: { contents in
+            return (TelegramTextAttributes.URL, contents)
+        })).mutableCopy() as! NSMutableAttributedString
+        
+        if let attributedPrefix = item.attributedPrefix {
+            attributedText.insert(attributedPrefix, at: 0)
+            attributedText.addAttribute(NSAttributedString.Key.font, value: textFont, range: NSRange(location: 0, length: attributedPrefix.length))
+            attributedText.addAttribute(NSAttributedString.Key.foregroundColor, value: textColor, range: NSRange(location: 0, length: attributedPrefix.length))
+        }
+        
+        if let _ = item.text.range(of: ">]"), let range = attributedText.string.range(of: ">") {
+            if themeUpdated || self.chevronImage == nil {
+                self.chevronImage = generateTintedImage(image: UIImage(bundleImageName: "Contact List/SubtitleArrow"), color: presentationData.theme.list.itemAccentColor)
+            }
+            if let chevronImage = self.chevronImage {
+                attributedText.addAttribute(.attachment, value: chevronImage, range: NSRange(range, in: attributedText.string))
+            }
+        }
+
         self.textNode.attributedText = attributedText
+        self.textNode.visibility = true
+        self.textNode.lineSpacing = 0.12
         self.activateArea.accessibilityLabel = attributedText.string
         
         let textSize = self.textNode.updateLayout(CGSize(width: width - sideInset * 2.0, height: .greatestFiniteMagnitude))
@@ -121,7 +160,7 @@ private final class PeerInfoScreenCommentItemNode: PeerInfoScreenItemNode {
     }
     
     private func updateTouchesAtPoint(_ point: CGPoint?) {
-        if let _ = self.item, let presentationData = self.presentationData {
+        if let item = self.item, let presentationData = self.presentationData {
             var rects: [CGRect]?
             if let point = point {
                 let textNodeFrame = self.textNode.frame
@@ -147,7 +186,7 @@ private final class PeerInfoScreenCommentItemNode: PeerInfoScreenItemNode {
                 if let current = self.linkHighlightingNode {
                     linkHighlightingNode = current
                 } else {
-                    linkHighlightingNode = LinkHighlightingNode(color: presentationData.theme.list.itemAccentColor.withAlphaComponent(0.2))
+                    linkHighlightingNode = LinkHighlightingNode(color: item.useAccentLinkColor ? presentationData.theme.list.itemAccentColor.withAlphaComponent(0.2) : presentationData.theme.list.freeTextColor.withAlphaComponent(0.2))
                     self.linkHighlightingNode = linkHighlightingNode
                     self.insertSubnode(linkHighlightingNode, belowSubnode: self.textNode)
                 }

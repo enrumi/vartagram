@@ -14,7 +14,7 @@ objc_library(
     srcs = glob([
         "Sources/*.c",
         "Sources/*.h",
-    ], exclude = public_headers),
+    ], exclude = public_headers, allow_empty=True),
     hdrs = public_headers,
     includes = [
         "PublicHeaders",
@@ -32,6 +32,8 @@ objc_library(
         "-DSQLITE_OMIT_DEPRECATED",
         "-DNDEBUG=1",
         "-DSQLITE_MAX_MMAP_SIZE=0",
+        "-Wno-all",
+        "-Wno-#warnings",
     ],
     defines = ["TEST_BUILD"] if telegram_is_internal_build == "true" else [],
     sdk_frameworks = [

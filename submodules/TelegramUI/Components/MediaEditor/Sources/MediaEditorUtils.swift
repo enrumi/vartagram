@@ -78,10 +78,11 @@ func loadTexture(image: UIImage, device: MTLDevice) -> MTLTexture? {
         let bytePerPixel = 4
         let bytesPerRow = bytePerPixel * Int(width)
         let bitsPerComponent = 8
-        let bitmapInfo = CGBitmapInfo.byteOrder32Little.rawValue + CGImageAlphaInfo.premultipliedFirst.rawValue
-        let context = CGContext.init(data: rawData, width: width, height: height, bitsPerComponent: bitsPerComponent, bytesPerRow: bytesPerRow, space: colorSpace, bitmapInfo: bitmapInfo)
-        context?.draw(imageRef!, in: CGRect(x: 0, y: 0, width: width, height: height))
-        
+        let bitmapInfo = CGBitmapInfo(rawValue: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue)
+        if let context = CGContext(data: rawData, width: width, height: height, bitsPerComponent: bitsPerComponent, bytesPerRow: bytesPerRow, space: colorSpace, bitmapInfo: bitmapInfo.rawValue) {
+            context.clear(CGRect(x: 0, y: 0, width: width, height: height))
+            context.draw(imageRef!, in: CGRect(x: 0, y: 0, width: width, height: height))
+        }
         return rawData
     }
     
@@ -97,6 +98,7 @@ func loadTexture(image: UIImage, device: MTLDevice) -> MTLTexture? {
     
     let data = dataForImage(image)
     texture?.replace(region: region, mipmapLevel: 0, withBytes: data, bytesPerRow: bytesPerRow)
+    data.deallocate()
     
     return texture
 }
@@ -134,7 +136,7 @@ func getTextureImage(device: MTLDevice, texture: MTLTexture, mirror: Bool = fals
     return UIImage(cgImage: cgImage)
 }
 
-public func getChatWallpaperImage(context: AccountContext, messageId: EngineMessage.Id) -> Signal<(CGSize, UIImage?, UIImage?), NoError> {
+public func getChatWallpaperImage(context: AccountContext, peerId: EnginePeer.Id) -> Signal<(CGSize, UIImage?, UIImage?), NoError> {
     let themeSettings = context.sharedContext.accountManager.sharedData(keys: [ApplicationSpecificSharedDataKeys.presentationThemeSettings])
     |> map { sharedData -> PresentationThemeSettings in
         let themeSettings: PresentationThemeSettings
@@ -147,7 +149,7 @@ public func getChatWallpaperImage(context: AccountContext, messageId: EngineMess
     }
     
     let peerWallpaper = context.account.postbox.transaction { transaction -> TelegramWallpaper? in
-        return (transaction.getPeerCachedData(peerId: messageId.peerId) as? CachedChannelData)?.wallpaper
+        return (transaction.getPeerCachedData(peerId: peerId) as? CachedChannelData)?.wallpaper
     }
     
     return combineLatest(themeSettings, peerWallpaper)

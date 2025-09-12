@@ -15,6 +15,7 @@ import MultiAnimationRenderer
 import AnimationUI
 import ComponentFlow
 import LottieComponent
+import TextNodeWithEntities
 
 public protocol ContextControllerActionsStackItemNode: ASDisplayNode {
     var wantsFullWidth: Bool { get }
@@ -35,8 +36,43 @@ public protocol ContextControllerActionsStackItemNode: ASDisplayNode {
     func increaseHighlightedIndex()
 }
 
+public struct ContextControllerReactionItems {
+    public var context: AccountContext
+    public var reactionItems: [ReactionContextItem]
+    public var selectedReactionItems: Set<MessageReaction.Reaction>
+    public var reactionsTitle: String?
+    public var reactionsLocked: Bool
+    public var animationCache: AnimationCache
+    public var alwaysAllowPremiumReactions: Bool
+    public var allPresetReactionsAreAvailable: Bool
+    public var getEmojiContent: ((AnimationCache, MultiAnimationRenderer) -> Signal<EmojiPagerContentComponent, NoError>)?
+    
+    public init(context: AccountContext, reactionItems: [ReactionContextItem], selectedReactionItems: Set<MessageReaction.Reaction>, reactionsTitle: String?, reactionsLocked: Bool, animationCache: AnimationCache, alwaysAllowPremiumReactions: Bool, allPresetReactionsAreAvailable: Bool, getEmojiContent: ((AnimationCache, MultiAnimationRenderer) -> Signal<EmojiPagerContentComponent, NoError>)?) {
+        self.context = context
+        self.reactionItems = reactionItems
+        self.selectedReactionItems = selectedReactionItems
+        self.reactionsTitle = reactionsTitle
+        self.reactionsLocked = reactionsLocked
+        self.animationCache = animationCache
+        self.alwaysAllowPremiumReactions = alwaysAllowPremiumReactions
+        self.allPresetReactionsAreAvailable = allPresetReactionsAreAvailable
+        self.getEmojiContent = getEmojiContent
+    }
+}
+
+public final class ContextControllerPreviewReaction {
+    public let context: AccountContext
+    public let file: TelegramMediaFile
+    
+    public init(context: AccountContext, file: TelegramMediaFile) {
+        self.context = context
+        self.file = file
+    }
+}
+
 public protocol ContextControllerActionsStackItem: AnyObject {
     func node(
+        context: AccountContext?,
         getController: @escaping () -> ContextControllerProtocol?,
         requestDismiss: @escaping (ContextMenuActionResult) -> Void,
         requestUpdate: @escaping (ContainedViewLayoutTransition) -> Void,
@@ -46,11 +82,12 @@ public protocol ContextControllerActionsStackItem: AnyObject {
     var id: AnyHashable? { get }
     var tip: ContextController.Tip? { get }
     var tipSignal: Signal<ContextController.Tip?, NoError>? { get }
-    var reactionItems: (context: AccountContext, reactionItems: [ReactionContextItem], selectedReactionItems: Set<MessageReaction.Reaction>, animationCache: AnimationCache, alwaysAllowPremiumReactions: Bool, getEmojiContent: ((AnimationCache, MultiAnimationRenderer) -> Signal<EmojiPagerContentComponent, NoError>)?)? { get }
+    var reactionItems: ContextControllerReactionItems? { get }
+    var previewReaction: ContextControllerPreviewReaction? { get }
     var dismissed: (() -> Void)? { get }
 }
 
-protocol ContextControllerActionsListItemNode: ASDisplayNode {
+public protocol ContextControllerActionsListItemNode: ASDisplayNode {
     func update(presentationData: PresentationData, constrainedSize: CGSize) -> (minSize: CGSize, apply: (_ size: CGSize, _ transition: ContainedViewLayoutTransition) -> Void)
     
     func canBeHighlighted() -> Bool
@@ -58,14 +95,15 @@ protocol ContextControllerActionsListItemNode: ASDisplayNode {
     func performAction()
 }
 
-private final class ContextControllerActionsListActionItemNode: HighlightTrackingButtonNode, ContextControllerActionsListItemNode {
+public final class ContextControllerActionsListActionItemNode: HighlightTrackingButtonNode, ContextControllerActionsListItemNode {
+    private let context: AccountContext?
     private let getController: () -> ContextControllerProtocol?
     private let requestDismiss: (ContextMenuActionResult) -> Void
     private let requestUpdateAction: (AnyHashable, ContextMenuActionItem) -> Void
     private var item: ContextMenuActionItem
     
     private let highlightBackgroundNode: ASDisplayNode
-    private let titleLabelNode: ImmediateTextNode
+    private let titleLabelNode: ImmediateTextNodeWithEntities
     private let subtitleNode: ImmediateTextNode
     private let iconNode: ASImageNode
     private let additionalIconNode: ASImageNode
@@ -79,12 +117,14 @@ private final class ContextControllerActionsListActionItemNode: HighlightTrackin
     
     private var iconDisposable: Disposable?
     
-    init(
+    public init(
+        context: AccountContext?,
         getController: @escaping () -> ContextControllerProtocol?,
         requestDismiss: @escaping (ContextMenuActionResult) -> Void,
         requestUpdateAction: @escaping (AnyHashable, ContextMenuActionItem) -> Void,
         item: ContextMenuActionItem
     ) {
+        self.context = context
         self.getController = getController
         self.requestDismiss = requestDismiss
         self.requestUpdateAction = requestUpdateAction
@@ -95,7 +135,7 @@ private final class ContextControllerActionsListActionItemNode: HighlightTrackin
         self.highlightBackgroundNode.isUserInteractionEnabled = false
         self.highlightBackgroundNode.alpha = 0.0
         
-        self.titleLabelNode = ImmediateTextNode()
+        self.titleLabelNode = ImmediateTextNodeWithEntities()
         self.titleLabelNode.isAccessibilityElement = false
         self.titleLabelNode.displaysAsynchronously = false
         
@@ -132,8 +172,10 @@ private final class ContextControllerActionsListActionItemNode: HighlightTrackin
             }
             if highlighted {
                 strongSelf.highlightBackgroundNode.alpha = 1.0
+                strongSelf.startTimer()
             } else {
                 strongSelf.highlightBackgroundNode.alpha = 0.0
+                strongSelf.invalidateTimer()
             }
         }
         
@@ -143,20 +185,37 @@ private final class ContextControllerActionsListActionItemNode: HighlightTrackin
     deinit {
         self.iconDisposable?.dispose()
     }
+        
+    private var timer: SwiftSignalKit.Timer?
+    private func startTimer() {
+        self.invalidateTimer()
+        
+        self.timer = SwiftSignalKit.Timer(timeout: 1.0, repeat: false, completion: { [weak self] in
+            guard let self else {
+                return
+            }
+            self.invalidateTimer()
+            self.longPressed()
+        }, queue: Queue.mainQueue())
+        self.timer?.start()
+    }
     
-    override func didLoad() {
+    private func invalidateTimer() {
+        self.timer?.invalidate()
+        self.timer = nil
+    }
+    
+    public override func didLoad() {
         super.didLoad()
         
         self.view.isExclusiveTouch = true
     }
     
     @objc private func pressed() {
-        guard let controller = self.getController() else {
-            return
-        }
+        self.invalidateTimer()
         
         self.item.action?(ContextMenuActionItem.Action(
-            controller: controller,
+            controller: self.getController(),
             dismissWithResult: { [weak self] result in
                 guard let strongSelf = self else {
                     return
@@ -172,19 +231,39 @@ private final class ContextControllerActionsListActionItemNode: HighlightTrackin
         ))
     }
     
-    func canBeHighlighted() -> Bool {
+    private func longPressed() {
+        self.touchesCancelled(nil, with: nil)
+        
+        self.item.longPressAction?(ContextMenuActionItem.Action(
+            controller: self.getController(),
+            dismissWithResult: { [weak self] result in
+                guard let strongSelf = self else {
+                    return
+                }
+                strongSelf.requestDismiss(result)
+            },
+            updateAction: { [weak self] id, updatedAction in
+                guard let strongSelf = self else {
+                    return
+                }
+                strongSelf.requestUpdateAction(id, updatedAction)
+            }
+        ))
+    }
+    
+    public func canBeHighlighted() -> Bool {
         return self.item.action != nil
     }
     
-    func updateIsHighlighted(isHighlighted: Bool) {
+    public func updateIsHighlighted(isHighlighted: Bool) {
         self.highlightBackgroundNode.alpha = isHighlighted ? 1.0 : 0.0
     }
     
-    func performAction() {
+    public func performAction() {
         self.pressed()
     }
     
-    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+    public override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         if self.titleLabelNode.tapAttributeAction != nil {
             if let result = self.titleLabelNode.hitTest(self.view.convert(point, to: self.titleLabelNode.view), with: event) {
                 return result
@@ -194,12 +273,12 @@ private final class ContextControllerActionsListActionItemNode: HighlightTrackin
         return super.hitTest(point, with: event)
     }
     
-    func setItem(item: ContextMenuActionItem) {
+    public func setItem(item: ContextMenuActionItem) {
         self.item = item
         self.accessibilityLabel = item.text
     }
     
-    func update(presentationData: PresentationData, constrainedSize: CGSize) -> (minSize: CGSize, apply: (_ size: CGSize, _ transition: ContainedViewLayoutTransition) -> Void) {
+    public func update(presentationData: PresentationData, constrainedSize: CGSize) -> (minSize: CGSize, apply: (_ size: CGSize, _ transition: ContainedViewLayoutTransition) -> Void) {
         let sideInset: CGFloat = 16.0
         let verticalInset: CGFloat = 11.0
         let titleSubtitleSpacing: CGFloat = 1.0
@@ -208,21 +287,7 @@ private final class ContextControllerActionsListActionItemNode: HighlightTrackin
         let iconSpacing: CGFloat = 8.0
         
         self.highlightBackgroundNode.backgroundColor = presentationData.theme.contextMenu.itemHighlightedBackgroundColor
-        
-        var subtitle: String?
-        switch self.item.textLayout {
-        case .singleLine:
-            self.titleLabelNode.maximumNumberOfLines = 1
-        case .twoLinesMax:
-            self.titleLabelNode.maximumNumberOfLines = 2
-        case let .secondLineWithValue(subtitleValue):
-            self.titleLabelNode.maximumNumberOfLines = 1
-            subtitle = subtitleValue
-        case .multiline:
-            self.titleLabelNode.maximumNumberOfLines = 0
-            self.titleLabelNode.lineSpacing = 0.1
-        }
-        
+                
         var forcedHeight: CGFloat?
         var titleVerticalOffset: CGFloat?
         let titleFont: UIFont
@@ -245,6 +310,41 @@ private final class ContextControllerActionsListActionItemNode: HighlightTrackin
         let subtitleFont = Font.regular(presentationData.listsFontSize.baseDisplaySize * 14.0 / 17.0)
         let subtitleColor = presentationData.theme.contextMenu.secondaryColor
         
+        if let context = self.context {
+            self.titleLabelNode.arguments = TextNodeWithEntities.Arguments(
+                context: context,
+                cache: context.animationCache,
+                renderer: context.animationRenderer,
+                placeholderColor: presentationData.theme.contextMenu.primaryColor.withMultipliedAlpha(0.1),
+                attemptSynchronous: true
+            )
+        }
+        self.titleLabelNode.visibility = self.item.enableEntityAnimations
+        
+        var subtitle: NSAttributedString?
+        switch self.item.textLayout {
+        case .singleLine:
+            self.titleLabelNode.maximumNumberOfLines = 1
+        case .twoLinesMax:
+            self.titleLabelNode.maximumNumberOfLines = 2
+        case let .secondLineWithValue(subtitleValue):
+            self.titleLabelNode.maximumNumberOfLines = 1
+            subtitle = NSAttributedString(
+                string: subtitleValue,
+                font: subtitleFont,
+                textColor: subtitleColor
+            )
+        case let .secondLineWithAttributedValue(subtitleValue):
+            self.titleLabelNode.maximumNumberOfLines = 1
+            let mutableString = subtitleValue.mutableCopy() as! NSMutableAttributedString
+            mutableString.addAttribute(.foregroundColor, value: subtitleColor, range: NSRange(location: 0, length: mutableString.length))
+            mutableString.addAttribute(.font, value: subtitleFont, range: NSRange(location: 0, length: mutableString.length))
+            subtitle = mutableString
+        case .multiline:
+            self.titleLabelNode.maximumNumberOfLines = 0
+            self.titleLabelNode.lineSpacing = 0.1
+        }
+        
         let titleColor: UIColor
         switch self.item.textColor {
         case .primary:
@@ -255,16 +355,43 @@ private final class ContextControllerActionsListActionItemNode: HighlightTrackin
             titleColor = presentationData.theme.contextMenu.primaryColor.withMultipliedAlpha(0.4)
         }
         
-        if self.item.parseMarkdown {
-            let attributedText = parseMarkdownIntoAttributedString(
-                self.item.text,
-                attributes: MarkdownAttributes(
-                    body: MarkdownAttributeSet(font: titleFont, textColor: titleColor),
-                    bold: MarkdownAttributeSet(font: titleBoldFont, textColor: titleColor),
-                    link: MarkdownAttributeSet(font: titleBoldFont, textColor: presentationData.theme.list.itemAccentColor),
-                    linkAttribute: { value in return ("URL", value) }
+        if self.item.parseMarkdown || !self.item.entities.isEmpty {
+            let attributedText: NSAttributedString
+            if !self.item.entities.isEmpty {
+                let inputStateText = ChatTextInputStateText(text: self.item.text, attributes: self.item.entities.compactMap { entity -> ChatTextInputStateTextAttribute? in
+                    if case let .CustomEmoji(_, fileId) = entity.type {
+                        return ChatTextInputStateTextAttribute(type: .customEmoji(stickerPack: nil, fileId: fileId, enableAnimation: true), range: entity.range)
+                    } else if case .Bold = entity.type {
+                        return ChatTextInputStateTextAttribute(type: .bold, range: entity.range)
+                    } else if case .Italic = entity.type {
+                        return ChatTextInputStateTextAttribute(type: .italic, range: entity.range)
+                    }
+                    return nil
+                })
+                let result = NSMutableAttributedString(attributedString: inputStateText.attributedText(files: self.item.entityFiles))
+                result.addAttributes([
+                    .font: titleFont,
+                    .foregroundColor: titleColor
+                ], range: NSRange(location: 0, length: result.length))
+                for attribute in inputStateText.attributes {
+                    if case .bold = attribute.type {
+                        result.addAttribute(NSAttributedString.Key.font, value: Font.semibold(presentationData.listsFontSize.baseDisplaySize), range: NSRange(location: attribute.range.lowerBound, length: attribute.range.count))
+                    } else if case .italic = attribute.type {
+                        result.addAttribute(NSAttributedString.Key.font, value: Font.semibold(15.0), range: NSRange(location: attribute.range.lowerBound, length: attribute.range.count))
+                    }
+                }
+                attributedText = result
+            } else {
+                attributedText = parseMarkdownIntoAttributedString(
+                    self.item.text,
+                    attributes: MarkdownAttributes(
+                        body: MarkdownAttributeSet(font: titleFont, textColor: titleColor),
+                        bold: MarkdownAttributeSet(font: titleBoldFont, textColor: titleColor),
+                        link: MarkdownAttributeSet(font: titleBoldFont, textColor: presentationData.theme.list.itemAccentColor),
+                        linkAttribute: { value in return ("URL", value) }
+                    )
                 )
-            )
+            }
             self.titleLabelNode.attributedText = attributedText
             self.titleLabelNode.linkHighlightColor = presentationData.theme.list.itemAccentColor.withMultipliedAlpha(0.5)
             self.titleLabelNode.highlightAttributeAction = { attributes in
@@ -288,13 +415,7 @@ private final class ContextControllerActionsListActionItemNode: HighlightTrackin
         
         self.titleLabelNode.isUserInteractionEnabled = self.titleLabelNode.tapAttributeAction != nil && self.item.action == nil
         
-        self.subtitleNode.attributedText = subtitle.flatMap { subtitle in
-            return NSAttributedString(
-                string: subtitle,
-                font: subtitleFont,
-                textColor: subtitleColor
-            )
-        }
+        self.subtitleNode.attributedText = subtitle
         
         var iconSize: CGSize?
         if let iconSource = self.item.iconSource {
@@ -341,8 +462,8 @@ private final class ContextControllerActionsListActionItemNode: HighlightTrackin
                 component: AnyComponent(LottieComponent(
                     content: LottieComponent.AppBundleContent(name: iconAnimation.name),
                     color: titleColor,
-                    startingPosition: .end,
-                    loop: false
+                    startingPosition: iconAnimation.loop ? .begin : .end,
+                    loop: iconAnimation.loop
                 )),
                 environment: {},
                 containerSize: animatedIconSize
@@ -533,13 +654,16 @@ private final class ContextControllerActionsListActionItemNode: HighlightTrackin
             }
             
             if let additionalIconSize {
-                let iconFrame = CGRect(
+                var iconFrame = CGRect(
                     origin: CGPoint(
                         x: 10.0,
                         y: floor((size.height - additionalIconSize.height) / 2.0)
                     ),
                     size: additionalIconSize
                 )
+                if self.item.iconPosition == .left {
+                    iconFrame.origin.x = size.width - additionalIconSize.width - 10.0
+                }
                 transition.updateFrame(node: self.additionalIconNode, frame: iconFrame, beginWithCurrentState: true)
             }
         })
@@ -594,7 +718,7 @@ private final class ContextControllerActionsListCustomItemNode: ASDisplayNode, C
     private let requestDismiss: (ContextMenuActionResult) -> Void
     
     private var presentationData: PresentationData?
-    private var itemNode: ContextMenuCustomNode?
+    private(set) var itemNode: ContextMenuCustomNode?
     
     init(
         getController: @escaping () -> ContextControllerProtocol?,
@@ -625,10 +749,10 @@ private final class ContextControllerActionsListCustomItemNode: ASDisplayNode, C
                 getController: self.getController,
                 actionSelected: { result in
                     switch result {
-                    case .dismissWithoutContent/* where ContextMenuActionResult.safeStreamRecordingDismissWithoutContent == .dismissWithoutContent*/:
+                    case .dismissWithoutContent:
                         self.requestDismiss(result)
-                        
-                    default: break
+                    default:
+                        break
                     }
                 }
             )
@@ -645,7 +769,7 @@ private final class ContextControllerActionsListCustomItemNode: ASDisplayNode, C
     }
 }
 
-final class ContextControllerActionsListStackItem: ContextControllerActionsStackItem {
+public final class ContextControllerActionsListStackItem: ContextControllerActionsStackItem {
     final class Node: ASDisplayNode, ContextControllerActionsStackItemNode {
         private final class Item {
             let node: ContextControllerActionsListItemNode
@@ -657,6 +781,7 @@ final class ContextControllerActionsListStackItem: ContextControllerActionsStack
             }
         }
         
+        private let context: AccountContext?
         private let requestUpdate: (ContainedViewLayoutTransition) -> Void
         private let getController: () -> ContextControllerProtocol?
         private let requestDismiss: (ContextMenuActionResult) -> Void
@@ -673,11 +798,13 @@ final class ContextControllerActionsListStackItem: ContextControllerActionsStack
         }
         
         init(
+            context: AccountContext?,
             getController: @escaping () -> ContextControllerProtocol?,
             requestDismiss: @escaping (ContextMenuActionResult) -> Void,
             requestUpdate: @escaping (ContainedViewLayoutTransition) -> Void,
             items: [ContextMenuItem]
         ) {
+            self.context = context
             self.requestUpdate = requestUpdate
             self.getController = getController
             self.requestDismiss = requestDismiss
@@ -689,6 +816,7 @@ final class ContextControllerActionsListStackItem: ContextControllerActionsStack
                 case let .action(actionItem):
                     return Item(
                         node: ContextControllerActionsListActionItemNode(
+                            context: context,
                             getController: getController,
                             requestDismiss: requestDismiss,
                             requestUpdateAction: { id, action in
@@ -759,6 +887,7 @@ final class ContextControllerActionsListStackItem: ContextControllerActionsStack
                         
                         let addedNode = Item(
                             node: ContextControllerActionsListActionItemNode(
+                                context: self.context,
                                 getController: self.getController,
                                 requestDismiss: self.requestDismiss,
                                 requestUpdateAction: { [weak self] id, action in
@@ -827,18 +956,28 @@ final class ContextControllerActionsListStackItem: ContextControllerActionsStack
                 
                 if let separatorNode = item.separatorNode {
                     itemTransition.updateFrame(node: separatorNode, frame: CGRect(origin: CGPoint(x: itemFrame.minX, y: itemFrame.maxY), size: CGSize(width: itemFrame.width, height: UIScreenPixel)), beginWithCurrentState: true)
+                    
+                    var separatorHidden = false
                     if i != self.itemNodes.count - 1 {
                         switch self.items[i + 1] {
                         case .separator:
-                            separatorNode.isHidden = true
+                            separatorHidden = true
                         case .action:
-                            separatorNode.isHidden = false
+                            separatorHidden = false
                         case .custom:
-                            separatorNode.isHidden = false
+                            separatorHidden = false
                         }
                     } else {
-                        separatorNode.isHidden = true
+                        separatorHidden = true
                     }
+                    
+                    if let itemContainerNode = item.node as? ContextControllerActionsListCustomItemNode, let itemNode = itemContainerNode.itemNode {
+                        if !itemNode.needsSeparator {
+                            separatorHidden = true
+                        }
+                    }
+                    
+                    separatorNode.isHidden = separatorHidden
                 }
                 
                 itemNodeLayout.apply(itemSize, itemTransition)
@@ -909,17 +1048,19 @@ final class ContextControllerActionsListStackItem: ContextControllerActionsStack
         }
     }
     
-    let id: AnyHashable?
-    let items: [ContextMenuItem]
-    let reactionItems: (context: AccountContext, reactionItems: [ReactionContextItem], selectedReactionItems: Set<MessageReaction.Reaction>, animationCache: AnimationCache, alwaysAllowPremiumReactions: Bool, getEmojiContent: ((AnimationCache, MultiAnimationRenderer) -> Signal<EmojiPagerContentComponent, NoError>)?)?
-    let tip: ContextController.Tip?
-    let tipSignal: Signal<ContextController.Tip?, NoError>?
-    let dismissed: (() -> Void)?
+    public let id: AnyHashable?
+    public let items: [ContextMenuItem]
+    public let reactionItems: ContextControllerReactionItems?
+    public let previewReaction: ContextControllerPreviewReaction?
+    public let tip: ContextController.Tip?
+    public let tipSignal: Signal<ContextController.Tip?, NoError>?
+    public let dismissed: (() -> Void)?
     
-    init(
+    public init(
         id: AnyHashable?,
         items: [ContextMenuItem],
-        reactionItems: (context: AccountContext, reactionItems: [ReactionContextItem], selectedReactionItems: Set<MessageReaction.Reaction>, animationCache: AnimationCache, alwaysAllowPremiumReactions: Bool, getEmojiContent: ((AnimationCache, MultiAnimationRenderer) -> Signal<EmojiPagerContentComponent, NoError>)?)?,
+        reactionItems: ContextControllerReactionItems?,
+        previewReaction: ContextControllerPreviewReaction?,
         tip: ContextController.Tip?,
         tipSignal: Signal<ContextController.Tip?, NoError>?,
         dismissed: (() -> Void)?
@@ -927,18 +1068,21 @@ final class ContextControllerActionsListStackItem: ContextControllerActionsStack
         self.id = id
         self.items = items
         self.reactionItems = reactionItems
+        self.previewReaction = previewReaction
         self.tip = tip
         self.tipSignal = tipSignal
         self.dismissed = dismissed
     }
     
-    func node(
+    public func node(
+        context: AccountContext?,
         getController: @escaping () -> ContextControllerProtocol?,
         requestDismiss: @escaping (ContextMenuActionResult) -> Void,
         requestUpdate: @escaping (ContainedViewLayoutTransition) -> Void,
         requestUpdateApparentHeight: @escaping (ContainedViewLayoutTransition) -> Void
     ) -> ContextControllerActionsStackItemNode {
         return Node(
+            context: context,
             getController: getController,
             requestDismiss: requestDismiss,
             requestUpdate: requestUpdate,
@@ -1009,7 +1153,8 @@ final class ContextControllerActionsCustomStackItem: ContextControllerActionsSta
     
     let id: AnyHashable?
     private let content: ContextControllerItemsContent
-    let reactionItems: (context: AccountContext, reactionItems: [ReactionContextItem], selectedReactionItems: Set<MessageReaction.Reaction>, animationCache: AnimationCache, alwaysAllowPremiumReactions: Bool, getEmojiContent: ((AnimationCache, MultiAnimationRenderer) -> Signal<EmojiPagerContentComponent, NoError>)?)?
+    let reactionItems: ContextControllerReactionItems?
+    let previewReaction: ContextControllerPreviewReaction?
     let tip: ContextController.Tip?
     let tipSignal: Signal<ContextController.Tip?, NoError>?
     let dismissed: (() -> Void)?
@@ -1017,7 +1162,8 @@ final class ContextControllerActionsCustomStackItem: ContextControllerActionsSta
     init(
         id: AnyHashable?,
         content: ContextControllerItemsContent,
-        reactionItems: (context: AccountContext, reactionItems: [ReactionContextItem], selectedReactionItems: Set<MessageReaction.Reaction>, animationCache: AnimationCache, alwaysAllowPremiumReactions: Bool, getEmojiContent: ((AnimationCache, MultiAnimationRenderer) -> Signal<EmojiPagerContentComponent, NoError>)?)?,
+        reactionItems: ContextControllerReactionItems?,
+        previewReaction: ContextControllerPreviewReaction?,
         tip: ContextController.Tip?,
         tipSignal: Signal<ContextController.Tip?, NoError>?,
         dismissed: (() -> Void)?
@@ -1025,12 +1171,14 @@ final class ContextControllerActionsCustomStackItem: ContextControllerActionsSta
         self.id = id
         self.content = content
         self.reactionItems = reactionItems
+        self.previewReaction = previewReaction
         self.tip = tip
         self.tipSignal = tipSignal
         self.dismissed = dismissed
     }
     
     func node(
+        context: AccountContext?,
         getController: @escaping () -> ContextControllerProtocol?,
         requestDismiss: @escaping (ContextMenuActionResult) -> Void,
         requestUpdate: @escaping (ContainedViewLayoutTransition) -> Void,
@@ -1046,28 +1194,42 @@ final class ContextControllerActionsCustomStackItem: ContextControllerActionsSta
 }
 
 func makeContextControllerActionsStackItem(items: ContextController.Items) -> [ContextControllerActionsStackItem] {
-    var reactionItems: (context: AccountContext, reactionItems: [ReactionContextItem], selectedReactionItems: Set<MessageReaction.Reaction>, animationCache: AnimationCache, alwaysAllowPremiumReactions: Bool, getEmojiContent: ((AnimationCache, MultiAnimationRenderer) -> Signal<EmojiPagerContentComponent, NoError>)?)?
+    var reactionItems: ContextControllerReactionItems?
     if let context = items.context, let animationCache = items.animationCache, !items.reactionItems.isEmpty {
-        reactionItems = (context, items.reactionItems, items.selectedReactionItems, animationCache, alwaysAllowPremiumReactions: items.alwaysAllowPremiumReactions, items.getEmojiContent)
+        reactionItems = ContextControllerReactionItems(
+            context: context,
+            reactionItems: items.reactionItems,
+            selectedReactionItems: items.selectedReactionItems,
+            reactionsTitle: items.reactionsTitle,
+            reactionsLocked: items.reactionsLocked,
+            animationCache: animationCache,
+            alwaysAllowPremiumReactions: items.alwaysAllowPremiumReactions,
+            allPresetReactionsAreAvailable: items.allPresetReactionsAreAvailable,
+            getEmojiContent: items.getEmojiContent
+        )
+    }
+    var previewReaction: ContextControllerPreviewReaction?
+    if let context = items.context, let file = items.previewReaction {
+        previewReaction = ContextControllerPreviewReaction(context: context, file: file)
     }
     switch items.content {
     case let .list(listItems):
-        return [ContextControllerActionsListStackItem(id: items.id, items: listItems, reactionItems: reactionItems, tip: items.tip, tipSignal: items.tipSignal, dismissed: items.dismissed)]
+        return [ContextControllerActionsListStackItem(id: items.id, items: listItems, reactionItems: reactionItems, previewReaction: previewReaction, tip: items.tip, tipSignal: items.tipSignal, dismissed: items.dismissed)]
     case let .twoLists(listItems1, listItems2):
-        return [ContextControllerActionsListStackItem(id: items.id, items: listItems1, reactionItems: nil, tip: nil, tipSignal: nil, dismissed: items.dismissed), ContextControllerActionsListStackItem(id: nil, items: listItems2, reactionItems: nil, tip: nil, tipSignal: nil, dismissed: nil)]
+        return [ContextControllerActionsListStackItem(id: items.id, items: listItems1, reactionItems: nil, previewReaction: nil, tip: nil, tipSignal: nil, dismissed: items.dismissed), ContextControllerActionsListStackItem(id: nil, items: listItems2, reactionItems: nil, previewReaction: nil, tip: nil, tipSignal: nil, dismissed: nil)]
     case let .custom(customContent):
-        return [ContextControllerActionsCustomStackItem(id: items.id, content: customContent, reactionItems: reactionItems, tip: items.tip, tipSignal: items.tipSignal, dismissed: items.dismissed)]
+        return [ContextControllerActionsCustomStackItem(id: items.id, content: customContent, reactionItems: reactionItems, previewReaction: previewReaction, tip: items.tip, tipSignal: items.tipSignal, dismissed: items.dismissed)]
     }
 }
 
-final class ContextControllerActionsStackNode: ASDisplayNode {
-    enum Presentation {
+public final class ContextControllerActionsStackNode: ASDisplayNode {
+    public enum Presentation {
         case modal
         case inline
         case additional
     }
     
-    final class NavigationContainer: ASDisplayNode, UIGestureRecognizerDelegate {
+    final class NavigationContainer: ASDisplayNode, ASGestureRecognizerDelegate {
         let backgroundNode: NavigationBackgroundNode
         let parentShadowNode: ASImageNode
         
@@ -1102,7 +1264,7 @@ final class ContextControllerActionsStackNode: ASDisplayNode {
                 let _ = strongSelf
                 return [.right]
             })
-            panRecognizer.delegate = self
+            panRecognizer.delegate = self.wrappedGestureRecognizerDelegate
             self.view.addGestureRecognizer(panRecognizer)
             self.panRecognizer = panRecognizer
         }
@@ -1172,7 +1334,8 @@ final class ContextControllerActionsStackNode: ASDisplayNode {
         var tip: ContextController.Tip?
         let tipSignal: Signal<ContextController.Tip?, NoError>?
         var tipNode: InnerTextSelectionTipContainerNode?
-        let reactionItems: (context: AccountContext, reactionItems: [ReactionContextItem], selectedReactionItems: Set<MessageReaction.Reaction>, animationCache: AnimationCache, alwaysAllowPremiumReactions: Bool, getEmojiContent: ((AnimationCache, MultiAnimationRenderer) -> Signal<EmojiPagerContentComponent, NoError>)?)?
+        let reactionItems: ContextControllerReactionItems?
+        let previewReaction: ContextControllerPreviewReaction?
         let itemDismissed: (() -> Void)?
         var storedScrollingState: CGFloat?
         let positionLock: CGFloat?
@@ -1180,6 +1343,7 @@ final class ContextControllerActionsStackNode: ASDisplayNode {
         private var tipDisposable: Disposable?
         
         init(
+            context: AccountContext?,
             getController: @escaping () -> ContextControllerProtocol?,
             requestDismiss: @escaping (ContextMenuActionResult) -> Void,
             requestUpdate: @escaping (ContainedViewLayoutTransition) -> Void,
@@ -1187,7 +1351,8 @@ final class ContextControllerActionsStackNode: ASDisplayNode {
             item: ContextControllerActionsStackItem,
             tip: ContextController.Tip?,
             tipSignal: Signal<ContextController.Tip?, NoError>?,
-            reactionItems: (context: AccountContext, reactionItems: [ReactionContextItem], selectedReactionItems: Set<MessageReaction.Reaction>, animationCache: AnimationCache, alwaysAllowPremiumReactions: Bool, getEmojiContent: ((AnimationCache, MultiAnimationRenderer) -> Signal<EmojiPagerContentComponent, NoError>)?)?,
+            reactionItems: ContextControllerReactionItems?,
+            previewReaction: ContextControllerPreviewReaction?,
             itemDismissed: (() -> Void)?,
             positionLock: CGFloat?
         ) {
@@ -1195,6 +1360,7 @@ final class ContextControllerActionsStackNode: ASDisplayNode {
             self.requestUpdate = requestUpdate
             self.item = item
             self.node = item.node(
+                context: context,
                 getController: getController,
                 requestDismiss: requestDismiss,
                 requestUpdate: requestUpdate,
@@ -1206,6 +1372,7 @@ final class ContextControllerActionsStackNode: ASDisplayNode {
             self.dimNode.alpha = 0.0
             
             self.reactionItems = reactionItems
+            self.previewReaction = previewReaction
             self.itemDismissed = itemDismissed
             self.positionLock = positionLock
             
@@ -1328,6 +1495,7 @@ final class ContextControllerActionsStackNode: ASDisplayNode {
         }
     }
     
+    private let context: AccountContext?
     private let getController: () -> ContextControllerProtocol?
     private let requestDismiss: (ContextMenuActionResult) -> Void
     private let requestUpdate: (ContainedViewLayoutTransition) -> Void
@@ -1338,23 +1506,29 @@ final class ContextControllerActionsStackNode: ASDisplayNode {
     
     private var selectionPanGesture: UIPanGestureRecognizer?
     
-    var topReactionItems: (context: AccountContext, reactionItems: [ReactionContextItem], selectedReactionItems: Set<MessageReaction.Reaction>, animationCache: AnimationCache, alwaysAllowPremiumReactions: Bool, getEmojiContent: ((AnimationCache, MultiAnimationRenderer) -> Signal<EmojiPagerContentComponent, NoError>)?)? {
+    public var topReactionItems: ContextControllerReactionItems? {
         return self.itemContainers.last?.reactionItems
     }
     
-    var topPositionLock: CGFloat? {
+    public var topPreviewReaction: ContextControllerPreviewReaction? {
+        return self.itemContainers.last?.previewReaction
+    }
+    
+    public var topPositionLock: CGFloat? {
         return self.itemContainers.last?.positionLock
     }
     
-    var storedScrollingState: CGFloat? {
+    public var storedScrollingState: CGFloat? {
         return self.itemContainers.last?.storedScrollingState
     }
     
-    init(
+    public init(
+        context: AccountContext?,
         getController: @escaping () -> ContextControllerProtocol?,
         requestDismiss: @escaping (ContextMenuActionResult) -> Void,
         requestUpdate: @escaping (ContainedViewLayoutTransition) -> Void
     ) {
+        self.context = context
         self.getController = getController
         self.requestDismiss = requestDismiss
         self.requestUpdate = requestUpdate
@@ -1400,8 +1574,8 @@ final class ContextControllerActionsStackNode: ASDisplayNode {
         }
     }
     
-    func replace(item: ContextControllerActionsStackItem, animated: Bool?) {
-        if let item = item as? ContextControllerActionsListStackItem, let topContainer = self.itemContainers.last, let topItem = topContainer.item as? ContextControllerActionsListStackItem, let topId = topItem.id, let id = item.id, topId == id, item.items.count == topItem.items.count {
+    public func replace(item: ContextControllerActionsStackItem, animated: Bool?) {
+        if let item = item as? ContextControllerActionsListStackItem, let topContainer = self.itemContainers.first, let topItem = topContainer.item as? ContextControllerActionsListStackItem, let topId = topItem.id, let id = item.id, topId == id, item.items.count == topItem.items.count {
             if let topNode = topContainer.node as? ContextControllerActionsListStackItem.Node {
                 var matches = true
                 for i in 0 ..< item.items.count {
@@ -1457,11 +1631,12 @@ final class ContextControllerActionsStackNode: ASDisplayNode {
         self.push(item: item, currentScrollingState: nil, positionLock: nil, animated: resolvedAnimated)
     }
     
-    func push(item: ContextControllerActionsStackItem, currentScrollingState: CGFloat?, positionLock: CGFloat?, animated: Bool) {
+    public func push(item: ContextControllerActionsStackItem, currentScrollingState: CGFloat?, positionLock: CGFloat?, animated: Bool) {
         if let itemContainer = self.itemContainers.last {
             itemContainer.storedScrollingState = currentScrollingState
         }
         let itemContainer = ItemContainer(
+            context: self.context,
             getController: self.getController,
             requestDismiss: self.requestDismiss,
             requestUpdate: self.requestUpdate,
@@ -1475,6 +1650,7 @@ final class ContextControllerActionsStackNode: ASDisplayNode {
             tip: item.tip,
             tipSignal: item.tipSignal,
             reactionItems: item.reactionItems,
+            previewReaction: item.previewReaction,
             itemDismissed: item.dismissed,
             positionLock: positionLock
         )
@@ -1484,18 +1660,18 @@ final class ContextControllerActionsStackNode: ASDisplayNode {
         
         let transition: ContainedViewLayoutTransition
         if animated {
-            transition = .animated(duration:  self.itemContainers.count == 1 ? 0.3 : 0.45, curve: .spring)
+            transition = .animated(duration: self.itemContainers.count == 1 ? 0.3 : 0.45, curve: .spring)
         } else {
             transition = .immediate
         }
         self.requestUpdate(transition)
     }
     
-    func clearStoredScrollingState() {
+    public func clearStoredScrollingState() {
         self.itemContainers.last?.storedScrollingState = nil
     }
     
-    func pop() {
+    public func pop() {
         if self.itemContainers.count == 1 {
             //dismiss
         } else {
@@ -1512,7 +1688,7 @@ final class ContextControllerActionsStackNode: ASDisplayNode {
         self.requestUpdate(transition)
     }
     
-    func update(
+    public func update(
         presentationData: PresentationData,
         constrainedSize: CGSize,
         presentation: Presentation,
@@ -1736,37 +1912,37 @@ final class ContextControllerActionsStackNode: ASDisplayNode {
         return CGSize(width: topItemWidth, height: topItemSize.height)
     }
     
-    func highlightGestureMoved(location: CGPoint) {
+    public func highlightGestureMoved(location: CGPoint) {
         if let topItemContainer = self.itemContainers.last {
             topItemContainer.highlightGestureMoved(location: self.view.convert(location, to: topItemContainer.view))
         }
     }
     
-    func highlightGestureFinished(performAction: Bool) {
+    public func highlightGestureFinished(performAction: Bool) {
         if let topItemContainer = self.itemContainers.last {
             topItemContainer.highlightGestureFinished(performAction: performAction)
         }
     }
     
-    func decreaseHighlightedIndex() {
+    public func decreaseHighlightedIndex() {
         if let topItemContainer = self.itemContainers.last {
             topItemContainer.decreaseHighlightedIndex()
         }
     }
     
-    func increaseHighlightedIndex() {
+    public func increaseHighlightedIndex() {
         if let topItemContainer = self.itemContainers.last {
             topItemContainer.increaseHighlightedIndex()
         }
     }
     
-    func updatePanSelection(isEnabled: Bool) {
+    public func updatePanSelection(isEnabled: Bool) {
         if let selectionPanGesture = self.selectionPanGesture {
             selectionPanGesture.isEnabled = isEnabled
         }
     }
     
-    func animateIn() {
+    public func animateIn() {
         for itemContainer in self.itemContainers {
             if let tipNode = itemContainer.tipNode {
                 tipNode.animateIn()

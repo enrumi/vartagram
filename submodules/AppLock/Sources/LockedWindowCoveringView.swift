@@ -3,6 +3,7 @@ import PasscodeUI
 import GradientBackground
 
 import Foundation
+import UIKit
 import Display
 import TelegramPresentationData
 import AsyncDisplayKit

@@ -29,6 +29,10 @@ UIView * _Nullable getPortalViewSourceView(UIView * _Nonnull portalView);
 
 NSObject * _Nullable makeBlurFilter();
 NSObject * _Nullable makeLuminanceToAlphaFilter();
+NSObject * _Nullable makeColorInvertFilter();
+NSObject * _Nullable makeMonochromeFilter();
 
 void setLayerDisableScreenshots(CALayer * _Nonnull layer, bool disableScreenshots);
+bool getLayerDisableScreenshots(CALayer * _Nonnull layer);
+
 void setLayerContentsMaskMode(CALayer * _Nonnull layer, bool maskMode);

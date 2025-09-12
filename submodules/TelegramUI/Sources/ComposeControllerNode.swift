@@ -23,7 +23,8 @@ final class ComposeControllerNode: ASDisplayNode {
     
     var requestDeactivateSearch: (() -> Void)?
     var requestOpenPeerFromSearch: ((PeerId) -> Void)?
-    
+    var requestOpenDisabledPeerFromSearch: ((EnginePeer, ChatListDisabledPeerReason) -> Void)?
+
     var openCreateNewGroup: (() -> Void)?
     var openCreateNewSecretChat: (() -> Void)?
     var openCreateContact: (() -> Void)?
@@ -53,8 +54,8 @@ final class ComposeControllerNode: ASDisplayNode {
         options.append(ContactListAdditionalOption(title: self.presentationData.strings.Compose_NewChannel, icon: .generic(UIImage(bundleImageName: "Contact List/CreateChannelActionIcon")!), action: {
             openCreateNewChannelImpl?()
         }))
-        
-        self.contactListNode = ContactListNode(context: context, presentation: .single(.natural(options: options, includeChatList: false, topPeers: false)), displayPermissionPlaceholder: false)
+
+        self.contactListNode = ContactListNode(context: context, presentation: .single(.natural(options: options, includeChatList: false, topPeers: .none)), onlyWriteable: false, isGroupInvitation: false, displayPermissionPlaceholder: false)
         
         super.init()
         
@@ -122,10 +123,15 @@ final class ComposeControllerNode: ASDisplayNode {
             return
         }
         
-        self.searchDisplayController = SearchDisplayController(presentationData: self.presentationData, contentNode: ContactsSearchContainerNode(context: self.context, onlyWriteable: false, categories: [.cloudContacts, .global], addContact: nil, openPeer: { [weak self] peer in
+        self.searchDisplayController = SearchDisplayController(presentationData: self.presentationData, contentNode: ContactsSearchContainerNode(context: self.context, onlyWriteable: false, categories: [.cloudContacts, .global], addContact: nil, openPeer: { [weak self] peer, _ in
             if let requestOpenPeerFromSearch = self?.requestOpenPeerFromSearch, case let .peer(peer, _, _) = peer {
                 requestOpenPeerFromSearch(peer.id)
             }
+        }, openDisabledPeer: { [weak self] peer, reason in
+            guard let self else {
+                return
+            }
+            self.requestOpenDisabledPeerFromSearch?(peer, reason)
         }, contextAction: nil), cancel: { [weak self] in
             self?.requestDeactivateSearch?()
         })

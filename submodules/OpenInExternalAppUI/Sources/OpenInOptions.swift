@@ -235,6 +235,13 @@ private func allOpenInOptions(context: AccountContext, item: OpenInItem) -> [Ope
                     }
                 }
             }))
+            options.append(OpenInOption(identifier: "yangoMaps", application: .other(title: "Yango Maps", identifier: 1665672451, scheme: "yangomaps", store: nil), action: {
+                if let _ = directions {
+                    return .openUrl(url: "yangomaps://build_route_on_map?lat_to=\(lat)&lon_to=\(lon)")
+                } else {
+                    return .openUrl(url: "yangomaps://maps.yango.com/?pt=\(lon),\(lat)&z=16")
+                }
+            }))
         
             options.append(OpenInOption(identifier: "yandexMaps", application: .other(title: "Yandex.Maps", identifier: 313877526, scheme: "yandexmaps", store: nil), action: {
                 if let _ = directions {
@@ -286,7 +293,7 @@ private func allOpenInOptions(context: AccountContext, item: OpenInItem) -> [Ope
                 }))
             }
             
-            options.append(OpenInOption(identifier: "2gis", application: .other(title: "2GIS", identifier: 481627348, scheme: "dgis", store: nil), action: {
+            options.append(OpenInOption(identifier: "2gis", application: .other(title: "2GIS", identifier: 481627348, scheme: "dgis", store: "ru"), action: {
                 let coordinates = "\(lon),\(lat)"
                 if let _ = directions {
                     return .openUrl(url: "dgis://2gis.ru/routeSearch/to/\(coordinates)/go")

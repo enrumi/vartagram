@@ -99,6 +99,8 @@ typedef enum
 
 @property (nonatomic, assign) bool autoStartVideoRecording;
 
+@property (nonatomic, strong) NSArray<NSNumber *> *zoomLevels;
+
 - (instancetype)initWithMode:(PGCameraMode)mode position:(PGCameraPosition)position;
 
 - (void)attachPreviewView:(TGCameraPreviewView *)previewView;

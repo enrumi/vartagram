@@ -66,15 +66,23 @@ public enum SourceAndRect {
     case node(() -> (ASDisplayNode, CGRect)?)
     case view(() -> (UIView, CGRect)?)
     
-    func globalRect() -> CGRect? {
+    func globalRect(isAlreadyGlobal: Bool) -> CGRect? {
         switch self {
             case let .node(node):
                 if let (sourceNode, sourceRect) = node() {
-                    return sourceNode.view.convert(sourceRect, to: nil)
+                    if isAlreadyGlobal {
+                        return sourceRect
+                    } else {
+                        return sourceNode.view.convert(sourceRect, to: nil)
+                    }
                 }
             case let .view(view):
                 if let (sourceView, sourceRect) = view() {
-                    return sourceView.convert(sourceRect, to: nil)
+                    if isAlreadyGlobal {
+                        return sourceRect
+                    } else {
+                        return sourceView.convert(sourceRect, to: nil)
+                    }
                 }
         }
         return nil
@@ -83,17 +91,25 @@ public enum SourceAndRect {
 
 public final class TooltipControllerPresentationArguments {
     public let sourceAndRect: SourceAndRect
+    public let sourceRectIsGlobal: Bool
     
-    public init(sourceNodeAndRect: @escaping () -> (ASDisplayNode, CGRect)?) {
+    public init(sourceNodeAndRect: @escaping () -> (ASDisplayNode, CGRect)?, sourceRectIsGlobal: Bool = false) {
         self.sourceAndRect = .node(sourceNodeAndRect)
+        self.sourceRectIsGlobal = sourceRectIsGlobal
     }
     
-    public init(sourceViewAndRect: @escaping () -> (UIView, CGRect)?) {
+    public init(sourceViewAndRect: @escaping () -> (UIView, CGRect)?, sourceRectIsGlobal: Bool = false) {
         self.sourceAndRect = .view(sourceViewAndRect)
+        self.sourceRectIsGlobal = sourceRectIsGlobal
     }
 }
 
 open class TooltipController: ViewController, StandalonePresentableController {
+    public enum Alignment {
+        case center
+        case natural
+    }
+    
     private var controllerNode: TooltipControllerNode {
         return self.displayNode as! TooltipControllerNode
     }
@@ -101,6 +117,7 @@ open class TooltipController: ViewController, StandalonePresentableController {
     public private(set) var content: TooltipControllerContent
     private let baseFontSize: CGFloat
     private let balancedTextLayout: Bool
+    private let alignment: Alignment
     private let isBlurred: Bool
     
     open func updateContent(_ content: TooltipControllerContent, animated: Bool, extendTimer: Bool, arrowOnBottom: Bool = true) {
@@ -132,10 +149,11 @@ open class TooltipController: ViewController, StandalonePresentableController {
     
     public var dismissed: ((Bool) -> Void)?
     
-    public init(content: TooltipControllerContent, baseFontSize: CGFloat, balancedTextLayout: Bool = false, isBlurred: Bool = false, timeout: Double = 2.0, dismissByTapOutside: Bool = false, dismissByTapOutsideSource: Bool = false, dismissImmediatelyOnLayoutUpdate: Bool = false, arrowOnBottom: Bool = true, padding: CGFloat = 8.0, innerPadding: UIEdgeInsets = UIEdgeInsets()) {
+    public init(content: TooltipControllerContent, baseFontSize: CGFloat, balancedTextLayout: Bool = false, alignment: Alignment = .center, isBlurred: Bool = false, timeout: Double = 2.0, dismissByTapOutside: Bool = false, dismissByTapOutsideSource: Bool = false, dismissImmediatelyOnLayoutUpdate: Bool = false, arrowOnBottom: Bool = true, padding: CGFloat = 8.0, innerPadding: UIEdgeInsets = UIEdgeInsets()) {
         self.content = content
         self.baseFontSize = baseFontSize
         self.balancedTextLayout = balancedTextLayout
+        self.alignment = alignment
         self.isBlurred = isBlurred
         self.timeout = timeout
         self.dismissByTapOutside = dismissByTapOutside
@@ -159,7 +177,7 @@ open class TooltipController: ViewController, StandalonePresentableController {
     }
     
     override open func loadDisplayNode() {
-        self.displayNode = TooltipControllerNode(content: self.content, baseFontSize: self.baseFontSize, balancedTextLayout: self.balancedTextLayout, isBlurred: self.isBlurred, dismiss: { [weak self] tappedInside in
+        self.displayNode = TooltipControllerNode(content: self.content, baseFontSize: self.baseFontSize, balancedTextLayout: self.balancedTextLayout, alignment: self.alignment, isBlurred: self.isBlurred, dismiss: { [weak self] tappedInside in
             self?.dismiss(tappedInside: tappedInside)
         }, dismissByTapOutside: self.dismissByTapOutside, dismissByTapOutsideSource: self.dismissByTapOutsideSource)
         self.controllerNode.padding = self.padding
@@ -187,7 +205,7 @@ open class TooltipController: ViewController, StandalonePresentableController {
         } else {
             self.layout = layout
             
-            if let presentationArguments = self.presentationArguments as? TooltipControllerPresentationArguments, let sourceRect = presentationArguments.sourceAndRect.globalRect() {
+            if let presentationArguments = self.presentationArguments as? TooltipControllerPresentationArguments, let sourceRect = presentationArguments.sourceAndRect.globalRect(isAlreadyGlobal: presentationArguments.sourceRectIsGlobal) {
                 self.controllerNode.sourceRect = sourceRect
             } else {
                 self.controllerNode.sourceRect = nil
