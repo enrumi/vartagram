@@ -3788,7 +3788,7 @@ final class PostboxImpl {
         return inactiveSecretChatPeerIds
         |> mapToSignal { inactiveSecretChatPeerIds in
             return self.transactionSignal(userInteractive: userInteractive, { subscriber, transaction in
-                let mutableView = MutableChatListView(postbox: self, currentTransaction: transaction, groupId: groupId, filterPredicate: filterPredicate, aroundIndex: index, count: count, summaryComponents: summaryComponents, extractCachedData: extractCachedData, accountPeerId: accountPeerId)
+                let mutableView = MutableChatListView(postbox: self, currentTransaction: transaction, groupId: groupId, filterPredicate: filterPredicate, aroundIndex: index, count: count, summaryComponents: summaryComponents, extractCachedData: extractCachedData, accountPeerId: accountPeerId, inactiveSecretChatPeerIds: inactiveSecretChatPeerIds)
                 mutableView.render(postbox: self)
 
                 let (index, signal) = self.viewTracker.addChatListView(mutableView)
