@@ -160,7 +160,7 @@ private enum DebugControllerEntry: ItemListNodeEntry {
         #endif
         case .webViewInspection, .resetWebViewCache:
             return DebugControllerSection.web.rawValue
-        case .keepChatNavigationStack, .skipReadHistory, .skipSetTyping, .alwaysDisplayTyping, .debugRatingLayout, .crashOnSlowQueries, .crashOnMemoryPressure:
+        case .keepChatNavigationStack, .skipReadHistory, .skipSetTyping, .alwaysDisplayTyping, .debugRatingLayout:
             return DebugControllerSection.experiments.rawValue
         case .clearTips, .resetNotifications, .fillLocalSavedMessageCache, .resetHoles, .resetTagHoles, .reindexUnread, .reindexCache, .resetBiometricsData, .photoPreview, .knockoutWallpaper, .compressedEmojiCache, .storiesJpegExperiment, .checkSerializedData, .enableQuickReactionSwitch, .experimentalCompatibility, .enableDebugDataDisplay, .rippleEffect, .browserExperiment, .allForumsHaveTabs, .enableReactionOverrides, .restorePurchases, .disableReloginTokens, .liveStreamV2, .experimentalCallMute, .playerV2, .devRequests, .fakeAds, .enableLocalTranslation:
             return DebugControllerSection.experiments.rawValue
