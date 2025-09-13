@@ -310,7 +310,7 @@ public final class PasscodeEntryController: ViewController {
         self.controllerNode.containerLayoutUpdated(layout, navigationBarHeight: self.navigationLayout(layout: layout).navigationFrame.maxY, transition: transition)
     }
     
-    public override func dismiss(completion: (() -> Void)? = nil) {
+    public override func dismiss(animated flag: Bool, completion: (() -> Void)? = nil) {
         self.view.endEditing(true)
         if flag {
             self.controllerNode.animateOut { [weak self] in
