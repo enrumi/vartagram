@@ -22,7 +22,7 @@ public protocol ShareControllerAccountContext: AnyObject {
     var contentSettings: ContentSettings { get }
     var appConfiguration: AppConfiguration { get }
     var ptgSettings: PtgSettings { get }
-    var inactiveSecretChatPeerIds: Signal<Set<PeerId>, NoError>
+    var inactiveSecretChatPeerIds: Signal<Set<PeerId>, NoError> { get }
     
     func resolveInlineStickers(fileIds: [Int64]) -> Signal<[Int64: TelegramMediaFile], NoError>
 }
