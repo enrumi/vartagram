@@ -737,6 +737,7 @@ func managedTopReactions(postbox: Postbox, network: Network) -> Signal<Void, NoE
                     }
                     return items
                 }
+                |> map { ($0, hash) }
             }
         }
     })
@@ -764,6 +765,7 @@ func managedDefaultTagReactions(postbox: Postbox, network: Network) -> Signal<Vo
             switch result {
             case .reactionsNotModified:
                 return .single(nil)
+                |> map { ($0, hash) }
             case let .reactions(_, reactions):
                 let parsedReactions = reactions.compactMap(MessageReaction.Reaction.init(apiReaction:))
 
