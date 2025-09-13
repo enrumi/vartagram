@@ -796,7 +796,7 @@ public class ContactsController: ViewController {
                     strongSelf.addPressed()
                 })
             })))
-        
+        }
         let controller = ContextController(presentationData: self.presentationData, source: .extracted(ContactsTabBarContextExtractedContentSource(controller: self, sourceNode: sourceNode)), items: .single(ContextController.Items(content: .list(items))), recognizer: nil, gesture: gesture)
         self.context.sharedContext.mainWindow?.presentInGlobalOverlay(controller)
     }
