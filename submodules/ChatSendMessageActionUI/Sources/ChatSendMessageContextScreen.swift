@@ -1562,7 +1562,9 @@ public class ChatSendMessageContextScreen: ViewControllerComponentContainer, Cha
 
         public func dismissWithoutAnimation() {
             self.statusBar.statusBarStyle = .Ignore
-            self.component.completion()
+            if let component = self.component.wrapped as? ChatSendMessageContextScreenComponent {
+                component.completion()
+            }
             self.presentingViewController?.dismiss(animated: false, completion: nil)
         }
 }
