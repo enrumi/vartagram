@@ -183,10 +183,9 @@ private func preparedShareItem(postbox: Postbox, network: Network, to peerId: Pe
 
                     let estimatedSize = TGMediaVideoConverter.estimatedSize(for: preset, duration: finalDuration, hasAudio: true)
 
-                    let thumbnailData = thumbnail?.jpegData(compressionQuality: 0.6)
+                    var thumbnailData = thumbnail?.jpegData(compressionQuality: 0.6)
 
                     let resource = LocalFileVideoMediaResource(randomId: Int64.random(in: Int64.min ... Int64.max), path: asset.url.path, adjustments: resourceAdjustments)
-                    var thumbnailData: Data?
                 if peerId.namespace == Namespaces.Peer.SecretChat {
                     let imageGenerator = AVAssetImageGenerator(asset: asset)
                     imageGenerator.maximumSize = asset.originalSize.fitted(CGSize(width: 90.0, height: 90.0))
