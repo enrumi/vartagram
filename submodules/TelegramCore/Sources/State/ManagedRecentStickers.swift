@@ -121,6 +121,7 @@ func managedRecentStickers(postbox: Postbox, network: Network, forceFetch: Bool 
         |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
             guard let result else {
                 return .single(nil)
+                |> map { ($0, 0) }
             }
             switch result {
                 case .recentStickersNotModified:
@@ -149,6 +150,7 @@ func managedRecentGifs(postbox: Postbox, network: Network, forceFetch: Bool = fa
             |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
                 guard let result else {
                     return .single(nil)
+                    |> map { ($0, 0) }
                 }
                 switch result {
                     case .savedGifsNotModified:
@@ -177,6 +179,7 @@ func managedSavedStickers(postbox: Postbox, network: Network, forceFetch: Bool =
             |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
                 guard let result else {
                     return .single(nil)
+                    |> map { ($0, 0) }
                 }
                 switch result {
                     case .favedStickersNotModified:
@@ -224,6 +227,7 @@ func managedGreetingStickers(postbox: Postbox, network: Network) -> Signal<Void,
         |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
             guard let result else {
                 return .single(nil)
+                |> map { ($0, 0) }
             }
             switch result {
                 case .stickersNotModified:
@@ -253,6 +257,7 @@ func managedPremiumStickers(postbox: Postbox, network: Network) -> Signal<Void, 
         |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
             guard let result else {
                 return .single(nil)
+                |> map { ($0, 0) }
             }
             switch result {
                 case .stickersNotModified:
@@ -282,6 +287,7 @@ func managedAllPremiumStickers(postbox: Postbox, network: Network) -> Signal<Voi
         |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
             guard let result else {
                 return .single(nil)
+                |> map { ($0, 0) }
             }
             switch result {
                 case .stickersNotModified:
@@ -311,6 +317,7 @@ func managedRecentStatusEmoji(postbox: Postbox, network: Network) -> Signal<Void
         |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
             guard let result else {
                 return .single(nil)
+                |> map { ($0, 0) }
             }
             switch result {
             case .emojiStatusesNotModified:
@@ -346,6 +353,7 @@ func managedFeaturedStatusEmoji(postbox: Postbox, network: Network) -> Signal<Vo
         |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
             guard let result else {
                 return .single(nil)
+                |> map { ($0, 0) }
             }
             switch result {
             case .emojiStatusesNotModified:
@@ -381,6 +389,7 @@ func managedFeaturedChannelStatusEmoji(postbox: Postbox, network: Network) -> Si
         |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
             guard let result else {
                 return .single(nil)
+                |> map { ($0, 0) }
             }
             switch result {
             case .emojiStatusesNotModified:
@@ -413,14 +422,16 @@ func managedUniqueStarGifts(accountPeerId: PeerId, postbox: Postbox, network: Ne
     let poll = managedRecentMedia(postbox: postbox, network: network, collectionId: Namespaces.OrderedItemList.CloudUniqueStarGifts, extractItemId: { RecentStarGiftItemId($0).id }, reverseHashOrder: false, forceFetch: false, fetch: { hash in
         return network.request(Api.functions.account.getCollectibleEmojiStatuses(hash: hash))
         |> retryRequestIfNotFrozen
-        |> mapToSignal { result -> Signal<[OrderedItemListEntry]?, NoError> in
+        |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
             guard let result else {
                 return .single(nil)
+                |> map { ($0, 0) }
             }
             switch result {
             case .emojiStatusesNotModified:
                 return .single(nil)
-            case let .emojiStatuses(_, statuses):
+                |> map { ($0, 0) }
+            case let .emojiStatuses(hash, statuses):
                 let parsedStatuses = statuses.compactMap(PeerEmojiStatus.init(apiStatus:))
 
                 return _internal_resolveInlineStickers(postbox: postbox, network: network, fileIds: parsedStatuses.flatMap(\.associatedFileIds))
@@ -463,6 +474,7 @@ func managedUniqueStarGifts(accountPeerId: PeerId, postbox: Postbox, network: Ne
                     }
                     return items
                 }
+                |> map { ($0, hash) }
             }
         }
     })
@@ -477,6 +489,7 @@ func managedProfilePhotoEmoji(postbox: Postbox, network: Network) -> Signal<Void
         |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
             guard let result else {
                 return .single(nil)
+                |> map { ($0, hash) }
             }
             switch result {
             case .emojiListNotModified:
@@ -510,6 +523,7 @@ func managedGroupPhotoEmoji(postbox: Postbox, network: Network) -> Signal<Void, 
         |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
             guard let result else {
                 return .single(nil)
+                |> map { ($0, hash) }
             }
             switch result {
             case .emojiListNotModified:
@@ -543,6 +557,7 @@ func managedBackgroundIconEmoji(postbox: Postbox, network: Network) -> Signal<Vo
         |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
             guard let result else {
                 return .single(nil)
+                |> map { ($0, hash) }
             }
             switch result {
             case .emojiListNotModified:
@@ -576,6 +591,7 @@ func managedDisabledChannelStatusIconEmoji(postbox: Postbox, network: Network) -
         |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
             guard let result else {
                 return .single(nil)
+                |> map { ($0, hash) }
             }
             switch result {
             case .emojiListNotModified:
@@ -618,6 +634,7 @@ func managedRecentReactions(postbox: Postbox, network: Network) -> Signal<Void, 
         |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
             guard let result else {
                 return .single(nil)
+                |> map { ($0, hash) }
             }
             switch result {
             case .reactionsNotModified:
@@ -680,6 +697,7 @@ func managedTopReactions(postbox: Postbox, network: Network) -> Signal<Void, NoE
         |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
             guard let result else {
                 return .single(nil)
+                |> map { ($0, hash) }
             }
             switch result {
             case .reactionsNotModified:
@@ -738,9 +756,10 @@ func managedDefaultTagReactions(postbox: Postbox, network: Network) -> Signal<Vo
     }, reverseHashOrder: false, forceFetch: false, fetch: { hash in
         return network.request(Api.functions.messages.getDefaultTagReactions(hash: hash))
         |> retryRequestIfNotFrozen
-        |> mapToSignal { result -> Signal<[OrderedItemListEntry]?, NoError> in
+        |> mapToSignal { result -> Signal<([OrderedItemListEntry]?, Int64), NoError> in
             guard let result else {
                 return .single(nil)
+                |> map { ($0, hash) }
             }
             switch result {
             case .reactionsNotModified:
