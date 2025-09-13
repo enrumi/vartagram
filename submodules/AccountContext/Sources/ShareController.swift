@@ -21,6 +21,8 @@ public protocol ShareControllerAccountContext: AnyObject {
     var animationRenderer: MultiAnimationRenderer { get }
     var contentSettings: ContentSettings { get }
     var appConfiguration: AppConfiguration { get }
+    var ptgSettings: PtgSettings { get }
+    var inactiveSecretChatPeerIds: Signal<Set<PeerId>, NoError>
     
     func resolveInlineStickers(fileIds: [Int64]) -> Signal<[Int64: TelegramMediaFile], NoError>
 }
