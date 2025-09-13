@@ -104,7 +104,7 @@ public extension TelegramEngine {
         }
 
         public func searchMessages(location: SearchMessagesLocation, query: String, state: SearchMessagesState?, centerId: MessageId? = nil, limit: Int32 = 100, inactiveSecretChatPeerIds: Set<PeerId>) -> Signal<(SearchMessagesResult, SearchMessagesState), NoError> {
-            return _internal_searchMessages(account: self.account, location: location, query: query, state: state, centerId: centerId, limit: limit)
+                return _internal_searchMessages(account: self.account, location: location, query: query, state: state, centerId: centerId, limit: limit, inactiveSecretChatPeerIds: inactiveSecretChatPeerIds)
         }
 
         public func getSearchMessageCount(location: SearchMessagesLocation, query: String) -> Signal<Int?, NoError> {
@@ -112,7 +112,7 @@ public extension TelegramEngine {
         }
 
         public func searchHashtagPosts(hashtag: String, state: SearchMessagesState?, limit: Int32 = 100) -> Signal<(SearchMessagesResult, SearchMessagesState), NoError> {
-            return _internal_searchHashtagPosts(account: self.account, hashtag: hashtag, state: state, limit: limit, inactiveSecretChatPeerIds: inactiveSecretChatPeerIds)
+            return _internal_searchHashtagPosts(account: self.account, hashtag: hashtag, state: state, limit: limit)
         }
 
         public func downloadMessage(messageId: MessageId) -> Signal<Message?, NoError> {

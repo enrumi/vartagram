@@ -288,6 +288,6 @@ public final class TelegramMediaPoll: Media, Equatable {
     }
     
     public func withUpdatedText(_ text: String) -> TelegramMediaPoll {
-        return TelegramMediaPoll(pollId: self.pollId, publicity: self.publicity, kind: self.kind, text: text, options: self.options, correctAnswers: self.correctAnswers, results: self.results, isClosed: self.isClosed, deadlineTimeout: self.deadlineTimeout)
+        return TelegramMediaPoll(pollId: self.pollId, publicity: self.publicity, kind: self.kind, text: text, textEntities: self.textEntities, options: self.options, correctAnswers: self.correctAnswers, results: self.results, isClosed: self.isClosed, deadlineTimeout: self.deadlineTimeout)
     }
 }
