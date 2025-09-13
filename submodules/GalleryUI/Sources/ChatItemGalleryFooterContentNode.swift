@@ -990,15 +990,15 @@ final class ChatItemGalleryFooterContentNode: GalleryFooterContentNode, ASScroll
                     break
                 }
             }
+            if let result = addLocallyGeneratedEntities(text, enabledTypes: [.timecode], entities: entities, mediaDuration: mediaDuration) {
+                entities = result
+            }
             var (text_, entities_) = self.context.shouldSuppressForeignAgentNotice(in: message) ? removeForeignAgentNotice(text: message.text, entities: entities, media: message.media) : (message.text, entities)
             if self.context.shouldHideChannelSignature(in: message), let username = message.channelUsername {
                 (text_, entities_) = removeChannelSignature(text: text_, entities: entities_, media: message.media, username: username)
             }
             var text = text_
             entities = entities_
-            //if let result = addLocallyGeneratedEntities(text, enabledTypes: [.timecode], entities: entities, mediaDuration: mediaDuration) {
-            //    entities = result
-            //}
             if let translateToLanguage, !text.isEmpty {
                 for attribute in message.attributes {
                     if let attribute = attribute as? TranslationMessageAttribute, !attribute.text.isEmpty, attribute.toLang == translateToLanguage {
