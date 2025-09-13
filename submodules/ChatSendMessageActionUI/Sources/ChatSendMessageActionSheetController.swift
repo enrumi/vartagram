@@ -71,12 +71,6 @@ public enum SendMessageActionSheetControllerParams {
     case editMessage(EditMessage)
 }
 
-public func dismissWithoutAnimation() {
-    self.statusBar.statusBarStyle = .Ignore
-    self.completion()
-    self.presentingViewController?.dismiss(animated: false, completion: nil)
-}
-
 public func makeChatSendMessageActionSheetController(
     initialData: ChatSendMessageContextScreen.InitialData,
     context: AccountContext,

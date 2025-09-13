@@ -1559,4 +1559,10 @@ public class ChatSendMessageContextScreen: ViewControllerComponentContainer, Cha
             return InitialData(messageEffect: messageEffect)
         }
     }
+
+        public func dismissWithoutAnimation() {
+            self.statusBar.statusBarStyle = .Ignore
+            self.completion()
+            self.presentingViewController?.dismiss(animated: false, completion: nil)
+        }
 }
