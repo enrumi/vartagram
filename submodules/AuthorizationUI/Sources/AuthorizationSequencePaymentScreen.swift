@@ -406,6 +406,8 @@ final class AuthorizationSequencePaymentScreenComponent: Component {
 }
 
 public final class AuthorizationSequencePaymentScreen: ViewControllerComponentContainer {
+    var loadServerCountryCodesDisposable: Disposable?
+
     public init(
         sharedContext: SharedAccountContext,
         engine: TelegramEngineUnauthorized,
@@ -429,8 +431,8 @@ public final class AuthorizationSequencePaymentScreen: ViewControllerComponentCo
             supportEmailAddress: supportEmailAddress,
             supportEmailSubject: supportEmailSubject
         ), navigationBarAppearance: .transparent, theme: .default, updatedPresentationData: (initial: presentationData, signal: .single(presentationData)))
-        
-        loadServerCountryCodes(accountManager: sharedContext.accountManager, engine: engine, completion: { [weak self] in
+
+        loadServerCountryCodesDisposable = loadServerCountryCodes(accountManager: sharedContext.accountManager, engine: engine, completion: { [weak self] in
             if let strongSelf = self {
                 strongSelf.requestLayout(forceUpdate: true, transition: ContainedViewLayoutTransition.immediate)
             }
@@ -445,6 +447,10 @@ public final class AuthorizationSequencePaymentScreen: ViewControllerComponentCo
         self.navigationBar?.backPressed = {
             back()
         }
+    }
+
+    deinit {
+        self.loadServerCountryCodesDisposable?.dispose()
     }
     
     public override func loadDisplayNode() {
