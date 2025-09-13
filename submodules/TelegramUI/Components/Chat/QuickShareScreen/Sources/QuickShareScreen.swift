@@ -221,7 +221,8 @@ private final class QuickShareScreenComponent: Component {
                         return component.context.account.stateManager.postbox.tailChatListView(
                             groupId: .root,
                             count: 20,
-                            summaryComponents: ChatListEntrySummaryComponents()
+                            summaryComponents: ChatListEntrySummaryComponents(),
+                            inactiveSecretChatPeerIds: component.context.inactiveSecretChatPeerIds
                         )
                         |> take(1)
                         |> map { view -> [EnginePeer] in
