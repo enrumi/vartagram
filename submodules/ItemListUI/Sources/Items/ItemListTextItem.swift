@@ -19,7 +19,7 @@ public enum ItemListTextItemText {
         switch self {
         case let .plain(text), let .markdown(text):
             return text
-        case let .custom(_, string), let .attributedString(text):
+        case let .custom(_, string), let .attributedString(string):
             return string.string
         }
     }
