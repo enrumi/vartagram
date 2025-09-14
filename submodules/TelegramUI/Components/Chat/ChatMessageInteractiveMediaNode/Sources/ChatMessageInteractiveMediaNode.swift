@@ -1643,20 +1643,20 @@ public final class ChatMessageInteractiveMediaNode: ASDisplayNode, GalleryItemTr
 
                             updatedFetchControls = FetchControls(fetch: { manual in
                                 if let strongSelf = self {
-//                                    if file.isAnimated {
-//                                        strongSelf.fetchDisposable.set(fetchedMediaResource(mediaBox: context.account.postbox.mediaBox, userLocation: .peer(message.id.peerId), userContentType: MediaResourceUserContentType(file: file), reference: AnyMediaReference.message(message: MessageReference(message), media: file).resourceReference(file.resource), statsCategory: statsCategoryForFileWithAttributes(file.attributes)).startStrict())
-//                                    } else if NativeVideoContent.isHLSVideo(file: file) {
+                                    if file.isAnimated {
+                                        strongSelf.fetchDisposable.set(fetchedMediaResource(mediaBox: context.account.postbox.mediaBox, userLocation: .peer(message.id.peerId), userContentType: MediaResourceUserContentType(file: file), reference: AnyMediaReference.message(message: MessageReference(message), media: file).resourceReference(file.resource), statsCategory: statsCategoryForFileWithAttributes(file.attributes)).startStrict())
+                                    } else if NativeVideoContent.isHLSVideo(file: file) {
                                         strongSelf.fetchDisposable.set(nil)
                                     } else {
                                         strongSelf.fetchDisposable.set(messageMediaFileInteractiveFetched(context: context, message: message, file: file, userInitiated: manual, storeToDownloadsPeerId: storeToDownloadsPeerId).startStrict())
-//                                    }
+                                    }
                                 }
                             }, cancel: {
-//                                if file.isAnimated {
-//                                    context.account.postbox.mediaBox.cancelInteractiveResourceFetch(file.resource)
-//                                } else {
+                                if file.isAnimated {
+                                    context.account.postbox.mediaBox.cancelInteractiveResourceFetch(file.resource)
+                                } else {
                                     messageMediaFileCancelInteractiveFetch(context: context, messageId: message.id, file: file)
-//                                }
+                                }
                             })
                         } else if let wallpaper = media as? WallpaperPreviewMedia {
                             updateImageSignal = { synchronousLoad, _ in
