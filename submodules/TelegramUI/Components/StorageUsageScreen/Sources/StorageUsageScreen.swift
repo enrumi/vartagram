@@ -2598,16 +2598,16 @@ final class StorageUsageScreenComponent: Component {
                 )
 
                 if firstTime {
-                    self.state?.updated(transition: Transition(animation: .none).withUserData(AnimationHint(value: .firstStatsUpdate)))
+                    self.state?.updated(transition: ComponentTransition(animation: .none).withUserData(AnimationHint(value: .firstStatsUpdate)))
                     self.component?.ready.set(.single(true))
                 }
 
                 self.isClearing = false
 
                 if !firstTime {
-                    self.state?.updated(transition: Transition(animation: .none).withUserData(AnimationHint(value: .clearedItems)))
+                    self.state?.updated(transition: ComponentTransition(animation: .none).withUserData(AnimationHint(value: .clearedItems)))
                 } else {
-                    self.state?.updated(transition: Transition(animation: .none))
+                    self.state?.updated(transition: ComponentTransition(animation: .none))
                 }
 
                 completion()
