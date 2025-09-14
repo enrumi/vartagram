@@ -41,8 +41,11 @@ jobs:
           PROVISIONING_PROFILE_WATCH_APP_DATA: ${{ secrets.PROVISIONING_PROFILE_WATCH_APP_DATA }}
           PROVISIONING_PROFILE_WATCH_EXTENSION_DATA: ${{ secrets.PROVISIONING_PROFILE_WATCH_EXTENSION_DATA }}
           PROVISIONING_PROFILE_WIDGET_DATA: ${{ secrets.PROVISIONING_PROFILE_WIDGET_DATA }}
+        shell: zsh
         run: |
           set -x
+          
+          echo $SHELL
 
           # source code paths are included in the final binary, so we need to make them stable across builds
           SOURCE_DIR=/Users/Shared/telegram-ios
@@ -110,7 +113,7 @@ jobs:
           OUTPUT_PATH="build/artifacts"
           rm -rf "$OUTPUT_PATH"
           mkdir -p "$OUTPUT_PATH"
-          for f in bazel-bin/Telegram/Telegram.ipa; do
+          for f in bazel-out/applebin_ios-ios_arm*-opt-ST-*/bin/Telegram/Telegram.ipa; do
             cp "$f" $OUTPUT_PATH/
           done
 
