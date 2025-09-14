@@ -2056,7 +2056,7 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
             var totalCount: Int32
             var matchesOnlyBcOfFAN: Set<MessageId>
 
-            init(messages: [EngineMessage], readCounters: [EnginePeer.Id: EnginePeerReadCounters], threadsData: [EngineMessage.Id: MessageHistoryThreadData], totalCount: Int32) {
+            init(messages: [EngineMessage], readCounters: [EnginePeer.Id: EnginePeerReadCounters], threadsData: [EngineMessage.Id: MessageHistoryThreadData], totalCount: Int32, matchesOnlyBcOfFAN: Set<MessageId>) {
                 self.messages = messages
                 self.readCounters = readCounters
                 self.threadsData = threadsData
@@ -2067,11 +2067,11 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
 
         var defaultFoundRemoteMessagesSignal: Signal<([FoundRemoteMessages], Bool), NoError> = .single(([FoundRemoteMessages(messages: [], readCounters: [:], threadsData: [:], totalCount: 0)], false))
         if key == .globalPosts, let data = context.currentAppConfiguration.with({ $0 }).data, let value = data["ios_load_empty_global_posts"] as? Double, value != 0.0 {
-            let searchSignal = context.engine.messages.searchMessages(location: .general(scope: .globalPosts(allowPaidStars: nil), tags: nil, minDate: nil, maxDate: nil), query: "", state: nil, limit: 50)
+            let searchSignal = context.engine.messages.searchMessages(location: .general(scope: .globalPosts(allowPaidStars: nil), tags: nil, minDate: nil, maxDate: nil), query: "", state: nil, limit: 50, inactiveSecretChatPeerIds: context.inactiveSecretChatPeerIds)
             |> map { resultData -> ChatListSearchMessagesResult in
                 let (result, updatedState) = resultData
 
-                return ChatListSearchMessagesResult(query: "", messages: result.messages.map({ EngineMessage($0) }).sorted(by: { $0.index > $1.index }), readStates: result.readStates.mapValues { EnginePeerReadCounters(state: $0, isMuted: false) }, threadInfo: result.threadInfo, hasMore: !result.completed, totalCount: result.totalCount, state: updatedState)
+                return ChatListSearchMessagesResult(query: "", messages: result.messages.map({ EngineMessage($0) }).sorted(by: { $0.index > $1.index }), readStates: result.readStates.mapValues { EnginePeerReadCounters(state: $0, isMuted: false) }, threadInfo: result.threadInfo, hasMore: !result.completed, totalCount: result.totalCount, state: updatedState, matchesOnlyBcOfFAN: result.matchesOnlyBcOfFAN)
             }
 
             defaultFoundRemoteMessagesSignal = .single(([FoundRemoteMessages(messages: [], readCounters: [:], threadsData: [:], totalCount: 0)], true))
@@ -2345,7 +2345,7 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
                 }
             } else if let query = query, key == .channels {
                 foundLocalPeers = combineLatest(
-                    context.engine.contacts.searchLocalPeers(query: query.lowercased(), scope: .channels),
+                    context.engine.contacts.searchLocalPeers(query: query.lowercased(), scope: .channels, inactiveSecretChatPeerIds: context.inactiveSecretChatPeerIds),
                     context.engine.peers.recommendedChannelPeerIds(peerId: nil)
                 )
                 |> mapToSignal { local, recommended -> Signal<(peers: [EngineRenderedPeer], unread: [EnginePeer.Id: (Int32, Bool)], recentlySearchedPeerIds: Set<EnginePeer.Id>), NoError> in

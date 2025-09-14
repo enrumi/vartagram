@@ -1240,7 +1240,7 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                 self.context.engine.data.get(
                     TelegramEngine.EngineData.Item.Configuration.GlobalPrivacy()
                 ),
-                self.context.engine.messages.chatList(group: .archive, count: 20) |> take(1)
+                self.context.engine.messages.chatList(group: .archive, count: 20, inactiveSecretChatPeerIds: self.context.inactiveSecretChatPeerIds) |> take(1)
             )
             |> deliverOnMainQueue).startStandalone(next: { [weak self] didDisplayTip, settings, chatListHead in
                 guard let self else {

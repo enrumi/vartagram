@@ -1278,7 +1278,7 @@ public final class ChatListNode: ListView {
                     return nil
                 case let .PeerId(value):
                     return PeerId(value)
-                case .ThreadId, .GroupId, .ContactId, .ArchiveIntro, .EmptyIntro, .SectionHeader, .Notice, .additionalCategory:
+                case .ThreadId, .GroupId, .ContactId, .ArchiveIntro, .EmptyIntro, .SectionHeader, .Notice, .additionalCategory, .EmptyChatSelectionList:
                     return nil
                 }
             }
