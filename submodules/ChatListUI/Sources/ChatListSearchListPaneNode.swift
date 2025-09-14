@@ -2065,21 +2065,22 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
             }
         }
 
-        var defaultFoundRemoteMessagesSignal: Signal<([FoundRemoteMessages], Bool), NoError> = .single(([FoundRemoteMessages(messages: [], readCounters: [:], threadsData: [:], totalCount: 0, matchesOnlyBcOfFAN: matchesOnlyBcOfFAN)], false))
+        var defaultFoundRemoteMessagesSignal: Signal<([FoundRemoteMessages], Bool), NoError> = .single(([FoundRemoteMessages(messages: [], readCounters: [:], threadsData: [:], totalCount: 0, matchesOnlyBcOfFAN: [])], false))
         if key == .globalPosts, let data = context.currentAppConfiguration.with({ $0 }).data, let value = data["ios_load_empty_global_posts"] as? Double, value != 0.0 {
             let searchSignal = context.engine.messages.searchMessages(location: .general(scope: .globalPosts(allowPaidStars: nil), tags: nil, minDate: nil, maxDate: nil), query: "", state: nil, limit: 50, inactiveSecretChatPeerIds: context.currentInactiveSecretChatPeerIds.with { $0 })
             |> map { resultData -> ChatListSearchMessagesResult in
                 let (result, updatedState) = resultData
 
-                return ChatListSearchMessagesResult(query: "", messages: result.messages.map({ EngineMessage($0) }).sorted(by: { $0.index > $1.index }), readStates: result.readStates.mapValues { EnginePeerReadCounters(state: $0, isMuted: false) }, threadInfo: result.threadInfo, hasMore: !result.completed, totalCount: result.totalCount, state: updatedState, matchesOnlyBcOfFAN: matchesOnlyBcOfFAN)
+                return ChatListSearchMessagesResult(query: "", messages: result.messages.map({ EngineMessage($0) }).sorted(by: { $0.index > $1.index }), readStates: result.readStates.mapValues { EnginePeerReadCounters(state: $0, isMuted: false) }, threadInfo: result.threadInfo, hasMore: !result.completed, totalCount: result.totalCount, state: updatedState, matchesOnlyBcOfFAN: [])
             }
 
-            defaultFoundRemoteMessagesSignal = .single(([FoundRemoteMessages(messages: [], readCounters: [:], threadsData: [:], totalCount: 0, matchesOnlyBcOfFAN: matchesOnlyBcOfFAN)], true))
+            defaultFoundRemoteMessagesSignal = .single(([FoundRemoteMessages(messages: [], readCounters: [:], threadsData: [:], totalCount: 0, matchesOnlyBcOfFAN: [])], true))
             |> then(
                 searchSignal
                 |> map { foundMessages -> ([FoundRemoteMessages], Bool) in
                     var result: [FoundRemoteMessages] = []
-                    result.append(FoundRemoteMessages(messages: foundMessages.messages, readCounters: foundMessages.readStates, threadsData: foundMessages.threadInfo, totalCount: foundMessages.totalCount, matchesOnlyBcOfFAN: matchesOnlyBcOfFAN))
+                    result.append(FoundRemoteMessages(messages: foundMessages.messages, readCounters: foundMessages.readStates, threadsData: foundMessages.threadInfo, totalCount: foundMessages.totalCount, matchesOnlyBcOfFAN: foundMessages.matchesOnlyBcOfFAN
+))
                     return (result, false)
                 }
             )
@@ -2629,7 +2630,7 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
                             if let _ = searchContext.loadMoreIndex {
                                 return context.engine.messages.searchHashtagPosts(hashtag: finalQuery, state: searchContext.result.state, limit: 80)
                                 |> map { result, updatedState -> ChatListSearchMessagesResult in
-                                    return ChatListSearchMessagesResult(query: finalQuery, messages: result.messages.map({ EngineMessage($0) }).sorted(by: { $0.index > $1.index }), readStates: result.readStates.mapValues { EnginePeerReadCounters(state: $0, isMuted: false) }, threadInfo: result.threadInfo, hasMore: !result.completed, totalCount: result.totalCount, state: updatedState)
+                                    return ChatListSearchMessagesResult(query: finalQuery, messages: result.messages.map({ EngineMessage($0) }).sorted(by: { $0.index > $1.index }), readStates: result.readStates.mapValues { EnginePeerReadCounters(state: $0, isMuted: false) }, threadInfo: result.threadInfo, hasMore: !result.completed, totalCount: result.totalCount, state: updatedState, matchesOnlyBcOfFAN: [])
                                 }
                                 |> mapToSignal { foundMessages -> Signal<([FoundRemoteMessages], Bool), NoError> in
                                     updateSearchContexts { previous in
@@ -2643,7 +2644,7 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
                             } else {
                                 var currentResults: [FoundRemoteMessages] = []
                                 if let currentContext = searchContexts[i] {
-                                    currentResults.append(FoundRemoteMessages(messages: currentContext.result.messages, readCounters: currentContext.result.readStates, threadsData: currentContext.result.threadInfo, totalCount: currentContext.result.totalCount))
+                                    currentResults.append(FoundRemoteMessages(messages: currentContext.result.messages, readCounters: currentContext.result.readStates, threadsData: currentContext.result.threadInfo, totalCount: currentContext.result.totalCount, matchesOnlyBcOfFAN: []))
                                 }
                                 return .single((currentResults, false))
                             }
@@ -2655,13 +2656,13 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
                     loadMore = .complete()
                 }
 
-                foundPublicMessages = .single(([FoundRemoteMessages(messages: [], readCounters: [:], threadsData: [:], totalCount: 0)], true))
+                foundPublicMessages = .single(([FoundRemoteMessages(messages: [], readCounters: [:], threadsData: [:], totalCount: 0, matchesOnlyBcOfFAN: [])], true))
                 |> then(
                     searchSignal
                     |> map { result -> ([FoundRemoteMessages], Bool) in
                         updateSearchContexts { _ in
                             var resultContexts: [Int: ChatListSearchMessagesContext] = [:]
-                            resultContexts[0] = ChatListSearchMessagesContext(result: ChatListSearchMessagesResult(query: finalQuery, messages: result.0.messages.map({ EngineMessage($0) }).sorted(by: { $0.index > $1.index }), readStates: result.0.readStates.mapValues { EnginePeerReadCounters(state: $0, isMuted: false) }, threadInfo: result.0.threadInfo, hasMore: !result.0.completed, totalCount: result.0.totalCount, state: result.1), loadMoreIndex: nil)
+                            resultContexts[0] = ChatListSearchMessagesContext(result: ChatListSearchMessagesResult(query: finalQuery, messages: result.0.messages.map({ EngineMessage($0) }).sorted(by: { $0.index > $1.index }), readStates: result.0.readStates.mapValues { EnginePeerReadCounters(state: $0, isMuted: false) }, threadInfo: result.0.threadInfo, hasMore: !result.0.completed, totalCount: result.0.totalCount, state: result.1, matchesOnlyBcOfFAN: []), loadMoreIndex: nil)
                             return (resultContexts, true)
                         }
 
@@ -2672,31 +2673,31 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
                         } else {
                             messages = foundMessages.messages.map { EngineMessage($0) }
                         }
-                        return ([FoundRemoteMessages(messages: messages, readCounters: foundMessages.readStates.mapValues { EnginePeerReadCounters(state: $0, isMuted: false) }, threadsData: foundMessages.threadInfo, totalCount: foundMessages.totalCount)], false)
+                        return ([FoundRemoteMessages(messages: messages, readCounters: foundMessages.readStates.mapValues { EnginePeerReadCounters(state: $0, isMuted: false) }, threadsData: foundMessages.threadInfo, totalCount: foundMessages.totalCount, matchesOnlyBcOfFAN: [])], false)
                     }
                     |> delay(0.2, queue: Queue.concurrentDefaultQueue())
                     |> then(loadMore)
                 )
             } else {
-                foundPublicMessages = .single(([FoundRemoteMessages(messages: [], readCounters: [:], threadsData: [:], totalCount: 0)], false))
+                foundPublicMessages = .single(([FoundRemoteMessages(messages: [], readCounters: [:], threadsData: [:], totalCount: 0, matchesOnlyBcOfFAN: [])], false))
             }
 
             let cleanFinalQuery = finalQuery.trimmingCharacters(in: .whitespacesAndNewlines)
 
             let foundRemoteMessages: Signal<([FoundRemoteMessages], Bool), NoError>
             if key == .publicPosts {
-                foundRemoteMessages = .single(([FoundRemoteMessages(messages: [], readCounters: [:], threadsData: [:], totalCount: 0)], false))
+                foundRemoteMessages = .single(([FoundRemoteMessages(messages: [], readCounters: [:], threadsData: [:], totalCount: 0, matchesOnlyBcOfFAN: [])], false))
             } else if case .savedMessagesChats = location {
                 foundRemoteMessages = .single(([FoundRemoteMessages(messages: [], readCounters: [:], threadsData: [:], totalCount: 0, matchesOnlyBcOfFAN: [])], false))
             } else if peersFilter.contains(.doNotSearchMessages) {
                 foundRemoteMessages = .single(([FoundRemoteMessages(messages: [], readCounters: [:], threadsData: [:], totalCount: 0, matchesOnlyBcOfFAN: [])], false))
             } else if key == .apps {
-                foundRemoteMessages = .single(([FoundRemoteMessages(messages: [], readCounters: [:], threadsData: [:], totalCount: 0)], false))
+                foundRemoteMessages = .single(([FoundRemoteMessages(messages: [], readCounters: [:], threadsData: [:], totalCount: 0, matchesOnlyBcOfFAN: [])], false))
             } else if key == .globalPosts && (cleanFinalQuery.isEmpty || approvedGlobalPostQueryState?.query != finalQuery) {
                 if cleanFinalQuery.isEmpty {
                     foundRemoteMessages = defaultFoundRemoteMessages.get()
                 } else {
-                    foundRemoteMessages = .single(([FoundRemoteMessages(messages: [], readCounters: [:], threadsData: [:], totalCount: 0)], false))
+                    foundRemoteMessages = .single(([FoundRemoteMessages(messages: [], readCounters: [:], threadsData: [:], totalCount: 0, matchesOnlyBcOfFAN: []	)], false))
                 }
             } else {
                 if !finalQuery.isEmpty {
@@ -2771,7 +2772,7 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
                                     if shouldTryLoadMore && foundMessages.hasMore {
                                         Queue.mainQueue().async {
                                             if let strongSelf = self {
-                                                strongSelf.listNode.visibleBottomContentOffsetChanged(strongSelf.listNode.visibleBottomContentOffset())
+                                                strongSelf.listNode?.visibleBottomContentOffsetChanged(strongSelf.listNode?.visibleBottomContentOffset() ?? <#default value#>)
                                             }
                                         }
                                     }
@@ -2815,7 +2816,7 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
                             if shouldTryLoadMore && foundMessages[i].hasMore {
                                 Queue.mainQueue().async {
                                     if let strongSelf = self {
-                                        strongSelf.listNode.visibleBottomContentOffsetChanged(strongSelf.listNode.visibleBottomContentOffset())
+                                        strongSelf.listNode?.visibleBottomContentOffsetChanged(strongSelf.listNode?.visibleBottomContentOffset() ?? <#default value#>)
                                     }
                                 }
                                 break
