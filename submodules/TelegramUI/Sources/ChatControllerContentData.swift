@@ -1101,7 +1101,7 @@ extension ChatControllerImpl {
                             strongSelf.nextChannelToReadDisposable = (combineLatest(queue: .mainQueue(),
                                 context.engine.peers.getNextUnreadChannel(peerId: channel.id, chatListFilterId: currentChatListFilter, getFilterPredicate: { data in
                                     return chatListFilterPredicate(filter: data, accountPeerId: accountPeerId)
-                                }),
+                                }, reverseOrder: false),
                                 ApplicationSpecificNotice.getNextChatSuggestionTip(accountManager: context.sharedContext.accountManager)
                             )
                             |> then(.complete() |> delay(1.0, queue: .mainQueue()))

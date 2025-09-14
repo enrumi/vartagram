@@ -50,7 +50,7 @@ extension ChatControllerImpl {
             let _ = combineLatest(queue: .mainQueue(),
                 self.context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: self.context.account.peerId)),
                 contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState: self.presentationInterfaceState, context: self.context, messages: updatedMessages, controllerInteraction: self.controllerInteraction, selectAll: selectAll, interfaceInteraction: self.interfaceInteraction, messageNode: node as? ChatMessageItemView),
-                !hideReactions ? peerMessageAllowedReactions(context: self.context, message: topMessage) : .single(nil),
+                !hideReactions ? peerMessageAllowedReactions(context: self.context, message: topMessage) : .single((nil, false)),
                 !hideReactions ? peerMessageSelectedReactions(context: self.context, message: topMessage) : .single(([], [])),
                 !hideReactions ? topMessageReactions(context: self.context, message: topMessage, subPeerId: self.chatLocation.threadId.flatMap(EnginePeer.Id.init)) : .single([]),
                 ApplicationSpecificNotice.getChatTextSelectionTips(accountManager: self.context.sharedContext.accountManager)

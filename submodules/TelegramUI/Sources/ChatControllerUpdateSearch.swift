@@ -93,7 +93,7 @@ extension ChatControllerImpl {
                             self.searchDisposable = searchDisposable
                         }
 
-                        let search = self.context.engine.messages.searchMessages(location: searchState.location, query: searchState.query, state: nil, limit: limit)
+                        let search = self.context.engine.messages.searchMessages(location: searchState.location, query: searchState.query, state: nil, limit: limit, inactiveSecretChatPeerIds: self.context.currentInactiveSecretChatPeerIds.with { $0 })
                         |> delay(0.2, queue: Queue.mainQueue())
                         self.searchResult.set(search
                         |> map { (result, state) -> (SearchMessagesResult, SearchMessagesState, SearchMessagesLocation)? in
@@ -120,7 +120,7 @@ extension ChatControllerImpl {
                                         }
                                     }
                                     navigateIndex = currentIndex
-                                    return current.updatedSearch(data.withUpdatedResultsState(ChatSearchResultsState(messageIndices: messageIndices, currentId: currentIndex?.id, state: updatedState, totalCount: results.totalCount, completed: results.completed)))
+                                    return current.updatedSearch(data.withUpdatedResultsState(ChatSearchResultsState(messageIndices: messageIndices, currentId: currentIndex?.id, state: updatedState, totalCount: results.totalCount, completed: results.completed, matchesOnlyBcOfFAN: [])))
                                 } else {
                                     return current
                                 }
@@ -148,7 +148,7 @@ extension ChatControllerImpl {
                             searchDisposable = MetaDisposable()
                             self.searchDisposable = searchDisposable
                         }
-                        searchDisposable.set((self.context.engine.messages.searchMessages(location: searchState.location, query: searchState.query, state: loadMoreState, limit: limit)
+                        searchDisposable.set((self.context.engine.messages.searchMessages(location: searchState.location, query: searchState.query, state: loadMoreState, limit: limit, inactiveSecretChatPeerIds: self.context.currentInactiveSecretChatPeerIds.with { $0 })
                         |> delay(0.2, queue: Queue.mainQueue())
                         |> deliverOnMainQueue).startStrict(next: { [weak self] results, updatedState in
                             guard let strongSelf = self else {
@@ -158,7 +158,7 @@ extension ChatControllerImpl {
                             strongSelf.updateChatPresentationInterfaceState(animated: true, interactive: true, { current in
                                 if let data = current.search, let previousResultsState = data.resultsState {
                                     let messageIndices = results.messages.map({ $0.index }).sorted()
-                                    return current.updatedSearch(data.withUpdatedResultsState(ChatSearchResultsState(messageIndices: messageIndices, currentId: previousResultsState.currentId, state: updatedState, totalCount: results.totalCount, completed: results.completed)))
+                                    return current.updatedSearch(data.withUpdatedResultsState(ChatSearchResultsState(messageIndices: messageIndices, currentId: previousResultsState.currentId, state: updatedState, totalCount: results.totalCount, completed: results.completed, matchesOnlyBcOfFAN: [])))
                                 } else {
                                     return current
                                 }

@@ -3164,7 +3164,8 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                                 location: .peer(peerId: peerId, fromId: nil, tags: nil, reactions: [reaction], threadId: self.chatLocation.threadId, minDate: nil, maxDate: nil),
                                 query: "",
                                 state: nil,
-                                centerId: message.id
+                                centerId: message.id,
+                                inactiveSecretChatPeerIds: self.context.currentInactiveSecretChatPeerIds.with { $0 }
                             )
                             |> take(1)
                             |> deliverOnMainQueue).startStandalone(next: { [weak self] results, searchState in
@@ -3195,7 +3196,8 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                                             currentId: currentIndex?.id,
                                             state: searchState,
                                             totalCount: results.totalCount,
-                                            completed: results.completed
+                                            completed: results.completed,
+                                            matchesOnlyBcOfFAN: []
                                         )
                                     ))
                                 })
@@ -3381,7 +3383,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                             }
                             
                             self.loadMoreSearchResultsDisposable?.dispose()
-                            self.loadMoreSearchResultsDisposable = (self.context.engine.messages.searchMessages(location: currentSearchState.location, query: currentSearchState.query, state: currentResultsState.state)
+                            self.loadMoreSearchResultsDisposable = (self.context.engine.messages.searchMessages(location: currentSearchState.location, query: currentSearchState.query, state: currentResultsState.state, inactiveSecretChatPeerIds: self.context.currentInactiveSecretChatPeerIds.with { $0 })
                             |> deliverOnMainQueue).startStrict(next: { [weak self] results, updatedState in
                                 guard let self, let controller = self.controller else {
                                     return
@@ -3403,7 +3405,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                                             }
                                         }
                                         navigateIndex = currentIndex
-                                        return current.updatedSearch(data.withUpdatedResultsState(ChatSearchResultsState(messageIndices: messageIndices, currentId: currentIndex?.id, state: updatedState, totalCount: results.totalCount, completed: results.completed)))
+                                        return current.updatedSearch(data.withUpdatedResultsState(ChatSearchResultsState(messageIndices: messageIndices, currentId: currentIndex?.id, state: updatedState, totalCount: results.totalCount, completed: results.completed, matchesOnlyBcOfFAN: [])))
                                     } else {
                                         return current
                                     }

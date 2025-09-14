@@ -1979,6 +1979,8 @@ extension ChatControllerImpl {
                 let forwardMessageIds = messages.map { $0.id }.sorted()
                 strongSelf.forwardMessages(messageIds: forwardMessageIds)
             }
+        }, saveMessages: { _ in
+        }, shareMessages: { _ in
         }, updateForwardOptionsState: { [weak self] f in
             if let strongSelf = self {
                 strongSelf.updateChatPresentationInterfaceState(animated: true, interactive: true, { $0.updatedInterfaceState({ $0.withUpdatedForwardOptionsState(f($0.forwardOptionsState ?? ChatInterfaceForwardOptionsState(hideNames: false, hideCaptions: false, unhideNamesOnCaptionChange: false))) }) })
@@ -2269,12 +2271,12 @@ extension ChatControllerImpl {
                     |> deliverOnMainQueue).startStandalone(next: { [weak self] searchResult in
                         if let strongSelf = self, let (searchResult, searchState, searchLocation) = searchResult {
                             let matchesOnlyBcOfFAN = strongSelf.presentationInterfaceState.search?.resultsState?.matchesOnlyBcOfFAN ?? []
-                            let controller = ChatSearchResultsController(context: strongSelf.context, updatedPresentationData: strongSelf.updatedPresentationData, location: searchLocation, searchQuery: searchData.query, searchResult: searchResult, searchState: searchState, navigateToMessageIndex: { index in
+                            let controller = ChatSearchResultsController(context: strongSelf.context, updatedPresentationData: strongSelf.updatedPresentationData, location: searchLocation, searchQuery: searchData.query, searchResult: searchResult, searchState: searchState, matchesOnlyBcOfFAN: matchesOnlyBcOfFAN, loadMorePaused: false, navigateToMessageIndex: { index in
                                 guard let strongSelf = self else {
                                     return
                                 }
                                 strongSelf.interfaceInteraction?.navigateMessageSearch(.index(index))
-                            }, resultsUpdated: { results, state in
+                            }, resultsUpdated: { results, state, _ in
                                 guard let strongSelf = self else {
                                     return
                                 }
@@ -2292,12 +2294,12 @@ extension ChatControllerImpl {
                                                 }
                                             }
                                         }
-                                        return current.updatedSearch(data.withUpdatedResultsState(ChatSearchResultsState(messageIndices: messageIndices, currentId: currentIndex?.id, state: state, totalCount: results.totalCount, completed: results.completed)))
+                                        return current.updatedSearch(data.withUpdatedResultsState(ChatSearchResultsState(messageIndices: messageIndices, currentId: currentIndex?.id, state: state, totalCount: results.totalCount, completed: results.completed, matchesOnlyBcOfFAN: [])))
                                     } else {
                                         return current
                                     }
                                 })
-                            }, matchesOnlyBcOfFAN: matchesOnlyBcOfFAN)
+                            })
                             strongSelf.chatDisplayNode.dismissInput()
                             if case let .inline(navigationController) = strongSelf.presentationInterfaceState.mode {
                                 navigationController?.pushViewController(controller)
@@ -2332,7 +2334,7 @@ extension ChatControllerImpl {
                             }
                             if let updatedIndex = updatedIndex {
                                 navigateIndex = resultsState.messageIndices[updatedIndex]
-                                return current.updatedSearch(data.withUpdatedResultsState(ChatSearchResultsState(messageIndices: resultsState.messageIndices, currentId: resultsState.messageIndices[updatedIndex].id, state: resultsState.state, totalCount: resultsState.totalCount, completed: resultsState.completed)))
+                                return current.updatedSearch(data.withUpdatedResultsState(ChatSearchResultsState(messageIndices: resultsState.messageIndices, currentId: resultsState.messageIndices[updatedIndex].id, state: resultsState.state, totalCount: resultsState.totalCount, completed: resultsState.completed, matchesOnlyBcOfFAN: [])))
                             }
                         }
                     }

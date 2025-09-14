@@ -2645,13 +2645,14 @@ extension UserDefaults {
                         sharedApplicationContext.notificationManager.addNotification(payload.dictionaryPayload)
                     }
                 })
-            }
 
-            Logger.shared.log("App \(self.episodeId) PushRegistry", "Invoking completion handler")
-            Logger.shared.sync()
+                Logger.shared.log("App \(self.episodeId) PushRegistry", "Invoking completion handler")
+                Logger.shared.sync()
 
-            completion()
-        })
+                completion()
+            }, error: { error in
+            })
+        }
     }
     
     public func pushRegistry(_ registry: PKPushRegistry, didInvalidatePushTokenFor type: PKPushType) {

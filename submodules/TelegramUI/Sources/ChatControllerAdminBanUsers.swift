@@ -131,7 +131,7 @@ extension ChatControllerImpl {
         
         var deleteAllMessageCount: Signal<Int?, NoError> = .single(nil)
         if authors.count == 1 {
-            deleteAllMessageCount = self.context.engine.messages.searchMessages(location: .peer(peerId: peerId, fromId: authors[0].id, tags: nil, reactions: nil, threadId: self.chatLocation.threadId, minDate: nil, maxDate: nil), query: "", state: nil)
+            deleteAllMessageCount = self.context.engine.messages.searchMessages(location: .peer(peerId: peerId, fromId: authors[0].id, tags: nil, reactions: nil, threadId: self.chatLocation.threadId, minDate: nil, maxDate: nil), query: "", state: nil, inactiveSecretChatPeerIds: self.context.currentInactiveSecretChatPeerIds.with { $0 })
             |> map { result, _ -> Int? in
                 return Int(result.totalCount)
             }
