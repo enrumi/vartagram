@@ -504,7 +504,12 @@ extension ChatControllerImpl {
             }
         
             switch contentData.chatLocationInfoData {
-            case let .peer(peerView):
+            case .peer:
+            //case let .peer(peerView):
+                break
+                // Don't show cache statistics
+                
+                /*
                 self.navigationActionDisposable.set((peerView.get()
                 |> take(1)
                 |> deliverOnMainQueue).startStrict(next: { [weak self] peerView in
@@ -693,6 +698,7 @@ extension ChatControllerImpl {
                         }
                     })
                 }))
+                */
             case .replyThread:
                 break
             case .customChatContents:
