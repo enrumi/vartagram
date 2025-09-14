@@ -386,7 +386,7 @@ public final class PresentationCallManagerImpl: PresentationCallManager {
                         context: firstState.0,
                         audioSession: strongSelf.audioSession,
                         callSessionManager: firstState.0.account.callSessionManager,
-                        callKitIntegration: enableCallKit ? callKitIntegrationIfEnabled(strongSelf.callKitIntegration, settings: strongSelf.callSettings) : nil,
+                        callKitIntegration: enableCallKit ? callKitIntegrationIfEnabled(strongSelf.callKitIntegration, settings: strongSelf.callSettings, isHidableAccount: firstState.0.immediateIsHidable) : nil,
                         serializedData: configuration.serializedData,
                         dataSaving: effectiveDataSaving(for: strongSelf.callSettings, autodownloadSettings: autodownloadSettings),
                         getDeviceAccessData: strongSelf.getDeviceAccessData,
