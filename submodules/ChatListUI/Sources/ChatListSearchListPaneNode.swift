@@ -2065,21 +2065,21 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
             }
         }
 
-        var defaultFoundRemoteMessagesSignal: Signal<([FoundRemoteMessages], Bool), NoError> = .single(([FoundRemoteMessages(messages: [], readCounters: [:], threadsData: [:], totalCount: 0)], false))
+        var defaultFoundRemoteMessagesSignal: Signal<([FoundRemoteMessages], Bool), NoError> = .single(([FoundRemoteMessages(messages: [], readCounters: [:], threadsData: [:], totalCount: 0, matchesOnlyBcOfFAN: matchesOnlyBcOfFAN)], false))
         if key == .globalPosts, let data = context.currentAppConfiguration.with({ $0 }).data, let value = data["ios_load_empty_global_posts"] as? Double, value != 0.0 {
-            let searchSignal = context.engine.messages.searchMessages(location: .general(scope: .globalPosts(allowPaidStars: nil), tags: nil, minDate: nil, maxDate: nil), query: "", state: nil, limit: 50, inactiveSecretChatPeerIds: context.inactiveSecretChatPeerIds)
+            let searchSignal = context.engine.messages.searchMessages(location: .general(scope: .globalPosts(allowPaidStars: nil), tags: nil, minDate: nil, maxDate: nil), query: "", state: nil, limit: 50, inactiveSecretChatPeerIds: context.currentInactiveSecretChatPeerIds.with { $0 })
             |> map { resultData -> ChatListSearchMessagesResult in
                 let (result, updatedState) = resultData
 
-                return ChatListSearchMessagesResult(query: "", messages: result.messages.map({ EngineMessage($0) }).sorted(by: { $0.index > $1.index }), readStates: result.readStates.mapValues { EnginePeerReadCounters(state: $0, isMuted: false) }, threadInfo: result.threadInfo, hasMore: !result.completed, totalCount: result.totalCount, state: updatedState, matchesOnlyBcOfFAN: result.matchesOnlyBcOfFAN)
+                return ChatListSearchMessagesResult(query: "", messages: result.messages.map({ EngineMessage($0) }).sorted(by: { $0.index > $1.index }), readStates: result.readStates.mapValues { EnginePeerReadCounters(state: $0, isMuted: false) }, threadInfo: result.threadInfo, hasMore: !result.completed, totalCount: result.totalCount, state: updatedState, matchesOnlyBcOfFAN: matchesOnlyBcOfFAN)
             }
 
-            defaultFoundRemoteMessagesSignal = .single(([FoundRemoteMessages(messages: [], readCounters: [:], threadsData: [:], totalCount: 0)], true))
+            defaultFoundRemoteMessagesSignal = .single(([FoundRemoteMessages(messages: [], readCounters: [:], threadsData: [:], totalCount: 0, matchesOnlyBcOfFAN: matchesOnlyBcOfFAN)], true))
             |> then(
                 searchSignal
                 |> map { foundMessages -> ([FoundRemoteMessages], Bool) in
                     var result: [FoundRemoteMessages] = []
-                    result.append(FoundRemoteMessages(messages: foundMessages.messages, readCounters: foundMessages.readStates, threadsData: foundMessages.threadInfo, totalCount: foundMessages.totalCount))
+                    result.append(FoundRemoteMessages(messages: foundMessages.messages, readCounters: foundMessages.readStates, threadsData: foundMessages.threadInfo, totalCount: foundMessages.totalCount, matchesOnlyBcOfFAN: matchesOnlyBcOfFAN))
                     return (result, false)
                 }
             )
@@ -2345,7 +2345,7 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
                 }
             } else if let query = query, key == .channels {
                 foundLocalPeers = combineLatest(
-                    context.engine.contacts.searchLocalPeers(query: query.lowercased(), scope: .channels, inactiveSecretChatPeerIds: context.inactiveSecretChatPeerIds),
+                    context.engine.contacts.searchLocalPeers(query: query.lowercased(), inactiveSecretChatPeerIds: context.inactiveSecretChatPeerIds, scope: .channels),
                     context.engine.peers.recommendedChannelPeerIds(peerId: nil)
                 )
                 |> mapToSignal { local, recommended -> Signal<(peers: [EngineRenderedPeer], unread: [EnginePeer.Id: (Int32, Bool)], recentlySearchedPeerIds: Set<EnginePeer.Id>), NoError> in
