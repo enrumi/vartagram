@@ -2558,94 +2558,94 @@ extension UserDefaults {
             }
         }
 
-        let _ = (useCallKitIntegration
-        |> take(1)
-        |> deliverOnMainQueue).start(next: { useCallKitIntegration in
-            guard useCallKitIntegration else {
-                Logger.shared.log("App \(self.episodeId) PushRegistry", "CallKitIntegration is disabled")
-                Logger.shared.sync()
-                if #available(iOS 13.0, *) {
-                    assertionFailure()
-                } else {
-                    // On iOS before 13, telegram servers do not send regular push notification for incoming calls when call integration is disabled?! But they send voip-push, even when integration is disabled.
-                    self.checkIncomingCallAndRefreshUnreadCountOfNonCurrentAccounts([accountId])
-                }
-                completion()
-                return
-            }
-
-            guard let callKitIntegration = CallKitIntegration.shared else {
-                Logger.shared.log("App \(self.episodeId) PushRegistry", "CallKitIntegration is not available")
-                Logger.shared.sync()
-                completion()
-                return
-            }
-
-            callKitIntegration.reportIncomingCall(
-                uuid: CallSessionManager.getStableIncomingUUID(stableId: callUpdate.callId),
-                stableId: callUpdate.callId,
-                handle: "\(callUpdate.peer.id.id._internalGetInt64Value())",
-                phoneNumber: phoneNumber.flatMap(formatPhoneNumber),
-                isVideo: callUpdate.isVideo,
-                displayTitle: callUpdate.peer.debugDisplayTitle,
-                completion: { error in
-                    if let error = error {
-                        if error.domain == "com.apple.CallKit.error.incomingcall" && (error.code == -3 || error.code == 3) {
-                            Logger.shared.log("PresentationCall", "reportIncomingCall device in DND mode")
-                        } else {
-                            Logger.shared.log("PresentationCall", "reportIncomingCall error \(error)")
-                            /*Queue.mainQueue().async {
-                                if let strongSelf = self {
-                                    strongSelf.callSessionManager.drop(internalId: strongSelf.internalId, reason: .hangUp, debugLog: .single(nil))
-                                }
-                            }*/
-                        }
-                    }
-                }
-            )
-
-            let _ = (self.sharedContextPromise.get()
+            let _ = (useCallKitIntegration
             |> take(1)
-            |> deliverOnMainQueue).start(next: { sharedApplicationContext in
-                let _ = (sharedApplicationContext.sharedContext.activeAccountContexts
-                |> take(1)
-                |> deliverOnMainQueue).start(next: { activeAccounts in
-                    var processed = false
-                    for (_, context, _) in activeAccounts.accounts {
-                        if context.account.id == accountId {
-                            context.account.stateManager.processIncomingCallUpdate(data: updateData, completion: { _ in
-                            })
+            |> deliverOnMainQueue).start(next: { useCallKitIntegration in
+                guard useCallKitIntegration else {
+                    Logger.shared.log("App \(self.episodeId) PushRegistry", "CallKitIntegration is disabled")
+                    Logger.shared.sync()
+                    if #available(iOS 13.0, *) {
+                        assertionFailure()
+                    } else {
+                        // On iOS before 13, telegram servers do not send regular push notification for incoming calls when call integration is disabled?! But they send voip-push, even when integration is disabled.
+                        self.checkIncomingCallAndRefreshUnreadCountOfNonCurrentAccounts([accountId])
+                    }
+                    completion()
+                    return
+                }
 
-                            let disposable = MetaDisposable()
-                            self.watchedCallsDisposables.add(disposable)
+                guard let callKitIntegration = CallKitIntegration.shared else {
+                    Logger.shared.log("App \(self.episodeId) PushRegistry", "CallKitIntegration is not available")
+                    Logger.shared.sync()
+                    completion()
+                    return
+                }
 
-                            disposable.set((context.account.callSessionManager.callState(internalId: CallSessionManager.getStableIncomingUUID(stableId: callUpdate.callId))
-                            |> deliverOnMainQueue).start(next: { state in
-                                switch state.state {
-                                case .terminated:
-                                    callKitIntegration.dropCall(uuid: CallSessionManager.getStableIncomingUUID(stableId: callUpdate.callId))
-                                default:
-                                    break
-                                }
-                            }))
-
-                            processed = true
-
-                            break
+                callKitIntegration.reportIncomingCall(
+                    uuid: CallSessionManager.getStableIncomingUUID(stableId: callUpdate.callId),
+                    stableId: callUpdate.callId,
+                    handle: "\(callUpdate.peer.id.id._internalGetInt64Value())",
+                    phoneNumber: phoneNumber.flatMap(formatPhoneNumber),
+                    isVideo: callUpdate.isVideo,
+                    displayTitle: callUpdate.peer.debugDisplayTitle,
+                    completion: { error in
+                        if let error = error {
+                            if error.domain == "com.apple.CallKit.error.incomingcall" && (error.code == -3 || error.code == 3) {
+                                Logger.shared.log("PresentationCall", "reportIncomingCall device in DND mode")
+                            } else {
+                                Logger.shared.log("PresentationCall", "reportIncomingCall error \(error)")
+                                /*Queue.mainQueue().async {
+                                    if let strongSelf = self {
+                                        strongSelf.callSessionManager.drop(internalId: strongSelf.internalId, reason: .hangUp, debugLog: .single(nil))
+                                    }
+                                }*/
+                            }
                         }
                     }
+                )
 
-                    if !processed {
-                        callKitIntegration.dropCall(uuid: CallSessionManager.getStableIncomingUUID(stableId: callUpdate.callId))
+                let _ = (self.sharedContextPromise.get()
+                |> take(1)
+                |> deliverOnMainQueue).start(next: { sharedApplicationContext in
+                    let _ = (sharedApplicationContext.sharedContext.activeAccountContexts
+                    |> take(1)
+                    |> deliverOnMainQueue).start(next: { activeAccounts in
+                        var processed = false
+                        for (_, context, _) in activeAccounts.accounts {
+                            if context.account.id == accountId {
+                                context.account.stateManager.processIncomingCallUpdate(data: updateData, completion: { _ in
+                                })
+
+                                let disposable = MetaDisposable()
+                                self.watchedCallsDisposables.add(disposable)
+
+                                disposable.set((context.account.callSessionManager.callState(internalId: CallSessionManager.getStableIncomingUUID(stableId: callUpdate.callId))
+                                |> deliverOnMainQueue).start(next: { state in
+                                    switch state.state {
+                                    case .terminated:
+                                        callKitIntegration.dropCall(uuid: CallSessionManager.getStableIncomingUUID(stableId: callUpdate.callId))
+                                    default:
+                                        break
+                                    }
+                                }))
+
+                                processed = true
+
+                                break
+                            }
+                        }
+
+                        if !processed {
+                            callKitIntegration.dropCall(uuid: CallSessionManager.getStableIncomingUUID(stableId: callUpdate.callId))
+                        }
+                    })
+
+                    if case PKPushType.voIP = type {
+                        Logger.shared.log("App \(self.episodeId) PushRegistry", "pushRegistry payload: \(payload.dictionaryPayload)")
+                        sharedApplicationContext.notificationManager.addNotification(payload.dictionaryPayload)
                     }
                 })
-
-                if case PKPushType.voIP = type {
-                    Logger.shared.log("App \(self.episodeId) PushRegistry", "pushRegistry payload: \(payload.dictionaryPayload)")
-                    sharedApplicationContext.notificationManager.addNotification(payload.dictionaryPayload)
-                }
-            })
-        }
+            }
 
             Logger.shared.log("App \(self.episodeId) PushRegistry", "Invoking completion handler")
             Logger.shared.sync()

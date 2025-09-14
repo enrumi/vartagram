@@ -486,7 +486,7 @@ class ChatSearchResultsControllerNode: ViewControllerTracingNode, ASScrollViewDe
                 let previousEntries = strongSelf.previousEntries.swap(entries)
 
                 let firstTime = previousEntries == nil
-                let transition = chatListSearchContainerPreparedTransition(from: previousEntries ?? [], to: entries, context: context, interaction: interaction)
+                let transition = chatListSearchContainerPreparedTransition(from: previousEntries ?? [], to: entries, context: context, interaction: interaction, location: strongSelf.mappedLocation)
                 strongSelf.enqueueTransition(transition, firstTime: firstTime)
             }
         }))

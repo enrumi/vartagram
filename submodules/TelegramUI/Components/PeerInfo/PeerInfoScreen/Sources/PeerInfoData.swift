@@ -1535,7 +1535,7 @@ func peerInfoScreenData(
                         notificationExceptions: nil,
                         inAppNotificationSettings: InAppNotificationSettings(playSounds: false, vibrate: false, displayPreviews: false, totalUnreadCountDisplayStyle: .filtered, totalUnreadCountDisplayCategory: .chats, totalUnreadCountIncludeTags: .all, displayNameOnLockscreen: false, displayNotificationsFromAllAccounts: false, customSound: nil),
                         privacySettings: privacySettings,
-                        unreadTrendingStickerPacks: 0,
+//                        unreadTrendingStickerPacks: 0,
                         archivedStickerPacks: nil,
                         userLimits: context.userLimits,
                         bots: [],

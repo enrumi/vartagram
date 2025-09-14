@@ -9950,6 +9950,13 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
         self.chatDisplayNode.historyNodeContainer.layer.addShakeAnimation(amplitude: -6.0, decay: true)
     }
     
+    public func hideChat() {
+        self.stopMediaRecorder()
+        self.dismissAllTooltips()
+        self.commitPurposefulAction()
+        self.effectiveNavigationController?.popToRoot(animated: false)
+    }
+    
     public func updatePushedTransition(_ fraction: CGFloat, transition: ContainedViewLayoutTransition) {
         if !transition.isAnimated {
             self.chatDisplayNode.historyNode.layer.removeAnimation(forKey: "sublayerTransform")

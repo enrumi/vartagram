@@ -2043,7 +2043,7 @@ public final class ChatHistoryListNodeImpl: ListView, ChatHistoryNode, ChatHisto
                 )
                 
                 var translateToLanguage: (fromLang: String, toLang: String)?
-                if let translationState, /*(isPremium || autoTranslate)  &&*/ translationState.isEnabled {
+                if let translationState, (/*isPremium*/ true || autoTranslate) && translationState.isEnabled {
                     var languageCode = translationState.toLang ?? chatPresentationData.strings.baseLanguageCode
                     let rawSuffix = "-raw"
                     if languageCode.hasSuffix(rawSuffix) {

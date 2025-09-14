@@ -1159,7 +1159,8 @@ extension ChatControllerImpl {
                                 }
                             }
                         }
-                        updatedState = updatedState.updatedSearch(data.withUpdatedResultsState(ChatSearchResultsState(messageIndices: messageIndices, currentId: currentIndex?.id, state: state, totalCount: results.totalCount, completed: results.completed)))
+                        let matchesOnlyBcOfFAN = current.search?.resultsState?.matchesOnlyBcOfFAN ?? []
+                        updatedState = updatedState.updatedSearch(data.withUpdatedResultsState(ChatSearchResultsState(messageIndices: messageIndices, currentId: currentIndex?.id, state: state, totalCount: results.totalCount, completed: results.completed, matchesOnlyBcOfFAN: matchesOnlyBcOfFAN)))
                     }
                     if isEmpty {
                         updatedState = updatedState.updatedDisplayHistoryFilterAsList(true)
@@ -2267,6 +2268,7 @@ extension ChatControllerImpl {
                     |> take(1)
                     |> deliverOnMainQueue).startStandalone(next: { [weak self] searchResult in
                         if let strongSelf = self, let (searchResult, searchState, searchLocation) = searchResult {
+                            let matchesOnlyBcOfFAN = strongSelf.presentationInterfaceState.search?.resultsState?.matchesOnlyBcOfFAN ?? []
                             let controller = ChatSearchResultsController(context: strongSelf.context, updatedPresentationData: strongSelf.updatedPresentationData, location: searchLocation, searchQuery: searchData.query, searchResult: searchResult, searchState: searchState, navigateToMessageIndex: { index in
                                 guard let strongSelf = self else {
                                     return
@@ -2295,7 +2297,7 @@ extension ChatControllerImpl {
                                         return current
                                     }
                                 })
-                            })
+                            }, matchesOnlyBcOfFAN: matchesOnlyBcOfFAN)
                             strongSelf.chatDisplayNode.dismissInput()
                             if case let .inline(navigationController) = strongSelf.presentationInterfaceState.mode {
                                 navigationController?.pushViewController(controller)

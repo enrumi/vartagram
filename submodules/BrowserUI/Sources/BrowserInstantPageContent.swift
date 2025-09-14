@@ -471,7 +471,7 @@ final class BrowserInstantPageContent: UIView, BrowserContent, UIScrollViewDeleg
             return
         }
         
-        let currentLayout = instantPageLayoutForWebPage(webPage, instantPage: instantPage, userLocation: self.sourceLocation.userLocation, boundingWidth: size.width, safeInset: insets.left, strings: self.presentationData.strings, theme: self.theme, dateTimeFormat: self.presentationData.dateTimeFormat, webEmbedHeights: self.currentWebEmbedHeights)
+        let currentLayout = instantPageLayoutForWebPage(webPage, instantPage: instantPage, userLocation: self.sourceLocation.userLocation, boundingWidth: size.width, safeInset: insets.left, strings: self.presentationData.strings, theme: self.theme, dateTimeFormat: self.presentationData.dateTimeFormat, webEmbedHeights: self.currentWebEmbedHeights, suppressForeignAgentNotice: self.context.sharedContext.currentPtgSettings.with { $0.suppressForeignAgentNotice })
         
         for (_, tileNode) in self.visibleTiles {
             tileNode.removeFromSupernode()

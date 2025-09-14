@@ -5,6 +5,7 @@ import ShareController
 import TelegramUniversalVideoContent
 import TelegramBaseController
 import ChatSendMessageActionUI
+import PeerMessagesMediaPlaylist
 
 import Foundation
 import UIKit
@@ -2602,7 +2603,7 @@ public final class SharedAccountContextImpl: SharedAccountContext {
     }
     
     public func subscribeChatListData(context: AccountContext, location: ChatListControllerLocation) -> Signal<EngineChatList, NoError> {
-        return chatListViewForLocation(chatListLocation: location, location: .initial(count: 100, filter: nil), account: context.account, shouldLoadCanMessagePeer: false)
+        return chatListViewForLocation(chatListLocation: location, location: .initial(count: 100, filter: nil), account: context.account, shouldLoadCanMessagePeer: false, inactiveSecretChatPeerIds: context.inactiveSecretChatPeerIds)
         |> map { update -> EngineChatList in
             return update.list
         }
@@ -4062,11 +4063,11 @@ public final class SharedAccountContextImpl: SharedAccountContext {
             })
 
             if #available(iOS 15.0, *) {
-                if let overlayMediaController = self.mediaManager.overlayMediaManager.controller as? OverlayMediaControllerImpl, let pictureInPictureContent = overlayMediaController.pictureInPictureContent as? PictureInPictureContentImpl {
+                if let overlayMediaController = self.mediaManager.overlayMediaManager.controller as? OverlayMediaControllerImpl, let pictureInPictureContent = overlayMediaController.pictureInPictureContent /*, let pictureInPictureContent = overlayMediaController.pictureInPictureContent as? PictureInPictureContentImpl */ {
                     if let videoNode = pictureInPictureContent.videoNode as? UniversalVideoNode {
                         if accountIds.contains(videoNode.sourceAccountId) {
                             videoNode.pause()
-                            pictureInPictureContent.pictureInPictureController?.stopPictureInPicture()
+                            //pictureInPictureContent.pictureInPictureController?.stopPictureInPicture()
                             overlayMediaController.removePictureInPictureContent(content: pictureInPictureContent)
                             videoNode.canAttachContent = false
                         }
@@ -4099,7 +4100,7 @@ public final class SharedAccountContextImpl: SharedAccountContext {
 
                 if let controller = controller as? ChatSendMessageActionSheetController {
                     dismissesIfInsideInactiveSecretChat.append { [weak controller] in
-                        controller?.dismissWithoutAnimation()
+                        controller?.dismiss(animated: false)
                     }
                 }
 
@@ -4150,13 +4151,13 @@ public final class SharedAccountContextImpl: SharedAccountContext {
                 if let controller = controller as? GalleryController {
                     let peerId: PeerId
                     switch controller.source {
-                    case let .peerMessagesAtId(messageId, chatLocation, _):
+                    case let .peerMessagesAtId(messageId, chatLocation, _, _):
                         if case let .peer(id) = chatLocation {
                             peerId = id
                         } else {
                             peerId = messageId.peerId
                         }
-                    case let .standaloneMessage(message):
+                    case let .standaloneMessage(message, _):
                         peerId = message.id.peerId
                     case let .custom(_, messageId, _):
                         peerId = messageId.peerId

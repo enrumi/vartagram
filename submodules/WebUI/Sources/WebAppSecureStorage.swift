@@ -171,7 +171,7 @@ final class WebAppSecureStorage {
         }
         return context.sharedContext.activeAccountContexts
         |> take(1)
-        |> mapToSignal { _, accountContexts, _ in
+        |> mapToSignal { _, accountContexts, _, _ in
             let signals = accountContexts.map { $0.1.engine.peers.secureBotStorageUuid() }
             return combineLatest(signals)
             |> map { activeUuids in

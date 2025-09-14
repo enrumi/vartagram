@@ -1041,6 +1041,7 @@ private func settingsItems(data: PeerInfoScreenData?, context: AccountContext, p
     }
     if let starsState = data.starsState {
         if !isPremiumDisabled || abs(starsState.balance.value) > 0 {
+            /*
             let balanceText: NSAttributedString
             if abs(starsState.balance.value) > 0 {
                 let formattedLabel = formatStarsAmountText(starsState.balance, dateTimeFormat: presentationData.dateTimeFormat)
@@ -1051,7 +1052,6 @@ private func settingsItems(data: PeerInfoScreenData?, context: AccountContext, p
             } else {
                 balanceText = NSAttributedString()
             }
-            /*
             items[.payment]!.append(PeerInfoScreenDisclosureItem(id: 102, label: .attributedText(balanceText), text: presentationData.strings.Settings_Stars, icon: PresentationResourcesSettings.stars, action: {
                 interaction.openSettings(.stars)
             }))
@@ -1350,7 +1350,7 @@ private func infoItems(data: PeerInfoScreenData?, context: AccountContext, prese
             let id = String(peerId.id._internalGetInt64Value())
             items[.peerInfo]!.append(PeerInfoScreenLabeledValueItem(id: 100, label: presentationData.strings.Profile_Id.lowercased(), text: id, action: nil, longTapAction: { sourceNode in
                 interaction.openPeerInfoContextMenu(.id(id), sourceNode, nil)
-            }, requestLayout: {
+            }, requestLayout: {_ in 
                 interaction.requestLayout(false)
             }))
         }
@@ -1877,7 +1877,7 @@ private func infoItems(data: PeerInfoScreenData?, context: AccountContext, prese
             maybeAppendIdItem(channel.id)
 
             if context.sharedContext.currentPtgSettings.with({ $0.showChannelCreationDate }), let channelCreationTimestamp = data.channelCreationTimestamp {
-                items[.peerInfo]!.append(PeerInfoScreenLabeledValueItem(id: 101, label: presentationData.strings.Profile_CreationDate.lowercased(), text: stringForDate(timestamp: channelCreationTimestamp, strings: presentationData.strings), action: nil, longTapAction: nil, requestLayout: {
+                items[.peerInfo]!.append(PeerInfoScreenLabeledValueItem(id: 101, label: presentationData.strings.Profile_CreationDate.lowercased(), text: stringForDate(timestamp: channelCreationTimestamp, strings: presentationData.strings), action: nil, longTapAction: nil, requestLayout: {_ in 
                     interaction.requestLayout(false)
                 }))
             }
@@ -13564,7 +13564,7 @@ public final class PeerInfoScreenImpl: ViewController, PeerInfoScreen, KeyShortc
     private let switchToStoryFolder: Int64?
     private let switchToGiftCollection: Int64?
     private let sharedMediaFromForumTopic: (EnginePeer.Id, Int64)?
-    let chatLocation: ChatLocation
+    public let chatLocation: ChatLocation
     private let chatLocationContextHolder = Atomic<ChatLocationContextHolder?>(value: nil)
     
     public weak var parentController: TelegramRootControllerInterface?
