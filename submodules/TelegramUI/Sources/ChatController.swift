@@ -642,9 +642,11 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
     ) {
         self.initTimestamp = CFAbsoluteTimeGetCurrent()
         
+#if DEBUG
         let _ = ChatControllerCount.modify { value in
             return value + 1
         }
+#endif
         
         self.context = context
         self.chatLocation = chatLocation
@@ -6049,9 +6051,11 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
     }
     
     deinit {
+#if DEBUG
         let _ = ChatControllerCount.modify { value in
             return value - 1
         }
+#endif
         
         self.historyStateDisposable?.dispose()
         self.messageIndexDisposable.dispose()
