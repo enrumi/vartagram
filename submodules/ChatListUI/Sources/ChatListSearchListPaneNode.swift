@@ -2772,7 +2772,9 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
                                     if shouldTryLoadMore && foundMessages.hasMore {
                                         Queue.mainQueue().async {
                                             if let strongSelf = self {
-                                                strongSelf.listNode?.visibleBottomContentOffsetChanged(strongSelf.listNode?.visibleBottomContentOffset() ?? <#default value#>)
+                                                if let listNode = strongSelf.listNode {
+                                                    listNode.visibleBottomContentOffsetChanged(listNode.visibleBottomContentOffset())
+                                                }
                                             }
                                         }
                                     }
@@ -2816,7 +2818,9 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
                             if shouldTryLoadMore && foundMessages[i].hasMore {
                                 Queue.mainQueue().async {
                                     if let strongSelf = self {
-                                        strongSelf.listNode?.visibleBottomContentOffsetChanged(strongSelf.listNode?.visibleBottomContentOffset() ?? <#default value#>)
+                                        if let listNode = strongSelf.listNode {
+                                            listNode.visibleBottomContentOffsetChanged(listNode.visibleBottomContentOffset())
+                                        }
                                     }
                                 }
                                 break

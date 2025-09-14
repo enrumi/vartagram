@@ -2448,7 +2448,7 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                 forumTopicData = nil
                 topForumTopicItems = []
 
-                if case let .chat(itemPeer, _, _, _, _, _, _) = contentData {
+                if case let .chat(itemPeer, _, _, _, _, _, _, _) = contentData {
                     if let messagePeer = itemPeer.chatMainPeer {
                         switch messagePeer {
                         case let .channel(channel):
