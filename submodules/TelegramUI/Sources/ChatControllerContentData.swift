@@ -1095,13 +1095,13 @@ extension ChatControllerImpl {
                                     }
                                 })
                             }
-                        } else if isRegularChat, strongSelf.nextChannelToReadDisposable == nil {
+                        } else if isRegularChat, strongSelf.nextChannelToReadDisposable == nil, let reverseOrder = context.sharedContext.currentPtgSettings.with({ $0.jumpToNextUnreadChannel != .disabled ? $0.jumpToNextUnreadChannel == .bottomFirst : nil }) {
                             //TODO:loc optimize
                             let accountPeerId = context.account.peerId
                             strongSelf.nextChannelToReadDisposable = (combineLatest(queue: .mainQueue(),
                                 context.engine.peers.getNextUnreadChannel(peerId: channel.id, chatListFilterId: currentChatListFilter, getFilterPredicate: { data in
                                     return chatListFilterPredicate(filter: data, accountPeerId: accountPeerId)
-                                }, reverseOrder: false),
+                                }, reverseOrder: reverseOrder),
                                 ApplicationSpecificNotice.getNextChatSuggestionTip(accountManager: context.sharedContext.accountManager)
                             )
                             |> then(.complete() |> delay(1.0, queue: .mainQueue()))
