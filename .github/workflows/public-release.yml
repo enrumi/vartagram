@@ -113,7 +113,7 @@ jobs:
           rm -rf "$OUTPUT_PATH"
           mkdir -p "$OUTPUT_PATH"
           
-          find bazel-out -path "applebin_ios-ios_arm*-opt-ST-*/bin/Telegram/Telegram.ipa" -exec cp {} $OUTPUT_PATH/ \;
+          cp "bazel-bin/Telegram/Telegram.ipa" $OUTPUT_PATH/
 
           # collect dsym
           mkdir -p build/DSYMs
