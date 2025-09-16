@@ -4279,7 +4279,7 @@ final class PostboxImpl {
     }
     
     fileprivate func replaceOrderedItemListItems(collectionId: Int32, items: [OrderedItemListEntry]) {
-        self.orderedItemListTable.replaceItems(collectionId: collectionId, items: items, operations: &self.currentOrderedItemListOperations)
+        //self.orderedItemListTable.replaceItems(collectionId: collectionId, items: items, operations: &self.currentOrderedItemListOperations)
     }
     
     fileprivate func addOrMoveToFirstPositionOrderedItemListItem(collectionId: Int32, item: OrderedItemListEntry, removeTailIfCountExceeds: Int?) {
@@ -4287,7 +4287,7 @@ final class PostboxImpl {
     }
     
     fileprivate func removeOrderedItemListItem(collectionId: Int32, itemId: MemoryBuffer) {
-        self.orderedItemListTable.remove(collectionId: collectionId, itemId: itemId, operations: &self.currentOrderedItemListOperations)
+        //self.orderedItemListTable.remove(collectionId: collectionId, itemId: itemId, operations: &self.currentOrderedItemListOperations)
     }
     
     fileprivate func getOrderedListItemIds(collectionId: Int32) -> [MemoryBuffer] {
