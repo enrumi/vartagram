@@ -301,7 +301,7 @@ public final class SqliteValueBox: ValueBox {
                 if !resultCode {
                     throw TempError.generic
                 }
-                let _ = try? FileManager.default.removeItem(atPath: tempPath)
+                //let _ = try? FileManager.default.removeItem(atPath: tempPath)
             } catch {
                 let _ = try? FileManager.default.removeItem(atPath: tempPath)
                 postboxLog("Don't have write access to database folder")
@@ -466,8 +466,8 @@ public final class SqliteValueBox: ValueBox {
         self.pageSize = Int(self.runPragma(database, "page_size"))
 
         // limit .wal file size to 1000 pages, so db size does not grow too much
-        resultCode = database.execute("PRAGMA journal_size_limit=4096000")
-        assert(resultCode)
+        //resultCode = database.execute("PRAGMA journal_size_limit=4096000")
+        //assert(resultCode)
 
         postboxLog("Did set up pragmas")
 
@@ -550,7 +550,7 @@ public final class SqliteValueBox: ValueBox {
         let resultCode = self.database.execute("COMMIT")
         assert(resultCode)
         
-        self.checkFileSize()
+        //self.checkFileSize()
     }
     
     public func checkpoint() {
@@ -2359,7 +2359,7 @@ public final class SqliteValueBox: ValueBox {
         resultCode = self.database.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         precondition(resultCode)
         
-        self.checkFileSize()
+        //self.checkFileSize()
     }
     
     public func freePagesFraction() -> Double {
