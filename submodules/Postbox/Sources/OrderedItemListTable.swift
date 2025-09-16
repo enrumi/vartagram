@@ -125,6 +125,7 @@ final class OrderedItemListTable: Table {
     }
     
     func replaceItems(collectionId: Int32, items: [OrderedItemListEntry], operations: inout [Int32: [OrderedItemListOperation]]) {
+        postboxLog("OrderedItemListTable: replace items")
         if operations[collectionId] == nil {
             operations[collectionId] = [.replace(items)]
         } else {
@@ -149,12 +150,14 @@ final class OrderedItemListTable: Table {
         
 
         assert(Set(items.map({ $0.id.makeData() })).count == items.count)
+        postboxLog("OrderedItemListTable: replace items, items count: \(items.count)")
         for i in 0 ..< items.count {
             self.valueBox.set(self.table, key: self.keyIndexToId(collectionId: collectionId, itemIndex: UInt32(i)), value: items[i].id)
             var indexValue: UInt32 = UInt32(i)
             self.valueBox.set(self.table, key: self.keyIdToIndex(collectionId: collectionId, id: items[i].id), value: MemoryBuffer(memory: &indexValue, capacity: 4, length: 4, freeWhenDone: false))
             self.indexTable.set(collectionId: collectionId, id: items[i].id, content: items[i].contents)
         }
+        postboxLog("OrderedItemListTable: replace items finish")
         #if ((arch(i386) || arch(x86_64)) && os(iOS)) || DEBUG
             assert(self.testIntegrity(collectionId: collectionId))
         #endif
@@ -206,6 +209,7 @@ final class OrderedItemListTable: Table {
     }
     
     func remove(collectionId: Int32, itemId: MemoryBuffer, operations: inout [Int32: [OrderedItemListOperation]]) {
+        postboxLog("OrderedItemListTable: remove items")
         if let index = self.getIndex(collectionId: collectionId, id: itemId) {
             let orderedIds = self.getItemIds(collectionId: collectionId)
             
@@ -216,7 +220,9 @@ final class OrderedItemListTable: Table {
                 self.valueBox.remove(self.table, key: self.keyIdToIndex(collectionId: collectionId, id: orderedIds[orderedIds.count - 1]), secure: false)
                 self.valueBox.remove(self.table, key: self.keyIndexToId(collectionId: collectionId, itemIndex: UInt32(orderedIds.count - 1)), secure: false)
                 
+                postboxLog("OrderedItemListTable: remove items, index: \(index), count: \(orderedIds.count)")
                 for i in (Int(index) + 1) ..< orderedIds.count {
+                    postboxLog("OrderedItemListTable: remove items, for")
                     var updatedIndex: UInt32 = UInt32(i - 1)
                     self.valueBox.set(self.table, key: self.keyIdToIndex(collectionId: collectionId, id: orderedIds[i]), value: MemoryBuffer(memory: &updatedIndex, capacity: 4, length: 4, freeWhenDone: false))
                     self.valueBox.set(self.table, key: self.keyIndexToId(collectionId: collectionId, itemIndex: updatedIndex), value: orderedIds[i])
@@ -226,6 +232,7 @@ final class OrderedItemListTable: Table {
                     operations[collectionId] = []
                 }
                 operations[collectionId]!.append(.remove(itemId))
+                postboxLog("OrderedItemListTable: finish")
             }
             self.indexTable.remove(collectionId: collectionId, id: itemId)
         }
