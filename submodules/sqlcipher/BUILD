@@ -35,7 +35,7 @@ objc_library(
         "-Wno-all",
         "-Wno-#warnings",
     ],
-    defines = ["TEST_BUILD"]# if telegram_is_internal_build == "true" else [],
+    defines = ["TEST_BUILD"],# if telegram_is_internal_build == "true" else [],
     sdk_frameworks = [
       "Foundation",
       "Security",
