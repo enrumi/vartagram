@@ -47,16 +47,13 @@ public final class Logger {
     private var file: (ManagedFile, Int)?
     private var shortFile: (ManagedFile, Int)?
     
-    public var logToFile: Bool /*LoggingSettings.defaultSettings.logToFile*/ {
-        set {
-            //let oldEnabled = self.logToConsole || oldValue
-            //let newEnabled = self.logToConsole || self.logToFile
-            //if oldEnabled != newEnabled {
-            //    NetworkSetLoggingEnabled(newEnabled)
-            //}
-        }
-        get {
-            return true
+    public var logToFile: Bool = LoggingSettings.defaultSettings.logToFile {
+        didSet {
+            let oldEnabled = self.logToConsole || oldValue
+            let newEnabled = self.logToConsole || self.logToFile
+            if oldEnabled != newEnabled {
+                NetworkSetLoggingEnabled(newEnabled)
+            }
         }
     }
     public var logToConsole: Bool = false {

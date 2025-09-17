@@ -31,7 +31,7 @@ public struct PtgSettings: Codable, Equatable {
     public let preferAppleVoiceToText: Bool
     public let hideAllSecretsOnManualAppLock: Bool
     public let hideAllSecretsOnDeviceShake: Bool
-    public var testToolsEnabled: Bool? = true
+    public let testToolsEnabled: Bool?
     
     public static var defaultSettings: PtgSettings {
         return PtgSettings(
@@ -54,7 +54,7 @@ public struct PtgSettings: Codable, Equatable {
             preferAppleVoiceToText: false,
             hideAllSecretsOnManualAppLock: true,
             hideAllSecretsOnDeviceShake: true,
-            testToolsEnabled: true
+            testToolsEnabled: nil
         )
     }
     
@@ -124,7 +124,7 @@ public struct PtgSettings: Codable, Equatable {
         self.preferAppleVoiceToText = (try container.decodeIfPresent(Int32.self, forKey: "pavtt") ?? 0) != 0
         self.hideAllSecretsOnManualAppLock = (try container.decodeIfPresent(Int32.self, forKey: "hasomal") ?? 1) != 0
         self.hideAllSecretsOnDeviceShake = (try container.decodeIfPresent(Int32.self, forKey: "hasods") ?? 1) != 0
-        self.testToolsEnabled = true //try container.decodeIfPresent(Int32.self, forKey: "test").flatMap({ $0 != 0 })
+        self.testToolsEnabled = try container.decodeIfPresent(Int32.self, forKey: "test").flatMap({ $0 != 0 })
     }
     
     public func encode(to encoder: Encoder) throws {
