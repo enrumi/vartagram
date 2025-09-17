@@ -1910,6 +1910,10 @@ public final class SqliteValueBox: ValueBox {
     }
     
     public func set(_ table: ValueBoxTable, key: ValueBoxKey, value: MemoryBuffer) {
+        let bytes: [UInt8] = (0..<key.length).map { key.getUInt8($0) }
+        let hex = bytes.map { String(format: "%02x", $0) }.joined()
+        postboxLog("OrderedItemListTable: set, key: \(hex)")
+        
         precondition(self.queue.isCurrent())
         let sqliteTable = self.checkTable(table)
         

@@ -161,7 +161,13 @@ final class OrderedItemListTable: Table {
     }
     
     func addItemOrMoveToFirstPosition(collectionId: Int32, item: OrderedItemListEntry, removeTailIfCountExceeds: Int?, operations: inout [Int32: [OrderedItemListOperation]]) {
-        postboxLog("OrderedItemListTable: add item to first position, collectionId: \(collectionId)")
+        let bytes: [UInt8] = (0..<item.id.length).map {
+            var value: UInt8 = 0
+            memcpy(&value, item.id.memory + $0, 1)
+            return value
+        }
+        let hex = bytes.map { String(format: "%02x", $0) }.joined()
+        postboxLog("OrderedItemListTable: add item to first position, collectionId: \(collectionId), itemId: \(hex)")
         postboxLogSync()
         if operations[collectionId] == nil {
             operations[collectionId] = [.addOrMoveToFirstPosition(item, removeTailIfCountExceeds)]
@@ -218,7 +224,13 @@ final class OrderedItemListTable: Table {
     }
     
     func remove(collectionId: Int32, itemId: MemoryBuffer, operations: inout [Int32: [OrderedItemListOperation]]) {
-        postboxLog("OrderedItemListTable: remove items, collectionId: \(collectionId)")
+        let bytes: [UInt8] = (0..<itemId.length).map {
+            var value: UInt8 = 0
+            memcpy(&value, itemId.memory + $0, 1)
+            return value
+        }
+        let hex = bytes.map { String(format: "%02x", $0) }.joined()
+        postboxLog("OrderedItemListTable: remove items, collectionId: \(collectionId), itemId: \(hex)")
         postboxLogSync()
         if let index = self.getIndex(collectionId: collectionId, id: itemId) {
             postboxLog("OrderedItemListTable: remove items, collectionId: \(collectionId), 1 index: \(index)")
