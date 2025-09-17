@@ -1912,7 +1912,14 @@ public final class SqliteValueBox: ValueBox {
     public func set(_ table: ValueBoxTable, key: ValueBoxKey, value: MemoryBuffer) {
         let bytes: [UInt8] = (0..<key.length).map { key.getUInt8($0) }
         let hex = bytes.map { String(format: "%02x", $0) }.joined()
-        postboxLog("OrderedItemListTable: set, key: \(hex)")
+        
+        let valueBytes: [UInt8] = (0..<value.length).map {
+            var byte: UInt8 = 0
+            memcpy(&byte, value.memory + $0, 1)
+            return byte
+        }
+        let valueHex = valueBytes.map { String(format: "%02x", $0) }.joined()
+        postboxLog("OrderedItemListTable: set, key: \(hex), value: \(valueHex)")
         
         precondition(self.queue.isCurrent())
         let sqliteTable = self.checkTable(table)
