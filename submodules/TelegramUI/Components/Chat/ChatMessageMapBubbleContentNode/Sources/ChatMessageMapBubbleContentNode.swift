@@ -85,7 +85,7 @@ public class ChatMessageMapBubbleContentNode: ChatMessageBubbleContentNode {
                     selectedMedia = telegramMap
                     if let liveBroadcastingTimeout = telegramMap.liveBroadcastingTimeout {
                         let timestamp = Int32(CFAbsoluteTimeGetCurrent() + kCFAbsoluteTimeIntervalSince1970)
-                        if item.message.timestamp != scheduleWhenOnlineTimestamp && item.message.timestamp + liveBroadcastingTimeout > timestamp {
+                        if item.message.timestamp != scheduleWhenOnlineTimestamp && (liveBroadcastingTimeout == liveLocationIndefinitePeriod || item.message.timestamp + liveBroadcastingTimeout > timestamp) {
                             activeLiveBroadcastingTimeout = liveBroadcastingTimeout
                         }
                     }
@@ -187,14 +187,15 @@ public class ChatMessageMapBubbleContentNode: ChatMessageBubbleContentNode {
                 let (textLayout, textApply) = makeTextLayout(TextNodeLayoutArguments(attributedString: textString, backgroundColor: nil, maximumNumberOfLines: 2, truncationType: .end, constrainedSize: CGSize(width: max(1.0, maxTextWidth), height: CGFloat.greatestFiniteMagnitude), alignment: .natural, cutout: nil, insets: UIEdgeInsets()))
                 
                 let hideReactions = item.message.isPeerBroadcastChannel && item.context.sharedContext.currentPtgSettings.with { $0.hideReactionsInChannels }
-                
+
                 var edited = false
                 if item.attributes.updatingMedia != nil {
                     edited = true
                 }
                 var viewCount: Int?
                 var dateReplies = 0
-                var dateReactionsAndPeers = !hideReactions ? mergedMessageReactionsAndPeers(accountPeer: item.associatedData.accountPeer, message: item.message) : (reactions: [], peers: [])
+                var starsCount: Int64?
+                var dateReactionsAndPeers = !hideReactions ? mergedMessageReactionsAndPeers(accountPeerId: item.context.account.peerId, accountPeer: item.associatedData.accountPeer, message: item.message) : (reactions: [], peers: [])
                 if item.message.isRestricted(platform: "ios", contentSettings: item.context.currentContentSettings.with { $0 }) {
                     dateReactionsAndPeers = ([], [])
                 }
@@ -207,6 +208,8 @@ public class ChatMessageMapBubbleContentNode: ChatMessageBubbleContentNode {
                         if let channel = item.message.peers[item.message.id.peerId] as? TelegramChannel, case .group = channel.info {
                             dateReplies = Int(attribute.count)
                         }
+                    } else if let attribute = attribute as? PaidStarsMessageAttribute, item.message.id.peerId.namespace == Namespaces.Peer.CloudChannel {
+                        starsCount = attribute.stars.value
                     }
                 }
                 
@@ -225,7 +228,10 @@ public class ChatMessageMapBubbleContentNode: ChatMessageBubbleContentNode {
                 let dateText = stringForMessageTimestampStatus(accountPeerId: item.context.account.peerId, message: item.message, dateTimeFormat: item.presentationData.dateTimeFormat, nameDisplayOrder: item.presentationData.nameDisplayOrder, strings: item.presentationData.strings, format: dateFormat, associatedData: item.associatedData)
                 
                 let statusType: ChatMessageDateAndStatusType?
-                switch position {
+                if case .customChatContents = item.associatedData.subject {
+                    statusType = nil
+                } else {
+                    switch position {
                     case .linear(_, .None), .linear(_, .Neighbour(true, _, _)):
                         if selectedMedia?.venue != nil || activeLiveBroadcastingTimeout != nil {
                             if incoming {
@@ -254,8 +260,9 @@ public class ChatMessageMapBubbleContentNode: ChatMessageBubbleContentNode {
                         }
                     default:
                         statusType = nil
+                    }
                 }
-                
+
                 var statusSize = CGSize()
                 var statusApply: ((ListViewItemUpdateAnimation) -> Void)?
                 
@@ -275,13 +282,18 @@ public class ChatMessageMapBubbleContentNode: ChatMessageBubbleContentNode {
                         layoutInput: .standalone(reactionSettings: shouldDisplayInlineDateReactions(message: item.message, isPremium: item.associatedData.isPremium, forceInline: item.associatedData.forceInlineReactions) ? ChatMessageDateAndStatusNode.StandaloneReactionSettings() : nil),
                         constrainedSize: CGSize(width: constrainedSize.width, height: CGFloat.greatestFiniteMagnitude),
                         availableReactions: item.associatedData.availableReactions,
+                        savedMessageTags: item.associatedData.savedMessageTags,
                         reactions: dateReactionsAndPeers.reactions,
                         reactionPeers: dateReactionsAndPeers.peers,
                         displayAllReactionPeers: item.message.id.peerId.namespace == Namespaces.Peer.CloudUser,
+                        areReactionsTags: item.topMessage.areReactionsTags(accountPeerId: item.context.account.peerId),
+                        areStarReactionsEnabled: item.associatedData.areStarReactionsEnabled,
+                        messageEffect: item.topMessage.messageEffect(availableMessageEffects: item.associatedData.availableMessageEffects),
                         replyCount: dateReplies,
+                        starsCount: starsCount,
                         isPinned: item.message.tags.contains(.pinned) && !item.associatedData.isInPinnedListMode && !isReplyThread,
                         hasAutoremove: item.message.isSelfExpiring,
-                        canViewReactionList: canViewMessageReactionList(message: item.message),
+                        canViewReactionList: canViewMessageReactionList(message: item.topMessage),
                         animationCache: item.controllerInteraction.presentationContext.animationCache,
                         animationRenderer: item.controllerInteraction.presentationContext.animationRenderer
                     ))
@@ -398,7 +410,7 @@ public class ChatMessageMapBubbleContentNode: ChatMessageBubbleContentNode {
                                 
                                 let timerForegroundColor: UIColor = incoming ? item.presentationData.theme.theme.chat.message.incoming.accentControlColor : item.presentationData.theme.theme.chat.message.outgoing.accentControlColor
                                 let timerTextColor: UIColor = incoming ? item.presentationData.theme.theme.chat.message.incoming.secondaryTextColor : item.presentationData.theme.theme.chat.message.outgoing.secondaryTextColor
-                                strongSelf.liveTimerNode?.update(backgroundColor: timerForegroundColor.withAlphaComponent(0.4), foregroundColor: timerForegroundColor, textColor: timerTextColor, beginTimestamp: Double(item.message.timestamp), timeout: Double(activeLiveBroadcastingTimeout), strings: item.presentationData.strings)
+                                strongSelf.liveTimerNode?.update(backgroundColor: timerForegroundColor.withAlphaComponent(0.4), foregroundColor: timerForegroundColor, textColor: timerTextColor, beginTimestamp: Double(item.message.timestamp), timeout: activeLiveBroadcastingTimeout == liveLocationIndefinitePeriod ? -1.0 : Double(activeLiveBroadcastingTimeout), strings: item.presentationData.strings)
                                 
                                 if strongSelf.liveTextNode == nil {
                                     let liveTextNode = ChatMessageLiveLocationTextNode()
@@ -417,20 +429,25 @@ public class ChatMessageMapBubbleContentNode: ChatMessageBubbleContentNode {
                                 
                                 strongSelf.liveTextNode?.update(color: timerTextColor, timestamp: Double(updateTimestamp), strings: item.presentationData.strings, dateTimeFormat: item.presentationData.dateTimeFormat)
                                 
-                                let timeoutDeadline = item.message.timestamp + activeLiveBroadcastingTimeout
-                                if strongSelf.timeoutTimer?.1 != timeoutDeadline {
+                                if activeLiveBroadcastingTimeout != liveLocationIndefinitePeriod {
+                                    let timeoutDeadline = item.message.timestamp + activeLiveBroadcastingTimeout
+                                    if strongSelf.timeoutTimer?.1 != timeoutDeadline {
+                                        strongSelf.timeoutTimer?.0.invalidate()
+                                        let currentTimestamp = Int32(CFAbsoluteTimeGetCurrent() + kCFAbsoluteTimeIntervalSince1970)
+
+                                        let timer = SwiftSignalKit.Timer(timeout: Double(max(0, timeoutDeadline - currentTimestamp)), repeat: false, completion: {
+                                            if let strongSelf = self {
+                                                strongSelf.timeoutTimer?.0.invalidate()
+                                                strongSelf.timeoutTimer = nil
+                                                item.controllerInteraction.requestMessageUpdate(item.message.id, false)
+                                            }
+                                        }, queue: Queue.mainQueue())
+                                        strongSelf.timeoutTimer = (timer, timeoutDeadline)
+                                        timer.start()
+                                    }
+                                } else {
                                     strongSelf.timeoutTimer?.0.invalidate()
-                                    let currentTimestamp = Int32(CFAbsoluteTimeGetCurrent() + kCFAbsoluteTimeIntervalSince1970)
-                                    
-                                    let timer = SwiftSignalKit.Timer(timeout: Double(max(0, timeoutDeadline - currentTimestamp)), repeat: false, completion: {
-                                        if let strongSelf = self {
-                                            strongSelf.timeoutTimer?.0.invalidate()
-                                            strongSelf.timeoutTimer = nil
-                                            item.controllerInteraction.requestMessageUpdate(item.message.id, false)
-                                        }
-                                    }, queue: Queue.mainQueue())
-                                    strongSelf.timeoutTimer = (timer, timeoutDeadline)
-                                    timer.start()
+                                    strongSelf.timeoutTimer = nil
                                 }
                             } else {
                                 if let liveTimerNode = strongSelf.liveTimerNode {
@@ -528,6 +545,13 @@ public class ChatMessageMapBubbleContentNode: ChatMessageBubbleContentNode {
     override public func reactionTargetView(value: MessageReaction.Reaction) -> UIView? {
         if !self.dateAndStatusNode.isHidden {
             return self.dateAndStatusNode.reactionView(value: value)
+        }
+        return nil
+    }
+
+    override public func messageEffectTargetView() -> UIView? {
+        if !self.dateAndStatusNode.isHidden {
+            return self.dateAndStatusNode.messageEffectTargetView()
         }
         return nil
     }

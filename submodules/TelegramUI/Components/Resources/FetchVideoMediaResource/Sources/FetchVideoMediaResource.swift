@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import Postbox
+import SSignalKit
 import SwiftSignalKit
 import TelegramCore
 import LegacyComponents
@@ -40,10 +41,6 @@ struct VideoConversionConfiguration {
     }
     
     static func with(appConfiguration: AppConfiguration) -> VideoConversionConfiguration {
-//        #if DEBUG
-//        return VideoConversionConfiguration(remuxToFMp4: true)
-//        #endif
-        
         if let data = appConfiguration.data, let conversion = data["video_conversion"] as? [String: Any] {
             let remuxToFMp4 = conversion["remux_fmp4"] as? Bool ?? VideoConversionConfiguration.defaultValue.remuxToFMp4
             return VideoConversionConfiguration(remuxToFMp4: remuxToFMp4)
@@ -249,7 +246,6 @@ public func fetchVideoLibraryMediaResource(postbox: Postbox, resource: VideoLibr
                         
                         let configuration = recommendedVideoExportConfiguration(values: mediaEditorValues, duration: 5.0, image: true, frameRate: 30.0)
                         let videoExport = MediaEditorVideoExport(postbox: postbox, subject: .image(image: image), configuration: configuration, outputPath: tempFile.path)
-                        videoExport.start()
                                                 
                         let statusDisposable = videoExport.status.start(next: { status in
                             switch status {
@@ -353,7 +349,6 @@ public func fetchVideoLibraryMediaResource(postbox: Postbox, resource: VideoLibr
                         let duration: Double = avAsset.duration.seconds
                         let configuration = recommendedVideoExportConfiguration(values: mediaEditorValues, duration: duration, frameRate: 30.0)
                         let videoExport = MediaEditorVideoExport(postbox: postbox, subject: .video(asset: avAsset, isStory: isStory), configuration: configuration, outputPath: tempFile.path)
-                        videoExport.start()
                         
                         let statusDisposable = videoExport.status.start(next: { status in
                             switch status {
@@ -481,17 +476,46 @@ public func fetchLocalFileVideoMediaResource(postbox: Postbox, resource: LocalFi
     let signal = Signal<MediaResourceDataFetchResult, MediaResourceDataFetchError> { subscriber in
         subscriber.putNext(.reset)
         
-        var filteredPath = resource.path
-        if filteredPath.hasPrefix("file://") {
-            filteredPath = String(filteredPath[filteredPath.index(filteredPath.startIndex, offsetBy: "file://".count)])
+        let filteredPaths = resource.paths.map { path in
+            if path.hasPrefix("file://") {
+                return path.replacingOccurrences(of: "file://", with: "")
+            } else {
+                return path
+            }
         }
+        let filteredPath = filteredPaths.first ?? ""
         
         let defaultPreset = TGMediaVideoConversionPreset(rawValue: UInt32(UserDefaults.standard.integer(forKey: "TG_preferredVideoPreset_v0")))
         let qualityPreset = MediaQualityPreset(preset: defaultPreset)
         
         let isImage = filteredPath.contains(".jpg")
         var isStory = false
-        let avAsset = AVURLAsset(url: URL(fileURLWithPath: filteredPath))
+        let avAsset: AVAsset?
+        
+        if isImage {
+            avAsset = nil
+        } else if filteredPaths.count > 1 {
+            let composition = AVMutableComposition()
+            var currentTime = CMTime.zero
+            
+            for path in filteredPaths {
+                let asset = AVURLAsset(url: URL(fileURLWithPath: path))
+                let duration = asset.duration
+                do {
+                    try composition.insertTimeRange(
+                        CMTimeRangeMake(start: .zero, duration: duration),
+                        of: asset,
+                        at: currentTime
+                    )
+                    currentTime = CMTimeAdd(currentTime, duration)
+                } catch {
+                }
+            }
+            avAsset = composition
+        } else {
+            avAsset = AVURLAsset(url: URL(fileURLWithPath: filteredPath))
+        }
+        
         var adjustments: TGVideoEditAdjustments?
         var mediaEditorValues: MediaEditorValues?
         if let videoAdjustments = resource.adjustments {
@@ -500,28 +524,35 @@ public func fetchLocalFileVideoMediaResource(postbox: Postbox, resource: LocalFi
                 if let values = try? JSONDecoder().decode(MediaEditorValues.self, from: videoAdjustments.data.makeData()) {
                     mediaEditorValues = values
                 }
-            } else if let dict = legacy_unarchiveDeprecated(data: videoAdjustments.data.makeData()) as? [AnyHashable : Any], let legacyAdjustments = TGVideoEditAdjustments(dictionary: dict) {
-                if alwaysUseModernPipeline && !isImage {
-                    mediaEditorValues = MediaEditorValues(legacyAdjustments: legacyAdjustments, defaultPreset: qualityPreset)
-                } else {
-                    adjustments = legacyAdjustments
+            } else {
+                if let values = try? JSONDecoder().decode(MediaEditorValues.self, from: videoAdjustments.data.makeData()) {
+                    mediaEditorValues = values
+                } else if let dict = legacy_unarchiveDeprecated(data: videoAdjustments.data.makeData()) as? [AnyHashable : Any], let legacyAdjustments = TGVideoEditAdjustments(dictionary: dict) {
+                    if alwaysUseModernPipeline && !isImage {
+                        mediaEditorValues = MediaEditorValues(legacyAdjustments: legacyAdjustments, defaultPreset: qualityPreset)
+                    } else {
+                        adjustments = legacyAdjustments
+                    }
                 }
             }
         }
         let tempFile = EngineTempBox.shared.tempFile(fileName: "video.mp4")
         let updatedSize = Atomic<Int64>(value: 0)
         if let mediaEditorValues {
-            let duration: Double = avAsset.duration.seconds
-            let configuration = recommendedVideoExportConfiguration(values: mediaEditorValues, duration: duration, frameRate: 30.0)
+            let duration: Double
             let subject: MediaEditorVideoExport.Subject
             if isImage, let data = try? Data(contentsOf: URL(fileURLWithPath: filteredPath), options: [.mappedRead]), let image = UIImage(data: data) {
+                duration = 5.0
                 subject = .image(image: image)
-            } else {
+            } else if let avAsset {
+                duration = avAsset.duration.seconds
                 subject = .video(asset: avAsset, isStory: isStory)
+            } else {
+                return EmptyDisposable
             }
             
+            let configuration = recommendedVideoExportConfiguration(values: mediaEditorValues, duration: duration, frameRate: 30.0)
             let videoExport = MediaEditorVideoExport(postbox: postbox, subject: subject, configuration: configuration, outputPath: tempFile.path)
-            videoExport.start()
             
             let statusDisposable = videoExport.status.start(next: { status in
                 switch status {
@@ -755,7 +786,7 @@ public func fetchLocalFileGifMediaResource(resource: LocalFileGifMediaResource) 
         
         let disposable = MetaDisposable()
         if let data = try? Data(contentsOf: URL(fileURLWithPath: resource.path), options: Data.ReadingOptions.mappedIfSafe) {
-            let signal = TGGifConverter.convertGif(toMp4: data)!
+            let signal = TGGifConverter.convertGif(toMp4: data)
             let signalDisposable = signal.start(next: { next in
                 if let result = next as? NSDictionary, let path = result["path"] as? String {
                     var value = stat()
@@ -867,8 +898,10 @@ private extension MediaEditorValues {
             additionalVideoTrimRange: nil,
             additionalVideoOffset: nil,
             additionalVideoVolume: nil,
+            collage: [],
             nightTheme: false,
             drawing: nil,
+            maskDrawing: nil,
             entities: [],
             toolValues: [:],
             audioTrack: nil,
@@ -876,6 +909,9 @@ private extension MediaEditorValues {
             audioTrackOffset: nil,
             audioTrackVolume: nil,
             audioTrackSamples: nil,
+            collageTrackSamples: nil,
+            coverImageTimestamp: nil,
+            coverDimensions: nil,
             qualityPreset: qualityPreset
         )
     }
@@ -1009,8 +1045,10 @@ private extension MediaEditorValues {
             additionalVideoTrimRange: nil,
             additionalVideoOffset: nil,
             additionalVideoVolume: nil,
+            collage: [],
             nightTheme: false,
             drawing: drawing,
+            maskDrawing: nil,
             entities: entities,
             toolValues: toolValues,
             audioTrack: nil,
@@ -1018,6 +1056,9 @@ private extension MediaEditorValues {
             audioTrackOffset: nil,
             audioTrackVolume: nil,
             audioTrackSamples: nil,
+            collageTrackSamples: nil,
+            coverImageTimestamp: nil,
+            coverDimensions: nil,
             qualityPreset: qualityPreset
         )
     }

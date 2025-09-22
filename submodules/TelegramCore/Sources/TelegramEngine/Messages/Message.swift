@@ -1,7 +1,10 @@
 import Postbox
 
 public final class EngineMessage: Equatable {
+    public static let newTopicThreadId: Int64 = Message.newTopicThreadId
+    
     public typealias Id = MessageId
+    public typealias StableId = UInt32
     public typealias Index = MessageIndex
     public typealias Tags = MessageTags
     public typealias Attribute = MessageAttribute
@@ -10,6 +13,12 @@ public final class EngineMessage: Equatable {
     public typealias GlobalTags = GlobalMessageTags
     public typealias LocalTags = LocalMessageTags
     public typealias ForwardInfo = MessageForwardInfo
+    public typealias CustomTag = MemoryBuffer
+    
+    public enum InputTag: Hashable {
+        case tag(Tags)
+        case custom(CustomTag)
+    }
     
     private let impl: Message
     
@@ -102,6 +111,7 @@ public final class EngineMessage: Equatable {
         tags: EngineMessage.Tags,
         globalTags: EngineMessage.GlobalTags,
         localTags: EngineMessage.LocalTags,
+        customTags: [EngineMessage.CustomTag],
         forwardInfo: EngineMessage.ForwardInfo?,
         author: EnginePeer?,
         text: String,
@@ -137,6 +147,7 @@ public final class EngineMessage: Equatable {
             tags: tags,
             globalTags: globalTags,
             localTags: localTags,
+            customTags: customTags,
             forwardInfo: forwardInfo,
             author: author?._asPeer(),
             text: text,

@@ -86,6 +86,7 @@ private final class ShareControllerAccountContextExtension: ShareControllerAccou
     let accountId: AccountRecordId
     let accountPeerId: EnginePeer.Id
     let stateManager: AccountStateManager
+    let engineData: TelegramEngine.EngineData
     let animationCache: AnimationCache
     let animationRenderer: MultiAnimationRenderer
     let contentSettings: ContentSettings
@@ -93,7 +94,7 @@ private final class ShareControllerAccountContextExtension: ShareControllerAccou
     
     let ptgSettings: PtgSettings
     let inactiveSecretChatPeerIds: Signal<Set<PeerId>, NoError>
-    
+
     init(
         accountId: AccountRecordId,
         stateManager: AccountStateManager,
@@ -105,6 +106,7 @@ private final class ShareControllerAccountContextExtension: ShareControllerAccou
         self.accountId = accountId
         self.accountPeerId = stateManager.accountPeerId
         self.stateManager = stateManager
+        self.engineData = TelegramEngine.EngineData(accountPeerId: stateManager.accountPeerId, postbox: stateManager.postbox)
         let cacheStorageBox = stateManager.postbox.mediaBox.cacheStorageBox
         self.animationCache = AnimationCacheImpl(basePath: stateManager.postbox.mediaBox.basePath + "/animation-cache", allocateTempFile: {
             return TempBox.shared.tempFile(fileName: "file").path
@@ -192,8 +194,10 @@ public class ShareRootControllerImpl {
     
     private weak var navigationController: NavigationController?
     
+    public var openUrl: (String) -> Void = { _ in }
+
     private let isAppLocked: Bool
-    
+
     public init(initializationData: ShareRootControllerInitializationData, getExtensionContext: @escaping () -> NSExtensionContext?, isAppLocked: Bool) {
         self.initializationData = initializationData
         self.getExtensionContext = getExtensionContext
@@ -243,7 +247,8 @@ public class ShareRootControllerImpl {
             
             setupSharedLogger(rootPath: rootPath, path: logsPath)
             
-            let applicationBindings = TelegramApplicationBindings(isMainApp: false, appBundleId: self.initializationData.appBundleId, appBuildType: self.initializationData.appBuildType, containerPath: self.initializationData.appGroupPath, appSpecificScheme: "tg", openUrl: { _ in
+            let applicationBindings = TelegramApplicationBindings(isMainApp: false, appBundleId: self.initializationData.appBundleId, appBuildType: self.initializationData.appBuildType, containerPath: self.initializationData.appGroupPath, appSpecificScheme: "tg", openUrl: { [weak self] url in
+                self?.openUrl(url)
             }, openUniversalUrl: { _, completion in
                 completion.completion(false)
                 return
@@ -317,7 +322,7 @@ public class ShareRootControllerImpl {
             semaphore.wait()
             
             initialPresentationDataAndSettings = initialPresentationDataAndSettings!.withUpdatedPtgSecretPasscodes(initialPresentationDataAndSettings!.ptgSecretPasscodes.withCheckedTimeoutUsingLockStateFile(rootPath: rootPath))
-            
+
             let presentationDataPromise = Promise<PresentationData>()
             
             let appLockContext = AppLockContextImpl(rootPath: rootPath, window: nil, rootController: nil, applicationBindings: applicationBindings, accountManager: accountManager, presentationDataSignal: presentationDataPromise.get(), lockIconInitialFrame: {
@@ -327,6 +332,10 @@ public class ShareRootControllerImpl {
             presentationDataPromise.set(.single(presentationData))
             
             var immediatePeerId: PeerId?
+            #if DEBUG
+            // Xcode crashes
+            immediatePeerId = nil
+            #else
             if #available(iOS 13.2, *), let sendMessageIntent = self.getExtensionContext()?.intent as? INSendMessageIntent {
                 if let contact = sendMessageIntent.recipients?.first, let handle = contact.customIdentifier, handle.hasPrefix("tg") {
                     let string = handle.suffix(from: handle.index(handle.startIndex, offsetBy: 2))
@@ -335,7 +344,8 @@ public class ShareRootControllerImpl {
                     }
                 }
             }
-            
+            #endif
+
             /*let account: Signal<(SharedAccountContextImpl, Account, [AccountWithInfo]), ShareAuthorizationError> = internalContext.sharedContext.accountManager.transaction { transaction -> (SharedAccountContextImpl, LoggingSettings) in
                 return (internalContext.sharedContext, transaction.getSharedData(SharedDataKeys.loggingSettings)?.get(LoggingSettings.self) ?? LoggingSettings.defaultSettings)
             }
@@ -395,6 +405,8 @@ public class ShareRootControllerImpl {
                 voipMaxLayer: 0,
                 voipVersions: [],
                 appData: .single(nil),
+                externalRequestVerificationStream: .never(),
+                externalRecaptchaRequestVerification: { _, _ in return .never() },
                 autolockDeadine: .single(nil),
                 encryptionProvider: OpenSSLEncryptionProvider(),
                 deviceModelName: nil,
@@ -478,7 +490,7 @@ public class ShareRootControllerImpl {
             |> mapToSignal { data -> Signal<(ShareControllerEnvironment, ShareControllerAccountContext, PostboxAccessChallengeData, [ShareControllerSwitchableAccount]), ShareAuthorizationError> in
                 let (environment, context, otherAccounts) = data
                 
-                let limitsConfigurationAndContentSettings = TelegramEngine.EngineData(postbox: context.stateManager.postbox).get(
+                let limitsConfigurationAndContentSettings = TelegramEngine.EngineData(accountPeerId: context.stateManager.accountPeerId, postbox: context.stateManager.postbox).get(
                     TelegramEngine.EngineData.Item.Configuration.Limits(),
                     TelegramEngine.EngineData.Item.Configuration.ContentSettings(),
                     TelegramEngine.EngineData.Item.Configuration.App()
@@ -505,19 +517,13 @@ public class ShareRootControllerImpl {
                 
                 let displayShare: () -> Void = {
                     var cancelImpl: (() -> Void)?
-                    let _ = cancelImpl
                     
                     let beginShare: () -> Void = {
                         let requestUserInteraction: ([UnpreparedShareItemContent]) -> Signal<[PreparedShareItemContent], NoError> = { content in
                             return Signal { [weak self] subscriber in
                                 switch content[0] {
                                     case let .contact(data):
-                                        #if !DEBUG
-                                        //qwefqwfqwefw
-                                        #endif
-                                        let _ = data
-                                        let _ = self
-                                        /*let controller = deviceContactInfoController(context: context, subject: .filter(peer: nil, contactId: nil, contactData: data, completion: { peer, contactData in
+                                        let controller = deviceContactInfoController(context: context, environment: environment, subject: .filter(peer: nil, contactId: nil, contactData: data, completion: { peer, contactData in
                                             let phone = contactData.basicData.phoneNumbers[0].value
                                             if let vCardData = contactData.serializedVCard() {
                                                 subscriber.putNext([.media(.media(.standalone(media: TelegramMediaContact(firstName: contactData.basicData.firstName, lastName: contactData.basicData.lastName, phoneNumber: phone, peerId: nil, vCardData: vCardData))))])
@@ -530,15 +536,15 @@ public class ShareRootControllerImpl {
                                         if let strongSelf = self, let window = strongSelf.mainWindow {
                                             controller.presentationArguments = ViewControllerPresentationArguments(presentationAnimation: .modalSheet)
                                             window.present(controller, on: .root)
-                                        }*/
+                                        }
                                         break
                                 }
                                 return EmptyDisposable
                             } |> runOn(Queue.mainQueue())
                         }
                         
-                        let sentItems: ([PeerId], [PeerId: Int64], [PreparedShareItemContent], ShareControllerAccountContext, Bool, String) -> Signal<ShareControllerExternalStatus, NoError> = { peerIds, threadIds, contents, account, silently, additionalText in
-                            let sentItems = sentShareItems(accountPeerId: account.accountPeerId, postbox: account.stateManager.postbox, network: account.stateManager.network, stateManager: account.stateManager, auxiliaryMethods: makeTelegramAccountAuxiliaryMethods(uploadInBackground: nil), to: peerIds, threadIds: threadIds, items: contents, silently: silently, additionalText: additionalText)
+                        let sentItems: ([PeerId], [PeerId: Int64], [PeerId: StarsAmount], [PreparedShareItemContent], ShareControllerAccountContext, Bool, String) -> Signal<ShareControllerExternalStatus, NoError> = { peerIds, threadIds, requireStars, contents, account, silently, additionalText in
+                            let sentItems = sentShareItems(accountPeerId: account.accountPeerId, postbox: account.stateManager.postbox, network: account.stateManager.network, stateManager: account.stateManager, auxiliaryMethods: makeTelegramAccountAuxiliaryMethods(uploadInBackground: nil), to: peerIds, threadIds: threadIds, requireStars: requireStars, items: contents, silently: silently, additionalText: additionalText)
                             |> `catch` { _ -> Signal<
                                 Float, NoError> in
                                 return .complete()
@@ -549,8 +555,20 @@ public class ShareRootControllerImpl {
                             }
                             |> then(.single(.done))
                         }
-                                            
-                        let shareController = ShareController(environment: environment, currentContext: context, subject: .fromExternal({ peerIds, threadIds, additionalText, account, silently in
+
+                        var itemCount = 1
+
+                        if let extensionItems = self?.getExtensionContext()?.inputItems as? [NSExtensionItem] {
+                            for item in extensionItems {
+                                if let attachments = item.attachments {
+                                    itemCount = 0
+                                    for _ in attachments {
+                                        itemCount += 1
+                                    }
+                                }
+                            }
+                        }
+                        let shareController = ShareController(environment: environment, currentContext: context, subject: .fromExternal(itemCount, { peerIds, threadIds, requireStars, additionalText, account, silently in
                             if let strongSelf = self, let inputItems = strongSelf.getExtensionContext()?.inputItems, !inputItems.isEmpty, !peerIds.isEmpty {
                                 let rawSignals = TGItemProviderSignals.itemSignals(forInputItems: inputItems)!
                                 return preparedShareItems(postbox: account.stateManager.postbox, network: account.stateManager.network, to: peerIds[0], dataItems: rawSignals)
@@ -576,11 +594,11 @@ public class ShareRootControllerImpl {
                                         return requestUserInteraction(value)
                                         |> castError(ShareControllerError.self)
                                         |> mapToSignal { contents -> Signal<ShareControllerExternalStatus, ShareControllerError> in
-                                            return sentItems(peerIds, threadIds, contents, account, silently, additionalText)
+                                            return sentItems(peerIds, threadIds, requireStars, contents, account, silently, additionalText)
                                             |> castError(ShareControllerError.self)
                                         }
                                     case let .done(contents):
-                                        return sentItems(peerIds, threadIds, contents, account, silently, additionalText)
+                                        return sentItems(peerIds, threadIds, requireStars, contents, account, silently, additionalText)
                                         |> castError(ShareControllerError.self)
                                     }
                                 }
@@ -592,6 +610,77 @@ public class ShareRootControllerImpl {
                         shareController.dismissed = { _ in
                             //inForeground.set(false)
                             self?.getExtensionContext()?.completeRequest(returningItems: nil, completionHandler: nil)
+                        }
+
+                        var canShareToStory = true
+                        var canSendInHighQuality = false
+                        if let inputItems = self?.getExtensionContext()?.inputItems, inputItems.count == 1, let item = inputItems[0] as? NSExtensionItem, let attachments = item.attachments {
+                            for attachment in attachments {
+                                if attachment.hasItemConformingToTypeIdentifier(kUTTypeImage as String) {
+                                    canSendInHighQuality = true
+                                } else if attachment.hasItemConformingToTypeIdentifier(kUTTypeMovie as String) {
+                                } else {
+                                    canShareToStory = false
+                                }
+                            }
+                        }
+
+                        if canShareToStory {
+                            shareController.canSendInHighQuality = canSendInHighQuality
+                            shareController.shareStory = { [weak self] in
+                                guard let self else {
+                                    return
+                                }
+                                if let inputItems = self.getExtensionContext()?.inputItems, inputItems.count == 1, let item = inputItems[0] as? NSExtensionItem, let attachments = item.attachments {
+                                    let sessionId = Int64.random(in: 1000000 ..< .max)
+
+                                    let storiesPath = rootPath + "/share/stories/\(sessionId)"
+                                    let _ = try? FileManager.default.createDirectory(atPath: storiesPath, withIntermediateDirectories: true, attributes: nil)
+                                    var index = 0
+
+                                    let dispatchGroup = DispatchGroup()
+
+                                    for attachment in attachments {
+                                        let fileIndex = index
+                                        if attachment.hasItemConformingToTypeIdentifier(kUTTypeImage as String) {
+                                            dispatchGroup.enter()
+                                            attachment.loadFileRepresentation(forTypeIdentifier: kUTTypeImage as String, completionHandler: { url, _ in
+                                                if let url, let imageData = try? Data(contentsOf: url) {
+                                                    let filePath = storiesPath + "/\(fileIndex).jpg"
+                                                    try? FileManager.default.removeItem(atPath: filePath)
+
+                                                    do {
+                                                        try imageData.write(to: URL(fileURLWithPath: filePath))
+                                                    } catch {
+                                                        print("Error: \(error)")
+                                                    }
+                                                }
+                                                dispatchGroup.leave()
+                                            })
+                                        } else if attachment.hasItemConformingToTypeIdentifier(kUTTypeMovie as String) {
+                                            dispatchGroup.enter()
+                                            attachment.loadFileRepresentation(forTypeIdentifier: kUTTypeMovie as String, completionHandler: { url, _ in
+                                                if let url {
+                                                    let filePath = storiesPath + "/\(fileIndex).mp4"
+                                                    try? FileManager.default.removeItem(atPath: filePath)
+
+                                                    do {
+                                                        try FileManager.default.copyItem(at: url, to: URL(fileURLWithPath: filePath))
+                                                    } catch {
+                                                        print("Error: \(error)")
+                                                    }
+                                                }
+                                                dispatchGroup.leave()
+                                            })
+                                        }
+                                        index += 1
+                                    }
+
+                                    dispatchGroup.notify(queue: .main) {
+                                        self.openUrl("tg://shareStory?session=\(sessionId)")
+                                    }
+                                }
+                            }
                         }
                         /*shareController.debugAction = {
                             guard let strongSelf = self else {
@@ -829,7 +918,7 @@ public class ShareRootControllerImpl {
                     strongSelf.mainWindow?.present(controller, on: .root)
                     return
                 }
-                
+
                 displayShare()
             }
             
@@ -884,7 +973,7 @@ private func attemptChatImport(
                 var attemptSelectionImpl: ((EnginePeer) -> Void)?
                 var createNewGroupImpl: (() -> Void)?
                 
-                let controller = PeerSelectionControllerImpl(PeerSelectionControllerParams(context: context, filter: [.onlyGroups, .onlyManageable, .excludeDisabled, .doNotSearchMessages], hasContactSelector: false, hasGlobalSearch: false, title: presentationData.strings.ChatImport_Title, attemptSelection: { peer, _ in
+                let controller = PeerSelectionControllerImpl(PeerSelectionControllerParams(context: context, filter: [.onlyGroups, .onlyManageable, .excludeDisabled, .doNotSearchMessages], hasContactSelector: false, hasGlobalSearch: false, title: presentationData.strings.ChatImport_Title, attemptSelection: { peer, _, _ in
                     attemptSelectionImpl?(peer)
                 }, createNewGroup: {
                     createNewGroupImpl?()
@@ -1051,7 +1140,7 @@ private func attemptChatImport(
                 navigationController.viewControllers = [controller]
             case let .privateChat(title):
                 var attemptSelectionImpl: ((EnginePeer) -> Void)?
-                let controller = context.sharedContext.makePeerSelectionController(PeerSelectionControllerParams(context: context, filter: [.onlyPrivateChats, .excludeDisabled, .doNotSearchMessages, .excludeSecretChats], hasChatListSelector: false, hasContactSelector: true, hasGlobalSearch: false, title: presentationData.strings.ChatImport_Title, attemptSelection: { peer, _ in
+                let controller = context.sharedContext.makePeerSelectionController(PeerSelectionControllerParams(context: context, filter: [.onlyPrivateChats, .excludeDisabled, .doNotSearchMessages, .excludeSecretChats], hasChatListSelector: false, hasContactSelector: true, hasGlobalSearch: false, title: presentationData.strings.ChatImport_Title, attemptSelection: { peer, _, _ in
                     attemptSelectionImpl?(peer)
                 }, pretendPresentedInModal: true, selectForumThreads: true))
                 
@@ -1124,7 +1213,7 @@ private func attemptChatImport(
             case let .unknown(peerTitle):
                 var attemptSelectionImpl: ((EnginePeer) -> Void)?
                 var createNewGroupImpl: (() -> Void)?
-                let controller = context.sharedContext.makePeerSelectionController(PeerSelectionControllerParams(context: context, filter: [.excludeDisabled, .doNotSearchMessages], hasContactSelector: true, hasGlobalSearch: false, title: presentationData.strings.ChatImport_Title, attemptSelection: { peer, _ in
+                let controller = context.sharedContext.makePeerSelectionController(PeerSelectionControllerParams(context: context, filter: [.excludeDisabled, .doNotSearchMessages], hasContactSelector: true, hasGlobalSearch: false, title: presentationData.strings.ChatImport_Title, attemptSelection: { peer, _, _ in
                     attemptSelectionImpl?(peer)
                 }, createNewGroup: {
                     createNewGroupImpl?()

@@ -1,3 +1,4 @@
+#import <LegacyComponents/LegacyComponents.h>
 #import "TGPhotoDrawingController.h"
 
 #import "LegacyComponentsInternal.h"
@@ -7,7 +8,7 @@
 #import <LegacyComponents/TGPaintUtils.h>
 #import <LegacyComponents/TGPhotoEditorUtils.h>
 #import <LegacyComponents/TGPhotoEditorAnimation.h>
-#import "TGPhotoEditorInterfaceAssets.h"
+#import <LegacyComponents/TGPhotoEditorInterfaceAssets.h>
 #import <LegacyComponents/TGObserverProxy.h>
 
 #import <LegacyComponents/TGMenuView.h>
@@ -19,7 +20,7 @@
 #import <LegacyComponents/TGPaintingData.h>
 
 #import "TGPaintingWrapperView.h"
-#import "TGPhotoEditorSparseView.h"
+#import <LegacyComponents/TGPhotoEditorSparseView.h>
 
 #import "PGPhotoEditor.h"
 #import "TGPhotoEditorPreviewView.h"
@@ -226,7 +227,7 @@ const CGSize TGPhotoPaintingMaxSize = { 1920.0f, 1920.0f };
         };
         [_paintingWrapperView addSubview:_drawingView];
         
-        [_drawingView setupWithDrawingData:_photoEditor.paintingData.drawingData];
+        [_drawingView setupWithDrawingData:_photoEditor.paintingData.drawingData storeAsClear:false];
     }
     
     _entitiesView.hasSelectionChanged = ^(bool hasSelection) {

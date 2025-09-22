@@ -181,7 +181,9 @@ static MTDatacenterAuthInfoMapKeyStruct parseAuthInfoMapKeyInteger(NSNumber *key
     NSMutableArray<MTWeakContextChangeListener *> *_changeListeners;
     
     MTSignal *_discoverBackupAddressListSignal;
-    
+    MTSignal * _Nonnull (^ _Nullable _externalRequestVerification)(NSString * _Nonnull);
+    MTSignal * _Nonnull (^ _Nullable _externalRecaptchaRequestVerification)(NSString * _Nonnull, NSString * _Nonnull);
+
     NSMutableDictionary *_discoverDatacenterAddressActions;
     NSMutableDictionary<NSNumber *, MTDatacenterAuthAction *> *_datacenterAuthActions;
     NSMutableDictionary *_datacenterTransferAuthActions;
@@ -249,7 +251,7 @@ static int32_t fixedTimeDifferenceValue = 0;
         _tempKeyExpiration = 24 * 60 * 60;
         
 #if DEBUG
-        //_tempKeyExpiration = 30;
+       //_tempKeyExpiration = 30;
 #endif
         
         _datacenterSeedAddressSetById = [[NSMutableDictionary alloc] init];
@@ -352,7 +354,9 @@ static void copyKeychainDictionaryKey(NSString * _Nonnull group, NSString * _Non
     
     id<MTDisposable> backupAddressListDisposable = _backupAddressListDisposable;
     _backupAddressListDisposable = nil;
-    
+
+    NSDictionary *transportSchemeDisposableByDatacenterId = _transportSchemeDisposableByDatacenterId;
+
     [[MTContext contextQueue] dispatchOnQueue:^
     {
         for (NSNumber *nDatacenterId in discoverDatacenterAddressActions)
@@ -386,8 +390,14 @@ static void copyKeychainDictionaryKey(NSString * _Nonnull group, NSString * _Non
         }
         
         [cleanupSessionInfoDisposables dispose];
-        
+
         [backupAddressListDisposable dispose];
+
+        for (NSNumber *nDatacenterId in transportSchemeDisposableByDatacenterId)
+        {
+            id<MTDisposable> disposable = transportSchemeDisposableByDatacenterId[nDatacenterId];
+            [disposable dispose];
+        }
     }];
 }
 
@@ -521,6 +531,44 @@ static void copyKeychainDictionaryKey(NSString * _Nonnull group, NSString * _Non
     [[MTContext contextQueue] dispatchOnQueue:^ {
         _discoverBackupAddressListSignal = signal;
     } synchronous:true];
+}
+
+- (void)setExternalRequestVerification:(MTSignal * _Nonnull (^ _Nonnull)(NSString * _Nonnull))externalRequestVerification {
+    [[MTContext contextQueue] dispatchOnQueue:^ {
+        _externalRequestVerification = externalRequestVerification;
+    } synchronous:true];
+}
+
+- (void)setExternalRecaptchaRequestVerification:(MTSignal * _Nonnull (^ _Nonnull)(NSString * _Nonnull, NSString * _Nonnull))externalRecaptchaRequestVerification {
+    [[MTContext contextQueue] dispatchOnQueue:^ {
+        _externalRecaptchaRequestVerification = externalRecaptchaRequestVerification;
+    } synchronous:true];
+}
+
+- (MTSignal * _Nullable)performExternalRequestVerificationWithNonce:(NSString * _Nonnull)nonce {
+    __block MTSignal * _Nonnull (^ _Nullable externalRequestVerification)(NSString * _Nonnull);
+    [[MTContext contextQueue] dispatchOnQueue:^ {
+        externalRequestVerification = _externalRequestVerification;
+    } synchronous:true];
+
+    if (externalRequestVerification != nil) {
+        return externalRequestVerification(nonce);
+    } else {
+        return [MTSignal single:nil];
+    }
+}
+
+- (MTSignal * _Nullable)performExternalRecaptchaRequestVerificationWithMethod:(NSString * _Nonnull)method siteKey:(NSString * _Nonnull)siteKey {
+    __block MTSignal * _Nonnull (^ _Nullable externalRecaptchaRequestVerification)(NSString * _Nonnull, NSString * _Nonnull);
+    [[MTContext contextQueue] dispatchOnQueue:^ {
+        externalRecaptchaRequestVerification = _externalRecaptchaRequestVerification;
+    } synchronous:true];
+
+    if (externalRecaptchaRequestVerification != nil) {
+        return externalRecaptchaRequestVerification(method, siteKey);
+    } else {
+        return [MTSignal single:nil];
+    }
 }
 
 - (NSTimeInterval)globalTime
@@ -976,14 +1024,16 @@ static void copyKeychainDictionaryKey(NSString * _Nonnull group, NSString * _Non
     [[MTContext contextQueue] dispatchOnQueue:^
     {
         MTDatacenterAddress *overrideAddress = _apiEnvironment.datacenterAddressOverrides[@(datacenterId)];
+        bool isAddressOverride = false;
         if (overrideAddress != nil) {
+            isAddressOverride = true;
             [results addObject:[[MTTransportScheme alloc] initWithTransportClass:[MTTcpTransport class] address:overrideAddress media:false]];
         } else {
             [results addObjectsFromArray:[self _allTransportSchemesForDatacenterWithId:datacenterId]];
         }
         
         MTDatacenterAddressSet *addressSet = [self addressSetForDatacenterWithId:datacenterId];
-        if (addressSet != nil) {
+        if (addressSet != nil && !isAddressOverride) {
             MTTransportScheme *manualScheme = _datacenterManuallySelectedSchemeById[[[MTTransportSchemeKey alloc] initWithDatacenterId:datacenterId isProxy:isProxy isMedia:media]];
             if (manualScheme != nil) {
                 bool addressValid = false;
@@ -1216,16 +1266,25 @@ static void copyKeychainDictionaryKey(NSString * _Nonnull group, NSString * _Non
                 }
             }] take:1];
 
-            _transportSchemeDisposableByDatacenterId[@(datacenterId)] = [[filteredSignal onDispose:^
+            MTMetaDisposable *disposable = [[MTMetaDisposable alloc] init];
+            _transportSchemeDisposableByDatacenterId[@(datacenterId)] = disposable;
+
+            __weak MTMetaDisposable *weakDisposable = disposable;
+            [disposable setDisposable:[[filteredSignal onDispose:^
             {
                 __strong MTContext *strongSelf = weakSelf;
                 if (strongSelf != nil)
                 {
                     [[MTContext contextQueue] dispatchOnQueue:^
                     {
-                        id<MTDisposable> disposable = strongSelf->_transportSchemeDisposableByDatacenterId[@(datacenterId)];
-                        [strongSelf->_transportSchemeDisposableByDatacenterId removeObjectForKey:@(datacenterId)];
-                        [disposable dispose];
+                        __strong MTMetaDisposable *strongDisposable = weakDisposable;
+                        if (strongDisposable) {
+                            id<MTDisposable> disposable = strongSelf->_transportSchemeDisposableByDatacenterId[@(datacenterId)];
+                            if (disposable == strongDisposable) {
+                                [strongSelf->_transportSchemeDisposableByDatacenterId removeObjectForKey:@(datacenterId)];
+                                [disposable dispose];
+                            }
+                        }
                     }];
                 }
             }] startWithNextStrict:^(MTTransportScheme *next)
@@ -1244,7 +1303,7 @@ static void copyKeychainDictionaryKey(NSString * _Nonnull group, NSString * _Non
             } completed:^
             {
                 
-            } file:__FILE_NAME__ line:__LINE__];
+            } file:__FILE_NAME__ line:__LINE__]];
         }
     }];
 }
@@ -1348,6 +1407,9 @@ static void copyKeychainDictionaryKey(NSString * _Nonnull group, NSString * _Non
         if (_apiEnvironment.networkSettings == nil || _apiEnvironment.networkSettings.reducedBackupDiscoveryTimeout) {
             delay = 5.0;
         }
+        #if DEBUG
+        delay = 1.0;
+        #endif
         [self _beginBackupAddressDiscoveryWithDelay:delay];
     }];
 }

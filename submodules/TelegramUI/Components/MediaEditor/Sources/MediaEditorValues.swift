@@ -21,6 +21,7 @@ public enum EditorToolKey: Int32, CaseIterable {
     case highlightsTint
     case blur
     case curves
+    case stickerOutline
     
     static let adjustmentToolsKeys: [EditorToolKey] = [
         .enhance,
@@ -112,11 +113,13 @@ public enum MediaQualityPreset: Int32 {
     case profile
     case profileHigh
     case profileVeryHigh
+    case sticker
     case passthrough
+    case quality
 
     var hasAudio: Bool {
         switch self {
-        case .animation, .profileLow, .profile, .profileHigh, .profileVeryHigh:
+        case .animation, .profileLow, .profile, .profileHigh, .profileVeryHigh, .sticker:
             return false
         default:
             return true
@@ -136,11 +139,13 @@ public enum MediaQualityPreset: Int32 {
         case .compressedVeryHigh:
             return 1920.0
         case .videoMessage:
-            return 384.0
+            return 400.0
         case .profileLow:
             return 720.0
         case .profile, .profileHigh, .profileVeryHigh:
             return 800.0
+        case .sticker:
+            return 512.0
         default:
             return 848.0
         }
@@ -168,6 +173,8 @@ public enum MediaQualityPreset: Int32 {
             return 2000
         case .profileVeryHigh:
             return 2400
+        case .sticker:
+            return 1000
         default:
             return 900
         }
@@ -223,7 +230,7 @@ public enum MediaCropOrientation: Int32 {
     }
 }
 
-public final class MediaEditorValues: Codable, Equatable {
+public final class MediaEditorValues: Codable, Equatable, CustomStringConvertible {
     public static func == (lhs: MediaEditorValues, rhs: MediaEditorValues) -> Bool {
         if lhs.peerId != rhs.peerId {
             return false
@@ -294,7 +301,13 @@ public final class MediaEditorValues: Codable, Equatable {
         if lhs.additionalVideoVolume != rhs.additionalVideoVolume {
             return false
         }
+        if lhs.collage != rhs.collage {
+            return false
+        }
         if lhs.drawing !== rhs.drawing {
+            return false
+        }
+        if lhs.maskDrawing !== rhs.maskDrawing {
             return false
         }
         if lhs.entities != rhs.entities {
@@ -313,6 +326,15 @@ public final class MediaEditorValues: Codable, Equatable {
             return false
         }
         if lhs.audioTrackSamples != rhs.audioTrackSamples {
+            return false
+        }
+        if lhs.collageTrackSamples != rhs.collageTrackSamples {
+            return false
+        }
+        if lhs.coverImageTimestamp != rhs.coverImageTimestamp {
+            return false
+        }
+        if lhs.coverDimensions != rhs.coverDimensions {
             return false
         }
         if lhs.nightTheme != rhs.nightTheme {
@@ -375,16 +397,165 @@ public final class MediaEditorValues: Codable, Equatable {
         case additionalVideoTrimRange
         case additionalVideoOffset
         case additionalVideoVolume
+        case collage
         
         case nightTheme
         case drawing
+        case maskDrawing
         case entities
         case toolValues
         case audioTrack
         case audioTrackTrimRange
         case audioTrackOffset
         case audioTrackVolume
+        case coverImageTimestamp
+        case coverDimensions
         case qualityPreset
+    }
+    
+    public struct VideoCollageItem: Codable, Equatable {
+        enum DecodingError: Error {
+            case generic
+        }
+        
+        private enum CodingKeys: String, CodingKey {
+            case contentType
+            case contentValue
+            case isVideo
+            case frame
+            case contentScale
+            case contentOffset
+            case videoTrimRange
+            case videoOffset
+            case videoVolume
+        }
+        
+        public enum Content: Equatable {
+            case main
+            case imageFile(path: String)
+            case videoFile(path: String)
+            case asset(localIdentifier: String, isVideo: Bool)
+            
+            public var isVideo: Bool {
+                switch self {
+                case .videoFile, .asset(_, true):
+                    return true
+                default:
+                    return false
+                }
+            }
+        }
+        
+        public let content: Content
+        public let frame: CGRect
+        public let contentScale: CGFloat
+        public let contentOffset: CGPoint
+        
+        public let videoTrimRange: Range<Double>?
+        public let videoOffset: Double?
+        public let videoVolume: CGFloat?
+        
+        public init(
+            content: Content,
+            frame: CGRect,
+            contentScale: CGFloat,
+            contentOffset: CGPoint,
+            videoTrimRange: Range<Double>?,
+            videoOffset: Double?,
+            videoVolume: CGFloat?
+        ) {
+            self.content = content
+            self.frame = frame
+            self.contentScale = contentScale
+            self.contentOffset = contentOffset
+            self.videoTrimRange = videoTrimRange
+            self.videoOffset = videoOffset
+            self.videoVolume = videoVolume
+        }
+        
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            switch try container.decode(Int32.self, forKey: .contentType) {
+            case 0:
+                self.content = .main
+            case 1:
+                self.content = .imageFile(path: try container.decode(String.self, forKey: .contentValue))
+            case 2:
+                self.content = .videoFile(path: try container.decode(String.self, forKey: .contentValue))
+            case 3:
+                self.content = .asset(localIdentifier: try container.decode(String.self, forKey: .contentValue), isVideo: try container.decode(Bool.self, forKey: .isVideo))
+            default:
+                throw DecodingError.generic
+            }
+            self.frame = try container.decode(CGRect.self, forKey: .frame)
+            
+            self.contentScale = try container.decodeIfPresent(CGFloat.self, forKey: .contentScale) ?? 1.0
+            self.contentOffset = try container.decodeIfPresent(CGPoint.self, forKey: .contentOffset) ?? .zero
+            
+            self.videoTrimRange = try container.decodeIfPresent(Range<Double>.self, forKey: .videoTrimRange)
+            self.videoOffset = try container.decodeIfPresent(Double.self, forKey: .videoOffset)
+            self.videoVolume = try container.decodeIfPresent(CGFloat.self, forKey: .videoVolume)
+        }
+        
+        public func encode(to encoder: any Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            switch self.content {
+            case .main:
+                try container.encode(Int32(0), forKey: .contentType)
+            case let .imageFile(value):
+                try container.encode(Int32(1), forKey: .contentType)
+                try container.encode(value, forKey: .contentValue)
+            case let .videoFile(value):
+                try container.encode(Int32(2), forKey: .contentType)
+                try container.encode(value, forKey: .contentValue)
+            case let .asset(value, isVideo):
+                try container.encode(Int32(3), forKey: .contentType)
+                try container.encode(value, forKey: .contentValue)
+                try container.encode(isVideo, forKey: .isVideo)
+            }
+            try container.encode(self.frame, forKey: .frame)
+            try container.encode(self.contentScale, forKey: .contentScale)
+            try container.encode(self.contentOffset, forKey: .contentOffset)
+            try container.encodeIfPresent(self.videoTrimRange, forKey: .videoTrimRange)
+            try container.encodeIfPresent(self.videoOffset, forKey: .videoOffset)
+            try container.encodeIfPresent(self.videoVolume, forKey: .videoVolume)
+        }
+        
+        func withUpdatedVideoTrimRange(_ videoTrimRange: Range<Double>?) -> VideoCollageItem {
+            return VideoCollageItem(
+                content: self.content,
+                frame: self.frame,
+                contentScale: self.contentScale,
+                contentOffset: self.contentOffset,
+                videoTrimRange: videoTrimRange,
+                videoOffset: self.videoOffset,
+                videoVolume: self.videoVolume
+            )
+        }
+        
+        func withUpdatedVideoOffset(_ videoOffset: Double?) -> VideoCollageItem {
+            return VideoCollageItem(
+                content: self.content,
+                frame: self.frame,
+                contentScale: self.contentScale,
+                contentOffset: self.contentOffset,
+                videoTrimRange: self.videoTrimRange,
+                videoOffset: videoOffset,
+                videoVolume: self.videoVolume
+            )
+        }
+        
+        func withUpdatedVideoVolume(_ videoVolume: CGFloat?) -> VideoCollageItem {
+            return VideoCollageItem(
+                content: self.content,
+                frame: self.frame,
+                contentScale: self.contentScale,
+                contentOffset: self.contentOffset,
+                videoTrimRange: self.videoTrimRange,
+                videoOffset: self.videoOffset,
+                videoVolume: videoVolume
+            )
+        }
     }
     
     public let peerId: EnginePeer.Id
@@ -411,13 +582,16 @@ public final class MediaEditorValues: Codable, Equatable {
     public let additionalVideoScale: CGFloat?
     public let additionalVideoRotation: CGFloat?
     public let additionalVideoPositionChanges: [VideoPositionChange]
-    
+        
     public let additionalVideoTrimRange: Range<Double>?
     public let additionalVideoOffset: Double?
     public let additionalVideoVolume: CGFloat?
     
+    public let collage: [VideoCollageItem]
+    
     public let nightTheme: Bool
     public let drawing: UIImage?
+    public let maskDrawing: UIImage?
     public let entities: [CodableDrawingEntity]
     public let toolValues: [EditorToolKey: Any]
     
@@ -427,10 +601,32 @@ public final class MediaEditorValues: Codable, Equatable {
     public let audioTrackVolume: CGFloat?
     public let audioTrackSamples: MediaAudioTrackSamples?
     
+    public let collageTrackSamples: MediaAudioTrackSamples?
+    
+    public let coverImageTimestamp: Double?
+    
+    public let coverDimensions: CGSize?
+    
     public let qualityPreset: MediaQualityPreset?
     
     var isStory: Bool {
         return self.qualityPreset == nil
+    }
+    
+    var isSticker: Bool {
+        return self.qualityPreset == .sticker
+    }
+    
+    var isAvatar: Bool {
+        return [.profile].contains(self.qualityPreset)
+    }
+    
+    var isCover: Bool {
+        return self.coverDimensions != nil
+    }
+    
+    public var cropValues: (offset: CGPoint, rotation: CGFloat, scale: CGFloat) {
+        return (self.cropOffset, self.cropRotation, self.cropScale)
     }
     
     public init(
@@ -457,8 +653,10 @@ public final class MediaEditorValues: Codable, Equatable {
         additionalVideoTrimRange: Range<Double>?,
         additionalVideoOffset: Double?,
         additionalVideoVolume: CGFloat?,
+        collage: [VideoCollageItem],
         nightTheme: Bool,
         drawing: UIImage?,
+        maskDrawing: UIImage?,
         entities: [CodableDrawingEntity],
         toolValues: [EditorToolKey: Any],
         audioTrack: MediaAudioTrack?,
@@ -466,6 +664,9 @@ public final class MediaEditorValues: Codable, Equatable {
         audioTrackOffset: Double?,
         audioTrackVolume: CGFloat?,
         audioTrackSamples: MediaAudioTrackSamples?,
+        collageTrackSamples: MediaAudioTrackSamples?,
+        coverImageTimestamp: Double?,
+        coverDimensions: CGSize?,
         qualityPreset: MediaQualityPreset?
     ) {
         self.peerId = peerId
@@ -491,8 +692,10 @@ public final class MediaEditorValues: Codable, Equatable {
         self.additionalVideoTrimRange = additionalVideoTrimRange
         self.additionalVideoOffset = additionalVideoOffset
         self.additionalVideoVolume = additionalVideoVolume
+        self.collage = collage
         self.nightTheme = nightTheme
         self.drawing = drawing
+        self.maskDrawing = maskDrawing
         self.entities = entities
         self.toolValues = toolValues
         self.audioTrack = audioTrack
@@ -500,6 +703,9 @@ public final class MediaEditorValues: Codable, Equatable {
         self.audioTrackOffset = audioTrackOffset
         self.audioTrackVolume = audioTrackVolume
         self.audioTrackSamples = audioTrackSamples
+        self.collageTrackSamples = collageTrackSamples
+        self.coverImageTimestamp = coverImageTimestamp
+        self.coverDimensions = coverDimensions
         self.qualityPreset = qualityPreset
     }
     
@@ -541,11 +747,18 @@ public final class MediaEditorValues: Codable, Equatable {
         self.additionalVideoOffset = try container.decodeIfPresent(Double.self, forKey: .additionalVideoOffset)
         self.additionalVideoVolume = try container.decodeIfPresent(CGFloat.self, forKey: .additionalVideoVolume)
         
+        self.collage = try container.decodeIfPresent([VideoCollageItem].self, forKey: .collage) ?? []
+        
         self.nightTheme = try container.decodeIfPresent(Bool.self, forKey: .nightTheme) ?? false
         if let drawingData = try container.decodeIfPresent(Data.self, forKey: .drawing), let image = UIImage(data: drawingData) {
             self.drawing = image
         } else {
             self.drawing = nil
+        }
+        if let drawingData = try container.decodeIfPresent(Data.self, forKey: .maskDrawing), let image = UIImage(data: drawingData) {
+            self.maskDrawing = image
+        } else {
+            self.maskDrawing = nil
         }
         
         self.entities = try container.decode([CodableDrawingEntity].self, forKey: .entities)
@@ -564,6 +777,10 @@ public final class MediaEditorValues: Codable, Equatable {
         self.audioTrackVolume = try container.decodeIfPresent(CGFloat.self, forKey: .audioTrackVolume)
         
         self.audioTrackSamples = nil
+        self.collageTrackSamples = nil
+        
+        self.coverImageTimestamp = try container.decodeIfPresent(Double.self, forKey: .coverImageTimestamp)
+        self.coverDimensions = try container.decodeIfPresent(CGSize.self, forKey: .coverDimensions)
         
         self.qualityPreset = (try container.decodeIfPresent(Int32.self, forKey: .qualityPreset)).flatMap { MediaQualityPreset(rawValue: $0) }
     }
@@ -603,9 +820,14 @@ public final class MediaEditorValues: Codable, Equatable {
         try container.encodeIfPresent(self.additionalVideoOffset, forKey: .additionalVideoOffset)
         try container.encodeIfPresent(self.additionalVideoVolume, forKey: .additionalVideoVolume)
         
+        try container.encode(self.collage, forKey: .collage)
+        
         try container.encode(self.nightTheme, forKey: .nightTheme)
         if let drawing = self.drawing, let pngDrawingData = drawing.pngData() {
             try container.encode(pngDrawingData, forKey: .drawing)
+        }
+        if let drawing = self.maskDrawing, let pngDrawingData = drawing.pngData() {
+            try container.encode(pngDrawingData, forKey: .maskDrawing)
         }
         
         try container.encode(self.entities, forKey: .entities)
@@ -623,97 +845,128 @@ public final class MediaEditorValues: Codable, Equatable {
         try container.encodeIfPresent(self.audioTrackOffset, forKey: .audioTrackOffset)
         try container.encodeIfPresent(self.audioTrackVolume, forKey: .audioTrackVolume)
         
+        try container.encodeIfPresent(self.coverImageTimestamp, forKey: .coverImageTimestamp)
+        try container.encodeIfPresent(self.coverDimensions, forKey: .coverDimensions)
+        
         try container.encodeIfPresent(self.qualityPreset?.rawValue, forKey: .qualityPreset)
     }
     
     public func makeCopy() -> MediaEditorValues {
-        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: self.videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, nightTheme: self.nightTheme, drawing: self.drawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, qualityPreset: self.qualityPreset)
+        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: self.videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, collage: self.collage, nightTheme: self.nightTheme, drawing: self.drawing, maskDrawing: self.maskDrawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, collageTrackSamples: self.collageTrackSamples, coverImageTimestamp: self.coverImageTimestamp, coverDimensions: self.coverDimensions, qualityPreset: self.qualityPreset)
     }
     
     func withUpdatedCrop(offset: CGPoint, scale: CGFloat, rotation: CGFloat, mirroring: Bool) -> MediaEditorValues {
-        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: offset, cropRect: self.cropRect, cropScale: scale, cropRotation: rotation, cropMirroring: mirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: self.videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, nightTheme: self.nightTheme, drawing: self.drawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, qualityPreset: self.qualityPreset)
+        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: offset, cropRect: self.cropRect, cropScale: scale, cropRotation: rotation, cropMirroring: mirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: self.videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, collage: self.collage, nightTheme: self.nightTheme, drawing: self.drawing, maskDrawing: self.maskDrawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, collageTrackSamples: self.collageTrackSamples, coverImageTimestamp: self.coverImageTimestamp, coverDimensions: self.coverDimensions, qualityPreset: self.qualityPreset)
+    }
+    
+    public func withUpdatedCropRect(cropRect: CGRect, rotation: CGFloat, mirroring: Bool) -> MediaEditorValues {
+        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: .zero, cropRect: cropRect, cropScale: 1.0, cropRotation: rotation, cropMirroring: mirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: self.videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, collage: self.collage, nightTheme: self.nightTheme, drawing: self.drawing, maskDrawing: self.maskDrawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, collageTrackSamples: self.collageTrackSamples, coverImageTimestamp: self.coverImageTimestamp, coverDimensions: self.coverDimensions, qualityPreset: self.qualityPreset)
     }
     
     func withUpdatedGradientColors(gradientColors: [UIColor]) -> MediaEditorValues {
-        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: gradientColors, videoTrimRange: self.videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, nightTheme: self.nightTheme, drawing: self.drawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, qualityPreset: self.qualityPreset)
+        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: gradientColors, videoTrimRange: self.videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, collage: self.collage, nightTheme: self.nightTheme, drawing: self.drawing, maskDrawing: self.maskDrawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, collageTrackSamples: self.collageTrackSamples, coverImageTimestamp: self.coverImageTimestamp, coverDimensions: self.coverDimensions, qualityPreset: self.qualityPreset)
     }
     
     func withUpdatedVideoIsMuted(_ videoIsMuted: Bool) -> MediaEditorValues {
-        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: self.videoTrimRange, videoIsMuted: videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, nightTheme: self.nightTheme, drawing: self.drawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, qualityPreset: self.qualityPreset)
+        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: self.videoTrimRange, videoIsMuted: videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, collage: self.collage, nightTheme: self.nightTheme, drawing: self.drawing, maskDrawing: self.maskDrawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, collageTrackSamples: self.collageTrackSamples, coverImageTimestamp: self.coverImageTimestamp, coverDimensions: self.coverDimensions, qualityPreset: self.qualityPreset)
     }
     
     func withUpdatedVideoIsFullHd(_ videoIsFullHd: Bool) -> MediaEditorValues {
-        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: self.videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, nightTheme: self.nightTheme, drawing: self.drawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, qualityPreset: self.qualityPreset)
+        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: self.videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, collage: self.collage, nightTheme: self.nightTheme, drawing: self.drawing, maskDrawing: self.maskDrawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, collageTrackSamples: self.collageTrackSamples, coverImageTimestamp: self.coverImageTimestamp, coverDimensions: self.coverDimensions, qualityPreset: self.qualityPreset)
     }
     
     
     func withUpdatedVideoIsMirrored(_ videoIsMirrored: Bool) -> MediaEditorValues {
-        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: self.videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, nightTheme: self.nightTheme, drawing: self.drawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, qualityPreset: self.qualityPreset)
+        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: self.videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, collage: self.collage, nightTheme: self.nightTheme, drawing: self.drawing, maskDrawing: self.maskDrawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, collageTrackSamples: self.collageTrackSamples, coverImageTimestamp: self.coverImageTimestamp, coverDimensions: self.coverDimensions, qualityPreset: self.qualityPreset)
     }
     
     func withUpdatedVideoVolume(_ videoVolume: CGFloat?) -> MediaEditorValues {
-        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: self.videoTrimRange, videoIsMuted: videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, nightTheme: self.nightTheme, drawing: self.drawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, qualityPreset: self.qualityPreset)
+        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: self.videoTrimRange, videoIsMuted: videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, collage: self.collage, nightTheme: self.nightTheme, drawing: self.drawing, maskDrawing: self.maskDrawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, collageTrackSamples: self.collageTrackSamples, coverImageTimestamp: self.coverImageTimestamp, coverDimensions: self.coverDimensions, qualityPreset: self.qualityPreset)
     }
     
     func withUpdatedAdditionalVideo(path: String?, isDual: Bool, positionChanges: [VideoPositionChange]) -> MediaEditorValues {
-        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: path, additionalVideoIsDual: isDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: positionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, nightTheme: self.nightTheme, drawing: self.drawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, qualityPreset: self.qualityPreset)
+        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: path, additionalVideoIsDual: isDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: positionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, collage: self.collage, nightTheme: self.nightTheme, drawing: self.drawing, maskDrawing: self.maskDrawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, collageTrackSamples: self.collageTrackSamples, coverImageTimestamp: self.coverImageTimestamp, coverDimensions: self.coverDimensions, qualityPreset: self.qualityPreset)
     }
     
     func withUpdatedAdditionalVideo(position: CGPoint, scale: CGFloat, rotation: CGFloat) -> MediaEditorValues {
-        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: position, additionalVideoScale: scale, additionalVideoRotation: rotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, nightTheme: self.nightTheme, drawing: self.drawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, qualityPreset: self.qualityPreset)
+        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: position, additionalVideoScale: scale, additionalVideoRotation: rotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, collage: self.collage, nightTheme: self.nightTheme, drawing: self.drawing, maskDrawing: self.maskDrawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, collageTrackSamples: self.collageTrackSamples, coverImageTimestamp: self.coverImageTimestamp, coverDimensions: self.coverDimensions, qualityPreset: self.qualityPreset)
     }
     
     func withUpdatedAdditionalVideoTrimRange(_ additionalVideoTrimRange: Range<Double>?) -> MediaEditorValues {
-        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, nightTheme: self.nightTheme, drawing: self.drawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, qualityPreset: self.qualityPreset)
+        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, collage: self.collage, nightTheme: self.nightTheme, drawing: self.drawing, maskDrawing: self.maskDrawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, collageTrackSamples: self.collageTrackSamples, coverImageTimestamp: self.coverImageTimestamp, coverDimensions: self.coverDimensions, qualityPreset: self.qualityPreset)
     }
     
     
     func withUpdatedAdditionalVideoOffset(_ additionalVideoOffset: Double?) -> MediaEditorValues {
-        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, nightTheme: self.nightTheme, drawing: self.drawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, qualityPreset: self.qualityPreset)
+        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, collage: self.collage, nightTheme: self.nightTheme, drawing: self.drawing, maskDrawing: self.maskDrawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, collageTrackSamples: self.collageTrackSamples, coverImageTimestamp: self.coverImageTimestamp, coverDimensions: self.coverDimensions, qualityPreset: self.qualityPreset)
     }
     
     func withUpdatedAdditionalVideoVolume(_ additionalVideoVolume: CGFloat?) -> MediaEditorValues {
-        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: additionalVideoVolume, nightTheme: self.nightTheme, drawing: self.drawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, qualityPreset: self.qualityPreset)
+        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: additionalVideoVolume, collage: self.collage, nightTheme: self.nightTheme, drawing: self.drawing, maskDrawing: self.maskDrawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, collageTrackSamples: self.collageTrackSamples, coverImageTimestamp: self.coverImageTimestamp, coverDimensions: self.coverDimensions, qualityPreset: self.qualityPreset)
     }
     
-    func withUpdatedVideoTrimRange(_ videoTrimRange: Range<Double>) -> MediaEditorValues {
-        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, nightTheme: self.nightTheme, drawing: self.drawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, qualityPreset: self.qualityPreset)
+    func withUpdatedCollage(_ collage: [VideoCollageItem]) -> MediaEditorValues {
+        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, collage: collage, nightTheme: self.nightTheme, drawing: self.drawing, maskDrawing: self.maskDrawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, collageTrackSamples: self.collageTrackSamples, coverImageTimestamp: self.coverImageTimestamp, coverDimensions: self.coverDimensions, qualityPreset: self.qualityPreset)
+    }
+    
+    public func withUpdatedVideoTrimRange(_ videoTrimRange: Range<Double>) -> MediaEditorValues {
+        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, collage: self.collage, nightTheme: self.nightTheme, drawing: self.drawing, maskDrawing: self.maskDrawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, collageTrackSamples: self.collageTrackSamples, coverImageTimestamp: self.coverImageTimestamp, coverDimensions: self.coverDimensions, qualityPreset: self.qualityPreset)
     }
     
     func withUpdatedDrawingAndEntities(drawing: UIImage?, entities: [CodableDrawingEntity]) -> MediaEditorValues {
-        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: self.videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, nightTheme: self.nightTheme, drawing: drawing, entities: entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, qualityPreset: self.qualityPreset)
+        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: self.videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, collage: self.collage, nightTheme: self.nightTheme, drawing: drawing, maskDrawing: self.maskDrawing, entities: entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, collageTrackSamples: self.collageTrackSamples, coverImageTimestamp: self.coverImageTimestamp, coverDimensions: self.coverDimensions, qualityPreset: self.qualityPreset)
+    }
+    
+    public func withUpdatedMaskDrawing(maskDrawing: UIImage?) -> MediaEditorValues {
+        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: self.videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, collage: self.collage, nightTheme: self.nightTheme, drawing: self.drawing, maskDrawing: maskDrawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, collageTrackSamples: self.collageTrackSamples, coverImageTimestamp: self.coverImageTimestamp, coverDimensions: self.coverDimensions, qualityPreset: self.qualityPreset)
     }
     
     func withUpdatedToolValues(_ toolValues: [EditorToolKey: Any]) -> MediaEditorValues {
-        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: self.videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, nightTheme: self.nightTheme, drawing: self.drawing, entities: self.entities, toolValues: toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, qualityPreset: self.qualityPreset)
+        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: self.videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, collage: self.collage, nightTheme: self.nightTheme, drawing: self.drawing, maskDrawing: self.maskDrawing, entities: self.entities, toolValues: toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, collageTrackSamples: self.collageTrackSamples, coverImageTimestamp: self.coverImageTimestamp, coverDimensions: self.coverDimensions, qualityPreset: self.qualityPreset)
     }
     
     func withUpdatedAudioTrack(_ audioTrack: MediaAudioTrack?) -> MediaEditorValues {
-        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: self.videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, nightTheme: self.nightTheme, drawing: self.drawing, entities: self.entities, toolValues: self.toolValues, audioTrack: audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, qualityPreset: self.qualityPreset)
+        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: self.videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, collage: self.collage, nightTheme: self.nightTheme, drawing: self.drawing, maskDrawing: self.maskDrawing, entities: self.entities, toolValues: self.toolValues, audioTrack: audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, collageTrackSamples: self.collageTrackSamples, coverImageTimestamp: self.coverImageTimestamp, coverDimensions: self.coverDimensions, qualityPreset: self.qualityPreset)
     }
     
     func withUpdatedAudioTrackTrimRange(_ audioTrackTrimRange: Range<Double>?) -> MediaEditorValues {
-        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, nightTheme: self.nightTheme, drawing: self.drawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, qualityPreset: self.qualityPreset)
+        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, collage: self.collage, nightTheme: self.nightTheme, drawing: self.drawing, maskDrawing: self.maskDrawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, collageTrackSamples: self.collageTrackSamples, coverImageTimestamp: self.coverImageTimestamp, coverDimensions: self.coverDimensions, qualityPreset: self.qualityPreset)
     }
     
     func withUpdatedAudioTrackOffset(_ audioTrackOffset: Double?) -> MediaEditorValues {
-        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, nightTheme: self.nightTheme, drawing: self.drawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, qualityPreset: self.qualityPreset)
+        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, collage: self.collage, nightTheme: self.nightTheme, drawing: self.drawing, maskDrawing: self.maskDrawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, collageTrackSamples: self.collageTrackSamples, coverImageTimestamp: self.coverImageTimestamp, coverDimensions: self.coverDimensions, qualityPreset: self.qualityPreset)
     }
     
     func withUpdatedAudioTrackVolume(_ audioTrackVolume: CGFloat?) -> MediaEditorValues {
-        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, nightTheme: self.nightTheme, drawing: self.drawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: audioTrackVolume, audioTrackSamples: self.audioTrackSamples, qualityPreset: self.qualityPreset)
+        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, collage: self.collage, nightTheme: self.nightTheme, drawing: self.drawing, maskDrawing: self.maskDrawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: audioTrackVolume, audioTrackSamples: self.audioTrackSamples, collageTrackSamples: self.collageTrackSamples, coverImageTimestamp: self.coverImageTimestamp, coverDimensions: self.coverDimensions, qualityPreset: self.qualityPreset)
     }
     
     func withUpdatedAudioTrackSamples(_ audioTrackSamples: MediaAudioTrackSamples?) -> MediaEditorValues {
-        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, nightTheme: self.nightTheme, drawing: self.drawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: audioTrackSamples, qualityPreset: self.qualityPreset)
+        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, collage: self.collage, nightTheme: self.nightTheme, drawing: self.drawing, maskDrawing: self.maskDrawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: audioTrackSamples, collageTrackSamples: self.collageTrackSamples, coverImageTimestamp: self.coverImageTimestamp, coverDimensions: self.coverDimensions, qualityPreset: self.qualityPreset)
+    }
+    
+    func withUpdatedCollageTrackSamples(_ collageTrackSamples: MediaAudioTrackSamples?) -> MediaEditorValues {
+        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, collage: self.collage, nightTheme: self.nightTheme, drawing: self.drawing, maskDrawing: self.maskDrawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, collageTrackSamples: collageTrackSamples, coverImageTimestamp: self.coverImageTimestamp, coverDimensions: self.coverDimensions, qualityPreset: self.qualityPreset)
     }
     
     func withUpdatedNightTheme(_ nightTheme: Bool) -> MediaEditorValues {
-        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, nightTheme: nightTheme, drawing: self.drawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, qualityPreset: self.qualityPreset)
+        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, collage: self.collage, nightTheme: nightTheme, drawing: self.drawing, maskDrawing: self.maskDrawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, collageTrackSamples: self.collageTrackSamples, coverImageTimestamp: self.coverImageTimestamp, coverDimensions: self.coverDimensions, qualityPreset: self.qualityPreset)
     }
     
     public func withUpdatedEntities(_ entities: [CodableDrawingEntity]) -> MediaEditorValues {
-        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, nightTheme: self.nightTheme, drawing: self.drawing, entities: entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, qualityPreset: self.qualityPreset)
+        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, collage: self.collage, nightTheme: self.nightTheme, drawing: self.drawing, maskDrawing: self.maskDrawing, entities: entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, collageTrackSamples: self.collageTrackSamples, coverImageTimestamp: self.coverImageTimestamp, coverDimensions: self.coverDimensions, qualityPreset: self.qualityPreset)
+    }
+    
+    public func withUpdatedCoverImageTimestamp(_ coverImageTimestamp: Double?) -> MediaEditorValues {
+        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, collage: self.collage, nightTheme: self.nightTheme, drawing: self.drawing, maskDrawing: self.maskDrawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, collageTrackSamples: self.collageTrackSamples, coverImageTimestamp: coverImageTimestamp, coverDimensions: self.coverDimensions, qualityPreset: self.qualityPreset)
+    }
+    
+    public func withUpdatedCoverDimensions(_ coverDimensions: CGSize?) -> MediaEditorValues {
+        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, collage: self.collage, nightTheme: self.nightTheme, drawing: self.drawing, maskDrawing: self.maskDrawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, collageTrackSamples: self.collageTrackSamples, coverImageTimestamp: self.coverImageTimestamp, coverDimensions: coverDimensions, qualityPreset: self.qualityPreset)
+    }
+    
+    public func withUpdatedQualityPreset(_ qualityPreset: MediaQualityPreset?) -> MediaEditorValues {
+        return MediaEditorValues(peerId: self.peerId, originalDimensions: self.originalDimensions, cropOffset: self.cropOffset, cropRect: self.cropRect, cropScale: self.cropScale, cropRotation: self.cropRotation, cropMirroring: self.cropMirroring, cropOrientation: self.cropOrientation, gradientColors: self.gradientColors, videoTrimRange: videoTrimRange, videoIsMuted: self.videoIsMuted, videoIsFullHd: self.videoIsFullHd, videoIsMirrored: self.videoIsMirrored, videoVolume: self.videoVolume, additionalVideoPath: self.additionalVideoPath, additionalVideoIsDual: self.additionalVideoIsDual, additionalVideoPosition: self.additionalVideoPosition, additionalVideoScale: self.additionalVideoScale, additionalVideoRotation: self.additionalVideoRotation, additionalVideoPositionChanges: self.additionalVideoPositionChanges, additionalVideoTrimRange: self.additionalVideoTrimRange, additionalVideoOffset: self.additionalVideoOffset, additionalVideoVolume: self.additionalVideoVolume, collage: self.collage, nightTheme: self.nightTheme, drawing: self.drawing, maskDrawing: self.maskDrawing, entities: self.entities, toolValues: self.toolValues, audioTrack: self.audioTrack, audioTrackTrimRange: self.audioTrackTrimRange, audioTrackOffset: self.audioTrackOffset, audioTrackVolume: self.audioTrackVolume, audioTrackSamples: self.audioTrackSamples, collageTrackSamples: self.collageTrackSamples, coverImageTimestamp: self.coverImageTimestamp, coverDimensions: self.coverDimensions, qualityPreset: qualityPreset)
     }
     
     public var resultDimensions: PixelDimensions {
@@ -756,6 +1009,114 @@ public final class MediaEditorValues: Codable, Equatable {
             return true
         }
         return false
+    }
+    
+    public var description: String {
+        var components: [String] = []
+        
+        components.append("originalDimensions: \(self.originalDimensions.width)x\(self.originalDimensions.height)")
+        
+        if self.cropOffset != .zero {
+            components.append("cropOffset: \(cropOffset)")
+        }
+        
+        if let cropRect = self.cropRect {
+            components.append("cropRect: \(cropRect)")
+        }
+        
+        if self.cropScale != 1.0 {
+            components.append("cropScale: \(self.cropScale)")
+        }
+        
+        if self.cropRotation != 0.0 {
+            components.append("cropRotation: \(self.cropRotation)")
+        }
+        
+        if self.cropMirroring {
+            components.append("cropMirroring: true")
+        }
+        
+        if let cropOrientation = self.cropOrientation {
+            components.append("cropOrientation: \(cropOrientation)")
+        }
+        
+        if let gradientColors = self.gradientColors, !gradientColors.isEmpty {
+            components.append("gradientColors: \(gradientColors.count) colors")
+        }
+        
+        if let videoTrimRange = self.videoTrimRange {
+            components.append("videoTrimRange: \(videoTrimRange.lowerBound) - \(videoTrimRange.upperBound)")
+        }
+        
+        if self.videoIsMuted {
+            components.append("videoIsMuted: true")
+        }
+        
+        if self.videoIsFullHd {
+            components.append("videoIsFullHd: true")
+        }
+        
+        if self.videoIsMirrored {
+            components.append("videoIsMirrored: true")
+        }
+        
+        if let videoVolume = self.videoVolume, videoVolume != 1.0 {
+            components.append("videoVolume: \(videoVolume)")
+        }
+        
+        if let additionalVideoPath = self.additionalVideoPath {
+            components.append("additionalVideo: \(additionalVideoPath)")
+        }
+        
+        if let position = self.additionalVideoPosition {
+            components.append("additionalVideoPosition: \(position)")
+        }
+        
+        if let scale = self.additionalVideoScale {
+            components.append("additionalVideoScale: \(scale)")
+        }
+        
+        if let rotation = self.additionalVideoRotation {
+            components.append("additionalVideoRotation: \(rotation)")
+        }
+        
+        if !self.additionalVideoPositionChanges.isEmpty {
+            components.append("additionalVideoPositionChanges: \(additionalVideoPositionChanges.count) changes")
+        }
+                
+        if !self.collage.isEmpty {
+            components.append("collage: \(collage.count) items")
+        }
+        
+        if self.nightTheme {
+            components.append("nightTheme: true")
+        }
+        
+        if self.drawing != nil {
+            components.append("drawing: true")
+        }
+        
+        if self.maskDrawing != nil {
+            components.append("maskDrawing: true")
+        }
+        
+        if !self.entities.isEmpty {
+            components.append("entities: \(self.entities.count) items")
+        }
+        
+        if !self.toolValues.isEmpty {
+            components.append("toolValues: \(self.toolValues.count) tools")
+        }
+        
+        if let audioTrack = self.audioTrack {
+            components.append("audioTrack: \(audioTrack.path)")
+        }
+        
+        if let qualityPreset = self.qualityPreset {
+            components.append("qualityPreset: \(qualityPreset)")
+        }
+        
+        return "MediaEditorValues(\(components.joined(separator: ", ")))"
     }
 }
 
@@ -1517,9 +1878,11 @@ func targetSize(cropSize: CGSize, rotateSideward: Bool = false) -> CGSize {
     return CGSize(width: renderWidth, height: renderHeight)
 }
 
-public func recommendedVideoExportConfiguration(values: MediaEditorValues, duration: Double, image: Bool = false, forceFullHd: Bool = false, frameRate: Float) -> MediaEditorVideoExport.Configuration {
+public func recommendedVideoExportConfiguration(values: MediaEditorValues, duration: Double, image: Bool = false, forceFullHd: Bool = false, frameRate: Float, isSticker: Bool = false, isAvatar: Bool = false) -> MediaEditorVideoExport.Configuration {
     let compressionProperties: [String: Any]
-    let codecType: AVVideoCodecType
+    let codecType: Any
+    
+    var values = values
     
     var videoBitrate: Int = 3700
     var audioBitrate: Int = 64
@@ -1527,7 +1890,17 @@ public func recommendedVideoExportConfiguration(values: MediaEditorValues, durat
     if image {
         videoBitrate = 5000
     } else {
-        if duration < 10 {
+        if isAvatar {
+            if duration <= 2.0 {
+                videoBitrate = 2400
+            } else if duration <= 5.0 {
+                videoBitrate = 2000
+            } else if duration <= 8.0 {
+                videoBitrate = 1500
+            } else {
+                videoBitrate = 1100
+            }
+        } else if duration < 10 {
             videoBitrate = 5800
         } else if duration < 20 {
             videoBitrate = 5500
@@ -1539,7 +1912,10 @@ public func recommendedVideoExportConfiguration(values: MediaEditorValues, durat
     let width: Int
     let height: Int
     
+    var frameRate = frameRate
+    
     var useHEVC = hasHEVCHardwareEncoder
+    var useVP9 = false
     if let qualityPreset = values.qualityPreset {
         let maxSize = CGSize(width: qualityPreset.maximumDimensions, height: qualityPreset.maximumDimensions)
         var resultSize = values.originalDimensions.cgSize
@@ -1558,7 +1934,19 @@ public func recommendedVideoExportConfiguration(values: MediaEditorValues, durat
         
         useHEVC = false
     } else {
-        if values.videoIsFullHd {
+        if isAvatar {
+            width = 800
+            height = 800
+            frameRate = 30
+            useHEVC = false
+            values = values.withUpdatedQualityPreset(.profile)
+        } else if isSticker {
+            width = 512
+            height = 512
+            useVP9 = true
+            frameRate = 30
+            values = values.withUpdatedQualityPreset(.sticker)
+        } else if values.videoIsFullHd {
             width = 1080
             height = 1920
         } else {
@@ -1567,7 +1955,10 @@ public func recommendedVideoExportConfiguration(values: MediaEditorValues, durat
         }
     }
     
-    if useHEVC {
+    if useVP9 {
+        codecType = "VP9"
+        compressionProperties = [:]
+    } else if useHEVC {
         codecType = AVVideoCodecType.hevc
         compressionProperties = [
             AVVideoAverageBitRateKey: videoBitrate * 1000,
@@ -1589,17 +1980,23 @@ public func recommendedVideoExportConfiguration(values: MediaEditorValues, durat
         AVVideoHeightKey: height
     ]
     
-    let audioSettings: [String: Any] = [
-        AVFormatIDKey: kAudioFormatMPEG4AAC,
-        AVSampleRateKey: 44100,
-        AVEncoderBitRateKey: audioBitrate * 1000,
-        AVNumberOfChannelsKey: audioNumberOfChannels
-    ]
+    let audioSettings: [String: Any]
+    if isSticker || isAvatar {
+        audioSettings = [:]
+    } else {
+        audioSettings = [
+            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVSampleRateKey: 44100,
+            AVEncoderBitRateKey: audioBitrate * 1000,
+            AVNumberOfChannelsKey: audioNumberOfChannels
+        ]
+    }
     
     return MediaEditorVideoExport.Configuration(
         videoSettings: videoSettings,
         audioSettings: audioSettings,
         values: values,
-        frameRate: frameRate
+        frameRate: frameRate,
+        preferredDuration: isSticker ? duration: nil
     )
 }

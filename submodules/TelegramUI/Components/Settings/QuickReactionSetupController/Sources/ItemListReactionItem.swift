@@ -331,13 +331,22 @@ public class ItemListReactionItemNode: ListViewItemNode, ItemListItemNode {
                         if let availableReactions = item.availableReactions {
                             for reaction in availableReactions.reactions {
                                 if reaction.value == item.reaction {
-                                    animationContent = .file(file: reaction.selectAnimation)
+                                    animationContent = .file(file: reaction.selectAnimation._parse())
                                     break
                                 }
                             }
                         }
                     case let .custom(fileId):
                         animationContent = .customEmoji(fileId: fileId)
+                    case .stars:
+                        if let availableReactions = item.availableReactions {
+                            for reaction in availableReactions.reactions {
+                                if reaction.value == item.reaction {
+                                    animationContent = .file(file: reaction.selectAnimation._parse())
+                                    break
+                                }
+                            }
+                        }
                     }
                     
                     
@@ -415,7 +424,7 @@ public class ItemListReactionItemNode: ListViewItemNode, ItemListItemNode {
         }
     }
     
-    override public func animateInsertion(_ currentTimestamp: Double, duration: Double, short: Bool) {
+    override public func animateInsertion(_ currentTimestamp: Double, duration: Double, options: ListViewItemAnimationOptions) {
         self.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.4)
     }
     

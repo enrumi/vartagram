@@ -29,9 +29,9 @@ public enum LocationBroadcastPanelSource {
 private func presentLiveLocationController(context: AccountContext, peerId: PeerId, controller: ViewController) {
     let presentImpl: (EngineMessage?) -> Void = { [weak controller] message in
         if let message = message, let strongController = controller {
-            let _ = context.sharedContext.openChatMessage(OpenChatMessageParams(context: context, chatLocation: nil, chatLocationContextHolder: nil, message: message._asMessage(), standalone: false, reverseMessageGalleryOrder: false, navigationController: strongController.navigationController as? NavigationController, modal: true, dismissInput: {
+            let _ = context.sharedContext.openChatMessage(OpenChatMessageParams(context: context, chatLocation: nil, chatFilterTag: nil, chatLocationContextHolder: nil, message: message._asMessage(), standalone: false, reverseMessageGalleryOrder: false, navigationController: strongController.navigationController as? NavigationController, modal: true, dismissInput: {
                 controller?.view.endEditing(true)
-            }, present: { c, a in
+            }, present: { c, a, _ in
                 controller?.present(c, in: .window(.root), with: a, blockInteraction: true)
             }, transitionNode: { _, _, _ in
                 return nil
@@ -39,6 +39,7 @@ private func presentLiveLocationController(context: AccountContext, peerId: Peer
             }, openUrl: { _ in
             }, openPeer: { peer, navigation in
             }, callPeer: { _, _ in
+            }, openConferenceCall: { _ in
             }, enqueueMessage: { message in
                 let _ = enqueueMessages(account: context.account, peerId: peerId, messages: [message]).start()
             }, sendSticker: nil, sendEmoji: nil, setupTemporaryHiddenMedia: { _, _, _ in
@@ -65,6 +66,8 @@ open class TelegramBaseController: ViewController, KeyShortcutResponder {
     public private(set) var accessoryPanelContainerHeight: CGFloat = 0.0
     
     public let mediaAccessoryPanelVisibility: MediaAccessoryPanelVisibility
+    public var tempHideAccessoryPanels: Bool = false
+    
     public let locationBroadcastPanelSource: LocationBroadcastPanelSource
     public let groupCallPanelSource: GroupCallPanelSource
     
@@ -258,10 +261,13 @@ open class TelegramBaseController: ViewController, KeyShortcutResponder {
             case let .peer(peerId):
                 let currentGroupCall: Signal<PresentationGroupCall?, NoError> = callManager.currentGroupCallSignal
                 |> distinctUntilChanged(isEqual: { lhs, rhs in
-                    return lhs?.internalId == rhs?.internalId
+                    return lhs == rhs
                 })
                 |> map { call -> PresentationGroupCall? in
-                    guard let call = call, call.peerId == peerId && call.account.peerId == context.account.peerId else {
+                    guard case let .group(call) = call else {
+                        return nil
+                    }
+                    guard call.peerId == peerId && call.account.peerId == context.account.peerId else {
                         return nil
                     }
                     return call
@@ -281,10 +287,7 @@ open class TelegramBaseController: ViewController, KeyShortcutResponder {
                         }
                     }
                     |> distinctUntilChanged(isEqual: { lhs, rhs in
-                        if lhs.0 != rhs.0 {
-                            return false
-                        }
-                        return true
+                        return lhs.0 == rhs.0
                     })
                     |> mapToSignal { activeCall, peer -> Signal<GroupCallPanelData?, NoError> in
                         guard let activeCall = activeCall else {
@@ -391,13 +394,14 @@ open class TelegramBaseController: ViewController, KeyShortcutResponder {
     private var suspendNavigationBarLayout: Bool = false
     private var suspendedNavigationBarLayout: ContainerViewLayout?
     private var additionalNavigationBarBackgroundHeight: CGFloat = 0.0
+    private var additionalNavigationBarCutout: CGSize?
 
     override open func updateNavigationBarLayout(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
         if self.suspendNavigationBarLayout {
             self.suspendedNavigationBarLayout = layout
             return
         }
-        self.applyNavigationBarLayout(layout, navigationLayout: self.navigationLayout(layout: layout), additionalBackgroundHeight: self.additionalNavigationBarBackgroundHeight, transition: transition)
+        self.applyNavigationBarLayout(layout, navigationLayout: self.navigationLayout(layout: layout), additionalBackgroundHeight: self.additionalNavigationBarBackgroundHeight, additionalCutout: self.additionalNavigationBarCutout, transition: transition)
     }
     
     override open func containerLayoutUpdated(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
@@ -408,13 +412,17 @@ open class TelegramBaseController: ViewController, KeyShortcutResponder {
         let navigationHeight = super.navigationLayout(layout: layout).navigationFrame.height - self.additionalNavigationBarHeight
         
         let mediaAccessoryPanelHidden: Bool
-        switch self.mediaAccessoryPanelVisibility {
-        case .always:
-            mediaAccessoryPanelHidden = false
-        case .none:
+        if self.tempHideAccessoryPanels {
             mediaAccessoryPanelHidden = true
-        case let .specific(size):
-            mediaAccessoryPanelHidden = size != layout.metrics.widthClass
+        } else {
+            switch self.mediaAccessoryPanelVisibility {
+            case .always:
+                mediaAccessoryPanelHidden = false
+            case .none:
+                mediaAccessoryPanelHidden = true
+            case let .specific(size):
+                mediaAccessoryPanelHidden = size != layout.metrics.widthClass
+            }
         }
         
         var additionalHeight: CGFloat = 0.0
@@ -447,7 +455,7 @@ open class TelegramBaseController: ViewController, KeyShortcutResponder {
             } else {
                 let presentationData = self.context.sharedContext.currentPresentationData.with { $0 }
                 groupCallAccessoryPanel = GroupCallNavigationAccessoryPanel(context: self.context, presentationData: presentationData, tapAction: { [weak self] in
-                    guard let strongSelf = self else {
+                    guard let strongSelf = self, let groupCallPanelData = strongSelf.groupCallPanelData else {
                         return
                     }
                     strongSelf.joinGroupCall(
@@ -455,6 +463,39 @@ open class TelegramBaseController: ViewController, KeyShortcutResponder {
                         invite: nil,
                         activeCall: EngineGroupCallDescription(id: groupCallPanelData.info.id, accessHash: groupCallPanelData.info.accessHash, title: groupCallPanelData.info.title, scheduleTimestamp: groupCallPanelData.info.scheduleTimestamp, subscribedToScheduled: groupCallPanelData.info.subscribedToScheduled, isStream: groupCallPanelData.info.isStream)
                     )
+                }, notifyScheduledTapAction: { [weak self] in
+                    guard let self, let groupCallPanelData = self.groupCallPanelData else {
+                        return
+                    }
+                    if groupCallPanelData.info.scheduleTimestamp != nil && !groupCallPanelData.info.subscribedToScheduled {
+                        let _ = self.context.engine.calls.toggleScheduledGroupCallSubscription(peerId: groupCallPanelData.peerId, reference: .id(id: groupCallPanelData.info.id, accessHash: groupCallPanelData.info.accessHash), subscribe: true).startStandalone()
+                        
+                        let controller = UndoOverlayController(
+                            presentationData: presentationData,
+                            content: .universal(
+                                animation: "anim_set_notification",
+                                scale: 0.06,
+                                colors: [
+                                    "Middle.Group 1.Fill 1": UIColor.white,
+                                    "Top.Group 1.Fill 1": UIColor.white,
+                                    "Bottom.Group 1.Fill 1": UIColor.white,
+                                    "EXAMPLE.Group 1.Fill 1": UIColor.white,
+                                    "Line.Group 1.Stroke 1": UIColor.white
+                                ],
+                                title: nil,
+                                text: presentationData.strings.Chat_ToastSubscribedToScheduledLiveStream_Text,
+                                customUndoText: nil,
+                                timeout: nil
+                            ),
+                            elevatedLayout: false,
+                            animateInAsReplacement: false,
+                            action: { _ in
+                                return true
+                            }
+                        )
+                        self.audioRateTooltipController = controller
+                        self.present(controller, in: .current)
+                    }
                 })
                 if let accessoryPanelContainer = self.accessoryPanelContainer {
                     accessoryPanelContainer.addSubnode(groupCallAccessoryPanel)
@@ -812,7 +853,8 @@ open class TelegramBaseController: ViewController, KeyShortcutResponder {
                     }
                     if let id = state.id as? PeerMessagesMediaPlaylistItemId, let playlistLocation = strongSelf.playlistLocation as? PeerMessagesPlaylistLocation {
                         if type == .music {
-                            if case .custom = playlistLocation {
+                            switch playlistLocation {
+                            case .custom, .savedMusic:
                                 let controllerContext: AccountContext
                                 if account.id == strongSelf.context.account.id {
                                     controllerContext = strongSelf.context
@@ -822,8 +864,8 @@ open class TelegramBaseController: ViewController, KeyShortcutResponder {
                                 let controller = strongSelf.context.sharedContext.makeOverlayAudioPlayerController(context: controllerContext, chatLocation: .peer(id: id.messageId.peerId), type: type, initialMessageId: id.messageId, initialOrder: order, playlistLocation: playlistLocation, parentNavigationController: strongSelf.navigationController as? NavigationController)
                                 strongSelf.displayNode.view.window?.endEditing(true)
                                 strongSelf.present(controller, in: .window(.root))
-                            } else if case let .messages(chatLocation, _, _) = playlistLocation {
-                                let signal = strongSelf.context.sharedContext.messageFromPreloadedChatHistoryViewForLocation(id: id.messageId, location: ChatHistoryLocationInput(content: .InitialSearch(subject: MessageHistoryInitialSearchSubject(location: .id(id.messageId), quote: nil), count: 60, highlight: true), id: 0), context: strongSelf.context, chatLocation: chatLocation, subject: nil, chatLocationContextHolder: Atomic<ChatLocationContextHolder?>(value: nil), tagMask: MessageTags.music)
+                            case let .messages(chatLocation, _, _):
+                                let signal = strongSelf.context.sharedContext.messageFromPreloadedChatHistoryViewForLocation(id: id.messageId, location: ChatHistoryLocationInput(content: .InitialSearch(subject: MessageHistoryInitialSearchSubject(location: .id(id.messageId)), count: 60, highlight: true, setupReply: false), id: 0), context: strongSelf.context, chatLocation: chatLocation, subject: nil, chatLocationContextHolder: Atomic<ChatLocationContextHolder?>(value: nil), tag: .tag(MessageTags.music))
                                 
                                 var cancelImpl: (() -> Void)?
                                 let presentationData = strongSelf.context.sharedContext.currentPresentationData.with { $0 }
@@ -874,6 +916,8 @@ open class TelegramBaseController: ViewController, KeyShortcutResponder {
                                 cancelImpl = {
                                     self?.playlistPreloadDisposable?.dispose()
                                 }
+                            default:
+                                break
                             }
                         } else {
                             strongSelf.context.sharedContext.navigateToChat(accountId: strongSelf.context.account.id, peerId: id.messageId.peerId, messageId: id.messageId)
@@ -929,7 +973,7 @@ open class TelegramBaseController: ViewController, KeyShortcutResponder {
         self.suspendNavigationBarLayout = false
         if let suspendedNavigationBarLayout = self.suspendedNavigationBarLayout {
             self.suspendedNavigationBarLayout = suspendedNavigationBarLayout
-            self.applyNavigationBarLayout(suspendedNavigationBarLayout, navigationLayout: self.navigationLayout(layout: layout), additionalBackgroundHeight: self.additionalNavigationBarBackgroundHeight, transition: transition)
+            self.applyNavigationBarLayout(suspendedNavigationBarLayout, navigationLayout: self.navigationLayout(layout: layout), additionalBackgroundHeight: self.additionalNavigationBarBackgroundHeight, additionalCutout: self.additionalNavigationBarCutout, transition: transition)
         }
         
         self.accessoryPanelContainerHeight = additionalHeight
@@ -1024,5 +1068,53 @@ open class TelegramBaseController: ViewController, KeyShortcutResponder {
                 }
             })
         }, activeCall: activeCall)
+    }
+    
+    open func joinConferenceCall(message: EngineMessage) {
+        var action: TelegramMediaAction?
+        for media in message.media {
+            if let media = media as? TelegramMediaAction {
+                action = media
+                break
+            }
+        }
+        guard case let .conferenceCall(conferenceCall) = action?.action else {
+            return
+        }
+        
+        if let currentGroupCallController = self.context.sharedContext.currentGroupCallController as? VoiceChatController, case let .group(groupCall) = currentGroupCallController.call, let currentCallId = groupCall.callId, currentCallId == conferenceCall.callId {
+            self.context.sharedContext.navigateToCurrentCall()
+            return
+        }
+        
+        let signal = self.context.engine.peers.joinCallInvitationInformation(messageId: message.id)
+        let _ = (signal
+        |> deliverOnMainQueue).startStandalone(next: { [weak self] resolvedCallLink in
+            guard let self else {
+                return
+            }
+            
+            let _ = (self.context.engine.calls.getGroupCallPersistentSettings(callId: resolvedCallLink.id)
+            |> deliverOnMainQueue).startStandalone(next: { [weak self] value in
+                guard let self else {
+                    return
+                }
+                
+                let value: PresentationGroupCallPersistentSettings = value?.get(PresentationGroupCallPersistentSettings.self) ?? PresentationGroupCallPersistentSettings.default
+                
+                self.context.joinConferenceCall(call: resolvedCallLink, isVideo: conferenceCall.flags.contains(.isVideo), unmuteByDefault: value.isMicrophoneEnabledByDefault)
+            })
+        }, error: { [weak self] error in
+            guard let self else {
+                return
+            }
+            switch error {
+            case .doesNotExist:
+                self.context.sharedContext.openCreateGroupCallUI(context: self.context, peerIds: conferenceCall.otherParticipants, parentController: self)
+            default:
+                let presentationData = self.context.sharedContext.currentPresentationData.with { $0 }
+                self.present(textAlertController(context: self.context, title: nil, text: presentationData.strings.Login_UnknownError, actions: [TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_OK, action: {})]), in: .window(.root))
+            }
+        })
     }
 }

@@ -1,5 +1,9 @@
 import Foundation
+#if !os(macOS)
 import UIKit
+#else
+import AppKit
+#endif
 import SwiftSignalKit
 import Postbox
 import TelegramCore
@@ -11,8 +15,7 @@ public func preloadVideoResource(postbox: Postbox, userLocation: MediaResourceUs
         let disposable = MetaDisposable()
         queue.async {
             let maximumFetchSize = 2 * 1024 * 1024 + 128 * 1024
-            //let maximumFetchSize = 128
-            let sourceImpl = FFMpegMediaFrameSource(queue: queue, postbox: postbox, userLocation: userLocation, userContentType: userContentType, resourceReference: resourceReference, tempFilePath: nil, streamable: true, isSeekable: true, video: true, preferSoftwareDecoding: false, fetchAutomatically: true, maximumFetchSize: maximumFetchSize)
+            let sourceImpl = FFMpegMediaFrameSource(queue: queue, postbox: postbox, userLocation: userLocation, userContentType: userContentType, resourceReference: resourceReference, tempFilePath: nil, limitedFileRange: nil, streamable: true, isSeekable: true, video: true, preferSoftwareDecoding: false, fetchAutomatically: true, maximumFetchSize: maximumFetchSize)
             let source = QueueLocalObject(queue: queue, generate: {
                 return sourceImpl
             })

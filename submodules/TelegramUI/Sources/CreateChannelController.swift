@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import Display
+import SSignalKit
 import SwiftSignalKit
 import Postbox
 import TelegramCore
@@ -19,6 +20,8 @@ import MapResourceToAvatarSizes
 import LegacyMediaPickerUI
 import TextFormat
 import AvatarEditorScreen
+import OldChannelsController
+import AVFoundation
 
 private struct CreateChannelArguments {
     let context: AccountContext
@@ -191,7 +194,7 @@ private enum CreateChannelEntry: ItemListNodeEntry {
         let arguments = arguments as! CreateChannelArguments
         switch self {
             case let .channelInfo(_, _, dateTimeFormat, peer, state, avatar):
-                return ItemListAvatarAndNameInfoItem(accountContext: arguments.context, presentationData: presentationData, dateTimeFormat: dateTimeFormat, mode: .editSettings, peer: peer.flatMap(EnginePeer.init), presence: nil, memberCount: nil, state: state, sectionId: ItemListSectionId(self.section), style: .blocks(withTopInset: false, withExtendedBottomInset: false), editingNameUpdated: { editingName in
+                return ItemListAvatarAndNameInfoItem(itemContext: .accountContext(arguments.context), presentationData: presentationData, dateTimeFormat: dateTimeFormat, mode: .editSettings, peer: peer.flatMap(EnginePeer.init), presence: nil, memberCount: nil, state: state, sectionId: ItemListSectionId(self.section), style: .blocks(withTopInset: false, withExtendedBottomInset: false), editingNameUpdated: { editingName in
                     arguments.updateEditingName(editingName)
                 }, editingNameCompleted: {
                     arguments.focusOnDescription()
@@ -641,15 +644,15 @@ public func createChannelController(context: AccountContext, mode: CreateChannel
                 }))
                 presentControllerImpl?(controller, ViewControllerPresentationArguments(presentationAnimation: .modalSheet))
             }
-            mixin.requestAvatarEditor = { imageCompletion, videoCompletion in
-                guard let imageCompletion, let videoCompletion else {
-                    return
-                }
-                let controller = AvatarEditorScreen(context: context, inputData: keyboardInputData.get(), peerType: .channel, markup: nil)
-                controller.imageCompletion = imageCompletion
-                controller.videoCompletion = videoCompletion
-                pushControllerImpl?(controller)
-            }
+//            mixin.requestAvatarEditor = { imageCompletion, videoCompletion in
+//                guard let imageCompletion, let videoCompletion else {
+//                    return
+//                }
+//                let controller = AvatarEditorScreen(context: context, inputData: keyboardInputData.get(), peerType: .channel, markup: nil)
+//                controller.imageCompletion = imageCompletion
+//                controller.videoCompletion = videoCompletion
+//                pushControllerImpl?(controller)
+//            }
             mixin.didFinishWithImage = { image in
                 if let image = image {
                     completedChannelPhotoImpl(image)

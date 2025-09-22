@@ -49,7 +49,7 @@ func resolveChatListMessageTagSummaryResultCalculation(postbox: PostboxImpl, pee
     guard let calculation = calculation else {
         return nil
     }
-    let addSummary = postbox.messageHistoryTagsSummaryTable.get(MessageHistoryTagsSummaryKey(tag: calculation.addCount.tag, peerId: peerId, threadId: threadId, namespace: calculation.addCount.namespace))
+    let addSummary = postbox.messageHistoryTagsSummaryTable.get(MessageHistoryTagsSummaryKey(tag: calculation.addCount.tag, peerId: peerId, threadId: threadId, namespace: calculation.addCount.namespace, customTag: nil))
     let subtractSummary = postbox.pendingMessageActionsMetadataTable.getCount(.peerNamespaceAction(peerId, calculation.subtractCount.namespace, calculation.subtractCount.type))
     let count = (addSummary?.count ?? 0) - subtractSummary
     return count > 0
@@ -60,13 +60,13 @@ public final class SeedConfiguration {
     public let initializeChatListWithHole: (topLevel: ChatListHole?, groups: ChatListHole?)
     public let messageHoles: [PeerId.Namespace: [MessageId.Namespace: Set<MessageTags>]]
     public let upgradedMessageHoles: [PeerId.Namespace: [MessageId.Namespace: Set<MessageTags>]]
-    public let messageThreadHoles: [PeerId.Namespace: [MessageId.Namespace]]
+    public let messageThreadHoles: (PeerId.Namespace, Int64?) -> [MessageId.Namespace]?
     public let messageTagsWithSummary: MessageTags
     public let messageTagsWithThreadSummary: MessageTags
     public let existingGlobalMessageTags: GlobalMessageTags
     public let peerNamespacesRequiringMessageTextIndex: [PeerId.Namespace]
     public let peerSummaryCounterTags: (Peer, Bool) -> PeerSummaryCounterTags
-    public let peerSummaryIsThreadBased: (Peer) -> Bool
+    public let peerSummaryIsThreadBased: (Peer, Peer?) -> (value: Bool, threadsArePeers: Bool)
     public let additionalChatListIndexNamespace: MessageId.Namespace?
     public let messageNamespacesRequiringGroupStatsValidation: Set<MessageId.Namespace>
     public let defaultMessageNamespaceReadStates: [MessageId.Namespace: PeerReadState]
@@ -77,8 +77,11 @@ public final class SeedConfiguration {
     public let decodeMessageThreadInfo: (CodableEntry) -> Message.AssociatedThreadInfo?
     public let decodeAutoremoveTimeout: (CachedPeerData) -> Int32?
     public let decodeDisplayPeerAsRegularChat: (CachedPeerData) -> Bool
+    public let decodeAssociatedChatListPeerId: (CachedPeerData) -> PeerId?
     public let isPeerUpgradeMessage: (Message) -> Bool
     public let automaticThreadIndexInfo: (PeerId, Int64) -> StoredMessageHistoryThreadInfo?
+    public let customTagsFromAttributes: ([MessageAttribute]) -> [MemoryBuffer]
+    public let displaySavedMessagesAsTopicListPreferencesKey: ValueBoxKey
     
     public init(
         globalMessageIdsPeerIdNamespaces: Set<GlobalMessageIdsNamespace>,
@@ -88,14 +91,14 @@ public final class SeedConfiguration {
         ),
         messageHoles: [PeerId.Namespace: [MessageId.Namespace: Set<MessageTags>]],
         upgradedMessageHoles: [PeerId.Namespace: [MessageId.Namespace: Set<MessageTags>]],
-        messageThreadHoles: [PeerId.Namespace: [MessageId.Namespace]],
+        messageThreadHoles: @escaping (PeerId.Namespace, Int64?) -> [MessageId.Namespace]?,
         existingMessageTags: MessageTags,
         messageTagsWithSummary: MessageTags,
         messageTagsWithThreadSummary: MessageTags,
         existingGlobalMessageTags: GlobalMessageTags,
         peerNamespacesRequiringMessageTextIndex: [PeerId.Namespace],
         peerSummaryCounterTags: @escaping (Peer, Bool) -> PeerSummaryCounterTags,
-        peerSummaryIsThreadBased: @escaping (Peer) -> Bool,
+        peerSummaryIsThreadBased: @escaping (Peer, Peer?) -> (value: Bool, threadsArePeers: Bool),
         additionalChatListIndexNamespace: MessageId.Namespace?,
         messageNamespacesRequiringGroupStatsValidation: Set<MessageId.Namespace>,
         defaultMessageNamespaceReadStates: [MessageId.Namespace: PeerReadState],
@@ -106,8 +109,11 @@ public final class SeedConfiguration {
         decodeMessageThreadInfo: @escaping (CodableEntry) -> Message.AssociatedThreadInfo?,
         decodeAutoremoveTimeout: @escaping (CachedPeerData) -> Int32?,
         decodeDisplayPeerAsRegularChat: @escaping (CachedPeerData) -> Bool,
+        decodeAssociatedChatListPeerId: @escaping (CachedPeerData) -> PeerId?,
         isPeerUpgradeMessage: @escaping (Message) -> Bool,
-        automaticThreadIndexInfo: @escaping (PeerId, Int64) -> StoredMessageHistoryThreadInfo?
+        automaticThreadIndexInfo: @escaping (PeerId, Int64) -> StoredMessageHistoryThreadInfo?,
+        customTagsFromAttributes: @escaping ([MessageAttribute]) -> [MemoryBuffer],
+        displaySavedMessagesAsTopicListPreferencesKey: ValueBoxKey
     ) {
         self.globalMessageIdsPeerIdNamespaces = globalMessageIdsPeerIdNamespaces
         self.initializeChatListWithHole = initializeChatListWithHole
@@ -130,7 +136,10 @@ public final class SeedConfiguration {
         self.decodeMessageThreadInfo = decodeMessageThreadInfo
         self.decodeAutoremoveTimeout = decodeAutoremoveTimeout
         self.decodeDisplayPeerAsRegularChat = decodeDisplayPeerAsRegularChat
+        self.decodeAssociatedChatListPeerId = decodeAssociatedChatListPeerId
         self.isPeerUpgradeMessage = isPeerUpgradeMessage
         self.automaticThreadIndexInfo = automaticThreadIndexInfo
+        self.customTagsFromAttributes = customTagsFromAttributes
+        self.displaySavedMessagesAsTopicListPreferencesKey = displaySavedMessagesAsTopicListPreferencesKey
     }
 }

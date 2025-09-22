@@ -254,7 +254,7 @@ public final class SecretMediaPreviewController: ViewController {
         }, controller: { [weak self] in
             return self
         })
-        self.displayNode = SecretMediaPreviewControllerNode(controllerInteraction: controllerInteraction)
+        self.displayNode = SecretMediaPreviewControllerNode(context: self.context, controllerInteraction: controllerInteraction)
         self.displayNodeDidLoad()
         
         self.controllerNode.statusPressed = { [weak self] _ in
@@ -300,7 +300,7 @@ public final class SecretMediaPreviewController: ViewController {
             }
         }
         
-        self.controllerNode.completeCustomDismiss = { [weak self] in
+        self.controllerNode.completeCustomDismiss = { [weak self] _ in
             self?._hiddenMedia.set(.single(nil))
             self?.presentingViewController?.dismiss(animated: false, completion: nil)
         }
@@ -525,7 +525,8 @@ public final class SecretMediaPreviewController: ViewController {
                     }
                 }
                                 
-                guard let item = galleryItemForEntry(context: self.context, presentationData: self.presentationData, entry: MessageHistoryEntry(message: message, isRead: false, location: nil, monthLocation: nil, attributes: MutableMessageHistoryEntryAttributes(authorIsContact: false)), streamVideos: false, hideControls: true, isSecret: true, playbackRate: { nil }, peerIsCopyProtected: true, tempFilePath: tempFilePath, playbackCompleted: { [weak self] in
+                let entry = GalleryEntry(entry: MessageHistoryEntry(message: message, isRead: false, location: nil, monthLocation: nil, attributes: MutableMessageHistoryEntryAttributes(authorIsContact: false)))
+                guard let item = galleryItemForEntry(context: self.context, presentationData: self.presentationData, entry: entry, streamVideos: false, hideControls: true, isSecret: true, playbackRate: { nil }, peerIsCopyProtected: true, tempFilePath: tempFilePath, playbackCompleted: { [weak self] in
                     if let self {
                         if self.currentNodeMessageIsViewOnce || (duration < 30.0 && !self.currentMessageIsDismissed) {
                             if let node = self.controllerNode.pager.centralItemNode() as? UniversalVideoGalleryItemNode {

@@ -5,6 +5,7 @@ import AccountContext
 import InstantPageUI
 import InstantPageCache
 import UrlHandling
+import TelegramUIPreferences
 
 func faqSearchableItems(context: AccountContext, resolvedUrl: Signal<ResolvedUrl?, NoError>, suggestAccountDeletion: Bool) -> Signal<[SettingsSearchableItem], NoError> {
     let strings = context.sharedContext.currentPresentationData.with { $0 }.strings
@@ -13,7 +14,7 @@ func faqSearchableItems(context: AccountContext, resolvedUrl: Signal<ResolvedUrl
         var results: [SettingsSearchableItem] = []
         var nextIndex: Int32 = 2
         if let resolvedUrl = resolvedUrl, case let .instantView(webPage, _) = resolvedUrl {
-            if case let .Loaded(content) = webPage.content, let instantPage = content.instantPage {
+            if case let .Loaded(content) = webPage.content, let instantPage = content.instantPage?._parse() {
                 var processingQuestions = false
                 var currentSection: String?
                 outer: for block in instantPage.blocks {
@@ -45,8 +46,9 @@ func faqSearchableItems(context: AccountContext, resolvedUrl: Signal<ResolvedUrl
                                             } else {
                                                 nextIndex += 1
                                             }
-                                            let item = SettingsSearchableItem(id: .faq(index), title: text.plainText, alternate: [], icon: .faq, breadcrumbs: [strings.SettingsSearch_FAQ, currentSection], present: { context, _, present in
-                                                present(.push, InstantPageController(context: context, webPage: webPage, sourceLocation: InstantPageSourceLocation(userLocation: .other, peerType: .channel), anchor: anchor))
+                                            let item = SettingsSearchableItem(id: .faq(index), title: text.plainText, alternate: [], icon: .faq, breadcrumbs: [strings.SettingsSearch_FAQ, currentSection], present: { context, _, present in          
+                                                let controller = context.sharedContext.makeInstantPageController(context: context, webPage: webPage, anchor: anchor, sourceLocation: InstantPageSourceLocation(userLocation: .other, peerType: .channel))
+                                                present(.push, controller)
                                             })
                                             if index == 1 {
                                                 results.insert(item, at: 0)

@@ -48,49 +48,61 @@ private let selectionSource = "var css = '*{-webkit-touch-callout:none;} :not(in
         " style.appendChild(document.createTextNode(css)); head.appendChild(style);"
 
 private let videoSource = """
-function disableWebkitEnterFullscreen(videoElement) {
+document.addEventListener('DOMContentLoaded', () => {
+function tgBrowserDisableWebkitEnterFullscreen(videoElement) {
   if (videoElement && videoElement.webkitEnterFullscreen) {
-    Object.defineProperty(videoElement, 'webkitEnterFullscreen', {
-      value: undefined
-    });
+    videoElement.setAttribute('playsinline', '');
   }
 }
 
-function disableFullscreenOnExistingVideos() {
-  document.querySelectorAll('video').forEach(disableWebkitEnterFullscreen);
+function tgBrowserDisableFullscreenOnExistingVideos() {
+  document.querySelectorAll('video').forEach(tgBrowserDisableWebkitEnterFullscreen);
 }
 
-function handleMutations(mutations) {
+function tgBrowserHandleMutations(mutations) {
   mutations.forEach((mutation) => {
     if (mutation.addedNodes && mutation.addedNodes.length > 0) {
       mutation.addedNodes.forEach((newNode) => {
         if (newNode.tagName === 'VIDEO') {
-          disableWebkitEnterFullscreen(newNode);
+          tgBrowserDisableWebkitEnterFullscreen(newNode);
         }
         if (newNode.querySelectorAll) {
-          newNode.querySelectorAll('video').forEach(disableWebkitEnterFullscreen);
+          newNode.querySelectorAll('video').forEach(tgBrowserDisableWebkitEnterFullscreen);
         }
       });
     }
   });
 }
 
-disableFullscreenOnExistingVideos();
+tgBrowserDisableFullscreenOnExistingVideos();
 
-const observer = new MutationObserver(handleMutations);
+const _tgbrowser_observer = new MutationObserver(tgBrowserHandleMutations);
 
-observer.observe(document.body, {
+_tgbrowser_observer.observe(document.body, {
   childList: true,
   subtree: true
 });
 
-function disconnectObserver() {
-  observer.disconnect();
+function tgBrowserDisconnectObserver() {
+  _tgbrowser_observer.disconnect();
 }
+});
 """
 
 final class WebAppWebView: WKWebView {
     var handleScriptMessage: (WKScriptMessage) -> Void = { _ in }
+
+    var customInsets: UIEdgeInsets = .zero {
+        didSet {
+            if self.customInsets != oldValue {
+                self.setNeedsLayout()
+            }
+        }
+    }
+        
+    override var safeAreaInsets: UIEdgeInsets {
+        return UIEdgeInsets(top: self.customInsets.top, left: self.customInsets.left, bottom: self.customInsets.bottom, right: self.customInsets.right)
+    }
     
     init(account: Account) {
         let configuration = WKWebViewConfiguration()
@@ -139,9 +151,9 @@ final class WebAppWebView: WKWebView {
         configuration.allowsInlineMediaPlayback = true
         configuration.allowsPictureInPictureMediaPlayback = false
         if #available(iOS 10.0, *) {
-            configuration.mediaTypesRequiringUserActionForPlayback = .audio
+            configuration.mediaTypesRequiringUserActionForPlayback = []
         } else {
-            configuration.mediaPlaybackRequiresUserAction = true
+            configuration.mediaPlaybackRequiresUserAction = false
         }
         
         super.init(frame: CGRect(), configuration: configuration)
@@ -175,6 +187,10 @@ final class WebAppWebView: WKWebView {
         fatalError("init(coder:) has not been implemented")
     }
     
+    deinit {
+        print()
+    }
+    
     override func didMoveToSuperview() {
         super.didMoveToSuperview()
         
@@ -194,6 +210,22 @@ final class WebAppWebView: WKWebView {
         }
     }
     
+    func hideScrollIndicators() {
+        var hiddenViews: [UIView] = []
+        for view in self.scrollView.subviews.reversed() {
+            let minSize = min(view.frame.width, view.frame.height)
+            if minSize < 4.0 {
+                view.isHidden = true
+                hiddenViews.append(view)
+            }
+        }
+        Queue.mainQueue().after(2.0) {
+            for view in hiddenViews {
+                view.isHidden = false
+            }
+        }
+    }
+    
     func sendEvent(name: String, data: String?) {
         let script = "window.TelegramGameProxy.receiveEvent(\"\(name)\", \(data ?? "null"))"
         self.evaluateJavaScript(script, completionHandler: { _, _ in
@@ -201,8 +233,11 @@ final class WebAppWebView: WKWebView {
     }
         
     func updateMetrics(height: CGFloat, isExpanded: Bool, isStable: Bool, transition: ContainedViewLayoutTransition) {
-        let data = "{height:\(height), is_expanded:\(isExpanded ? "true" : "false"), is_state_stable:\(isStable ? "true" : "false")}"
-        self.sendEvent(name: "viewport_changed", data: data)
+        let viewportData = "{height:\(height), is_expanded:\(isExpanded ? "true" : "false"), is_state_stable:\(isStable ? "true" : "false")}"
+        self.sendEvent(name: "viewport_changed", data: viewportData)
+        
+        let safeInsetsData = "{top:\(self.customInsets.top), bottom:\(self.customInsets.bottom), left:\(self.customInsets.left), right:\(self.customInsets.right)}"
+        self.sendEvent(name: "safe_area_changed", data: safeInsetsData)
     }
     
     var lastTouchTimestamp: Double?
@@ -214,7 +249,7 @@ final class WebAppWebView: WKWebView {
             if let result = result as? CGFloat {
                 Queue.mainQueue().async {
                     let convertedY = result - self.scrollView.contentOffset.y
-                    let viewportHeight = self.frame.height - (layout.inputHeight ?? 0.0) + 26.0
+                    let viewportHeight = self.frame.height
                     if convertedY < 0.0 || (convertedY + 44.0) > viewportHeight {
                         let targetOffset: CGFloat
                         if convertedY < 0.0 {

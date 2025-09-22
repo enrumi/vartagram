@@ -1,6 +1,6 @@
 import Foundation
 
-public struct MediaId: Hashable, PostboxCoding, CustomStringConvertible, Codable {
+public struct MediaId: Hashable, Comparable, PostboxCoding, CustomStringConvertible, Codable {
     public typealias Namespace = Int32
     public typealias Id = Int64
     
@@ -37,6 +37,14 @@ public struct MediaId: Hashable, PostboxCoding, CustomStringConvertible, Codable
     public func encode(_ encoder: PostboxEncoder) {
         encoder.encodeInt32(self.namespace, forKey: "n")
         encoder.encodeInt64(self.id, forKey: "i")
+    }
+    
+    public static func <(lhs: MediaId, rhs: MediaId) -> Bool {
+        if lhs.namespace != rhs.namespace {
+            return lhs.namespace < rhs.namespace
+        } else {
+            return lhs.id < rhs.id
+        }
     }
     
     public func encodeToBuffer(_ buffer: WriteBuffer) {
@@ -95,6 +103,18 @@ public func areMediaArraysEqual(_ lhs: [Media], _ rhs: [Media]) -> Bool {
     }
     for i in 0 ..< lhs.count {
         if !lhs[i].isEqual(to: rhs[i]) {
+            return false
+        }
+    }
+    return true
+}
+
+public func areMediaArraysSemanticallyEqual(_ lhs: [Media], _ rhs: [Media]) -> Bool {
+    if lhs.count != rhs.count {
+        return false
+    }
+    for i in 0 ..< lhs.count {
+        if !lhs[i].isSemanticallyEqual(to: rhs[i]) {
             return false
         }
     }

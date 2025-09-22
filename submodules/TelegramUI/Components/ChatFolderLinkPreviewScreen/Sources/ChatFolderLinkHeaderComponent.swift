@@ -6,6 +6,8 @@ import ComponentFlow
 import AccountContext
 import MultilineTextComponent
 import TelegramPresentationData
+import TelegramCore
+import MultilineTextWithEntitiesComponent
 
 final class BadgeComponent: Component {
     let fillColor: UIColor
@@ -45,7 +47,7 @@ final class BadgeComponent: Component {
             fatalError("init(coder:) has not been implemented")
         }
         
-        func update(component: BadgeComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+        func update(component: BadgeComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
             let height: CGFloat = 20.0
             let contentInset: CGFloat = 10.0
             
@@ -77,23 +79,26 @@ final class BadgeComponent: Component {
         return View(frame: CGRect())
     }
     
-    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
 }
 
 final class ChatFolderLinkHeaderComponent: Component {
+    let context: AccountContext
     let theme: PresentationTheme
     let strings: PresentationStrings
-    let title: String
+    let title: ChatFolderTitle
     let badge: String?
     
     init(
+        context: AccountContext,
         theme: PresentationTheme,
         strings: PresentationStrings,
-        title: String,
+        title: ChatFolderTitle,
         badge: String?
     ) {
+        self.context = context
         self.theme = theme
         self.strings = strings
         self.title = title
@@ -141,7 +146,7 @@ final class ChatFolderLinkHeaderComponent: Component {
             fatalError("init(coder:) has not been implemented")
         }
         
-        func update(component: ChatFolderLinkHeaderComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+        func update(component: ChatFolderLinkHeaderComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
             let themeUpdated = self.component?.theme !== component.theme
             
             self.component = component
@@ -214,7 +219,14 @@ final class ChatFolderLinkHeaderComponent: Component {
             
             let titleSize = self.title.update(
                 transition: .immediate,
-                component: AnyComponent(Text(text: component.title, font: Font.semibold(17.0), color: component.theme.list.itemAccentColor)),
+                component: AnyComponent(MultilineTextWithEntitiesComponent(
+                    context: component.context,
+                    animationCache: component.context.animationCache,
+                    animationRenderer: component.context.animationRenderer,
+                    placeholderColor: component.theme.list.itemAccentColor.withMultipliedAlpha(0.1),
+                    text: .plain(component.title.attributedString(font: Font.semibold(17.0), textColor: component.theme.list.itemAccentColor)),
+                    manualVisibilityControl: false
+                )),
                 environment: {},
                 containerSize: CGSize(width: 200.0, height: 100.0)
             )
@@ -317,7 +329,7 @@ final class ChatFolderLinkHeaderComponent: Component {
         return View(frame: CGRect())
     }
     
-    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
 }

@@ -70,9 +70,8 @@ class IntentHandler: INExtension {
     }
 }
 
-@available(iOSApplicationExtension 10.0, iOS 10.0, *)
 @objc(IntentHandler)
-class DefaultIntentHandler: INExtension, INSendMessageIntentHandling, INSearchForMessagesIntentHandling, INSetMessageAttributeIntentHandling, INStartAudioCallIntentHandling, INSearchCallHistoryIntentHandling {
+class DefaultIntentHandler: INExtension, INSendMessageIntentHandling, INSearchForMessagesIntentHandling, INSetMessageAttributeIntentHandling, INStartCallIntentHandling, INSearchCallHistoryIntentHandling {
     private let accountPromise = Promise<Account?>()
     private let allAccounts = Promise<[(AccountRecordId, PeerId, Bool)]>()
     
@@ -86,7 +85,7 @@ class DefaultIntentHandler: INExtension, INSendMessageIntentHandling, INSearchFo
     private var appGroupUrl: URL?
     
     private let ptgSecretPasscodes = Promise<PtgSecretPasscodes>()
-    
+
     override init() {
         super.init()
         
@@ -136,12 +135,12 @@ class DefaultIntentHandler: INExtension, INSendMessageIntentHandling, INSearchFo
             return PtgSecretPasscodes(transaction).withCheckedTimeoutUsingLockStateFile(rootPath: rootPath)
         }
         self.ptgSecretPasscodes.set(ptgSecretPasscodes)
-        
+
         let excludeAccountIds = ptgSecretPasscodes
         |> map { ptgSecretPasscodes in
             return ptgSecretPasscodes.allHidableAccountIds()
         }
-        
+
         self.allAccounts.set(accountManager.accountRecords(excludeAccountIds: excludeAccountIds)
         |> take(1)
         |> map { view -> [(AccountRecordId, PeerId, Bool)] in
@@ -186,12 +185,12 @@ class DefaultIntentHandler: INExtension, INSendMessageIntentHandling, INSearchFo
         |> take(1)
         |> mapToSignal { ptgSecretPasscodes in
             let allHidableAccountIds = ptgSecretPasscodes.allHidableAccountIds()
-            
+
             let account: Signal<Account?, NoError>
             if let accountCache = accountCache, !allHidableAccountIds.contains(accountCache.id) {
                 account = .single(accountCache)
             } else {
-                account = currentAccount(allocateIfNotExists: false, networkArguments: NetworkInitializationArguments(apiId: apiId, apiHash: apiHash, languagesCategory: languagesCategory, appVersion: appVersion, voipMaxLayer: 0, voipVersions: [], appData: .single(buildConfig.bundleData(withAppToken: nil, signatureDict: nil)), autolockDeadine: .single(nil), encryptionProvider: OpenSSLEncryptionProvider(), deviceModelName: nil, useBetaFeatures: !buildConfig.isAppStoreBuild, isICloudEnabled: false), supplementary: true, manager: accountManager, rootPath: rootPath, auxiliaryMethods: accountAuxiliaryMethods, encryptionParameters: encryptionParameters, initialPeerIdsExcludedFromUnreadCounters: [], excludeAccountIds: allHidableAccountIds)
+                account = currentAccount(allocateIfNotExists: false, networkArguments: NetworkInitializationArguments(apiId: apiId, apiHash: apiHash, languagesCategory: languagesCategory, appVersion: appVersion, voipMaxLayer: 0, voipVersions: [], appData: .single(buildConfig.bundleData(withAppToken: nil, tokenType: nil, tokenEnvironment: nil, signatureDict: nil)), externalRequestVerificationStream: .never(), externalRecaptchaRequestVerification: { _, _ in return .never() }, autolockDeadine: .single(nil), encryptionProvider: OpenSSLEncryptionProvider(), deviceModelName: nil, useBetaFeatures: !buildConfig.isAppStoreBuild, isICloudEnabled: false), supplementary: true, manager: accountManager, rootPath: rootPath, auxiliaryMethods: accountAuxiliaryMethods, encryptionParameters: encryptionParameters, initialPeerIdsExcludedFromUnreadCounters: [], excludeAccountIds: allHidableAccountIds)
                 |> mapToSignal { account -> Signal<Account?, NoError> in
                     if let account = account {
                         switch account {
@@ -204,7 +203,7 @@ class DefaultIntentHandler: INExtension, INSendMessageIntentHandling, INSearchFo
                                     accountCache = account
                                     Logger.shared.logToFile = settings.logging.logToFile
                                     Logger.shared.logToConsole = settings.logging.logToConsole
-                                    
+
                                     Logger.shared.redactSensitiveData = settings.logging.redactSensitiveData
                                     return account
                                 }
@@ -217,7 +216,7 @@ class DefaultIntentHandler: INExtension, INSendMessageIntentHandling, INSearchFo
                 }
                 |> take(1)
             }
-            
+
             return account
         })
     }
@@ -253,16 +252,31 @@ class DefaultIntentHandler: INExtension, INSendMessageIntentHandling, INSearchFo
         
         var personResolutionResult: INPersonResolutionResult {
             switch self {
-                case let .success(person):
-                    return .success(with: person)
-                case let .disambiguation(persons):
-                    return .disambiguation(with: persons)
-                case .needsValue:
-                    return .needsValue()
-                case .noResult:
-                    return .unsupported()
-                case .skip:
-                    return .notRequired()
+            case let .success(person):
+                return .success(with: person)
+            case let .disambiguation(persons):
+                return .disambiguation(with: persons)
+            case .needsValue:
+                return .needsValue()
+            case .noResult:
+                return .unsupported()
+            case .skip:
+                return .notRequired()
+            }
+        }
+
+        var contactResolutionResult: INStartCallContactResolutionResult {
+            switch self {
+            case let .success(person):
+                return .success(with: person)
+            case let .disambiguation(persons):
+                return .disambiguation(with: persons)
+            case .needsValue:
+                return .needsValue()
+            case .noResult:
+                return .unsupported()
+            case .skip:
+                return .notRequired()
             }
         }
     }
@@ -536,7 +550,7 @@ class DefaultIntentHandler: INExtension, INSendMessageIntentHandling, INSearchFo
         }
         
         let ptgSecretPasscodes = self.ptgSecretPasscodes.get()
-        
+
         self.actionDisposable.set((self.accountPromise.get()
         |> take(1)
         |> castError(IntentHandlingError.self)
@@ -665,36 +679,34 @@ class DefaultIntentHandler: INExtension, INSendMessageIntentHandling, INSearchFo
     }
     
     // MARK: - INStartAudioCallIntentHandling
-    
-    public func resolveContacts(for intent: INStartAudioCallIntent, with completion: @escaping ([INPersonResolutionResult]) -> Void) {
+    public func resolveContacts(for intent: INStartCallIntent, with completion: @escaping ([INStartCallContactResolutionResult]) -> Void) {
         if let appGroupUrl = self.appGroupUrl {
             let rootPath = rootPathForBasePath(appGroupUrl.path)
             if let data = try? Data(contentsOf: URL(fileURLWithPath: appLockStatePath(rootPath: rootPath))), let state = try? JSONDecoder().decode(LockState.self, from: data), isAppLocked(state: state) {
-                completion([INPersonResolutionResult.notRequired()])
+                completion([INStartCallContactResolutionResult.notRequired()])
                 return
             }
         }
         
         guard CNContactStore.authorizationStatus(for: .contacts) == .authorized else {
-            completion([INPersonResolutionResult.notRequired()])
+            completion([INStartCallContactResolutionResult.notRequired()])
             return
         }
         self.resolve(persons: intent.contacts, with: { result in
-            completion(result.map { $0.personResolutionResult })
+            completion(result.map { $0.contactResolutionResult })
         })
     }
     
-    @available(iOSApplicationExtension 11.0, iOS 11.0, *)
-    public func resolveDestinationType(for intent: INStartAudioCallIntent, with completion: @escaping (INCallDestinationTypeResolutionResult) -> Void) {
+    public func resolveDestinationType(for intent: INStartCallIntent, with completion: @escaping (INCallDestinationTypeResolutionResult) -> Void) {
         completion(.success(with: .normal))
     }
     
-    public func handle(intent: INStartAudioCallIntent, completion: @escaping (INStartAudioCallIntentResponse) -> Void) {
+    public func handle(intent: INStartCallIntent, completion: @escaping (INStartCallIntentResponse) -> Void) {
         if let appGroupUrl = self.appGroupUrl {
             let rootPath = rootPathForBasePath(appGroupUrl.path)
             if let data = try? Data(contentsOf: URL(fileURLWithPath: appLockStatePath(rootPath: rootPath))), let state = try? JSONDecoder().decode(LockState.self, from: data), isAppLocked(state: state) {
-                let userActivity = NSUserActivity(activityType: NSStringFromClass(INStartAudioCallIntent.self))
-                let response = INStartAudioCallIntentResponse(code: .failureRequiringAppLaunch, userActivity: userActivity)
+                let userActivity = NSUserActivity(activityType: NSStringFromClass(INStartCallIntent.self))
+                let response = INStartCallIntentResponse(code: .failureRequiringAppLaunch, userActivity: userActivity)
                 completion(response)
                 return
             }
@@ -720,13 +732,13 @@ class DefaultIntentHandler: INExtension, INSendMessageIntentHandling, INSearchFo
             return .single(peerId)
         }
         |> deliverOnMainQueue).start(next: { peerId in
-            let userActivity = NSUserActivity(activityType: NSStringFromClass(INStartAudioCallIntent.self))
+            let userActivity = NSUserActivity(activityType: NSStringFromClass(INStartCallIntent.self))
             userActivity.userInfo = ["handle": "TGCA\(peerId.toInt64())"]
-            let response = INStartAudioCallIntentResponse(code: .continueInApp, userActivity: userActivity)
+            let response = INStartCallIntentResponse(code: .continueInApp, userActivity: userActivity)
             completion(response)
         }, error: { _ in
-            let userActivity = NSUserActivity(activityType: NSStringFromClass(INStartAudioCallIntent.self))
-            let response = INStartAudioCallIntentResponse(code: .failureRequiringAppLaunch, userActivity: userActivity)
+            let userActivity = NSUserActivity(activityType: NSStringFromClass(INStartCallIntent.self))
+            let response = INStartCallIntentResponse(code: .failureRequiringAppLaunch, userActivity: userActivity)
             completion(response)
         }))
     }
@@ -881,7 +893,7 @@ private final class WidgetIntentHandler {
     private var appGroupUrl: URL?
     
     private let ptgSecretPasscodes = Promise<PtgSecretPasscodes>()
-    
+
     init() {
         guard let appBundleIdentifier = Bundle.main.bundleIdentifier, let lastDotRange = appBundleIdentifier.range(of: ".", options: [.backwards]) else {
             return
@@ -912,7 +924,7 @@ private final class WidgetIntentHandler {
         
         initializeAccountManagement()
         let accountManager = AccountManager<TelegramAccountManagerTypes>(basePath: rootPath + "/accounts-metadata", isTemporary: true, isReadOnly: false, useCaches: false, removeDatabaseOnError: false)
-        
+
         let deviceSpecificEncryptionParameters = BuildConfig.deviceSpecificEncryptionParameters(rootPath, baseAppBundleId: baseAppBundleId)
         let encryptionParameters = ValueBoxEncryptionParameters(forceEncryptionIfNoSet: false, key: ValueBoxEncryptionParameters.Key(data: deviceSpecificEncryptionParameters.key)!, salt: ValueBoxEncryptionParameters.Salt(data: deviceSpecificEncryptionParameters.salt)!)
         self.encryptionParameters = encryptionParameters
@@ -926,9 +938,9 @@ private final class WidgetIntentHandler {
         |> take(1)
         |> map { ptgSecretPasscodes in
             let allHidableAccountIds = ptgSecretPasscodes.allHidableAccountIds()
-            
+
             let view = AccountManager<TelegramAccountManagerTypes>.getCurrentRecords(basePath: rootPath + "/accounts-metadata", excludeAccountIds: allHidableAccountIds)
-            
+
             var result: [(AccountRecordId, Int, PeerId, Bool)] = []
             for record in view.records {
                 let isLoggedOut = record.attributes.contains(where: { attribute in
@@ -961,7 +973,7 @@ private final class WidgetIntentHandler {
                     return lhs.0 < rhs.0
                 }
             })
-            
+
             return result.map { record -> (AccountRecordId, PeerId, Bool) in
                 return (record.0, record.2, record.3)
             }
@@ -1345,7 +1357,7 @@ private func mapPeersToFriends(accountId: AccountRecordId, accountPeerId: PeerId
             var profileImage: INImage?
             
             var isForum = false
-            if let peer = peer as? TelegramChannel, peer.flags.contains(.isForum) {
+            if let peer = peer as? TelegramChannel, peer.isForumOrMonoForum {
                 isForum = true
             }
             

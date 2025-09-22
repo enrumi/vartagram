@@ -122,11 +122,13 @@ public final class EmojiSearchContent: ASDisplayNode, EntitySearchContainerNode 
                 groupId: AnyHashable(groupItem.info.id),
                 title: groupItem.info.title,
                 subtitle: nil,
+                badge: nil,
                 actionButtonTitle: self.presentationData.strings.EmojiInput_AddPack(groupItem.info.title).string,
                 isFeatured: true,
                 isPremiumLocked: !self.hasPremiumForInstallation,
                 isEmbedded: false,
                 hasClear: false,
+                hasEdit: false,
                 collapsedLineCount: 3,
                 displayPremiumBadges: false,
                 headerItem: nil,
@@ -164,12 +166,13 @@ public final class EmojiSearchContent: ASDisplayNode, EntitySearchContainerNode 
                         self.onCancel?()
                     } else {
                         self.itemGroups.removeAll(where: { $0.groupId == groupId })
-                        self.update(transition: Transition(animation: .curve(duration: 0.4, curve: .spring)).withUserData(EmojiPagerContentComponent.ContentAnimation(type: .groupRemoved(id: groupId))))
+                        self.update(transition: ComponentTransition(animation: .curve(duration: 0.4, curve: .spring)).withUserData(EmojiPagerContentComponent.ContentAnimation(type: .groupRemoved(id: groupId))))
                     }
                 }
             },
             clearGroup: { _ in
             },
+            editAction: { _ in },
             pushController: { _ in
             },
             presentController: { _ in
@@ -231,7 +234,7 @@ public final class EmojiSearchContent: ASDisplayNode, EntitySearchContainerNode 
                             )
                             |> take(1)
                             |> map { view, availableReactions, hasPremium -> [EmojiPagerContentComponent.ItemGroup] in
-                                var result: [(String, TelegramMediaFile?, String)] = []
+                                var result: [(String, TelegramMediaFile.Accessor?, String)] = []
                                 
                                 var allEmoticons: [String: String] = [:]
                                 for keyword in keywords {
@@ -244,18 +247,16 @@ public final class EmojiSearchContent: ASDisplayNode, EntitySearchContainerNode 
                                     guard let item = entry.item as? StickerPackItem else {
                                         continue
                                     }
-                                    for attribute in item.file.attributes {
-                                        switch attribute {
-                                        case let .CustomEmoji(_, _, alt, _):
-                                            if !item.file.isPremiumEmoji || hasPremium {
+                                    
+                                    if item.file.isCustomEmoji {
+                                        if !item.file.isPremiumEmoji || hasPremium {
+                                            if let alt = item.file.customEmojiAlt {
                                                 if !alt.isEmpty, let keyword = allEmoticons[alt] {
                                                     result.append((alt, item.file, keyword))
                                                 } else if alt == query {
                                                     result.append((alt, item.file, alt))
                                                 }
                                             }
-                                        default:
-                                            break
                                         }
                                     }
                                 }
@@ -286,11 +287,13 @@ public final class EmojiSearchContent: ASDisplayNode, EntitySearchContainerNode 
                                     groupId: "search",
                                     title: nil,
                                     subtitle: nil,
+                                    badge: nil,
                                     actionButtonTitle: nil,
                                     isFeatured: false,
                                     isPremiumLocked: false,
                                     isEmbedded: false,
                                     hasClear: false,
+                                    hasEdit: false,
                                     collapsedLineCount: nil,
                                     displayPremiumBadges: false,
                                     headerItem: nil,
@@ -314,7 +317,7 @@ public final class EmojiSearchContent: ASDisplayNode, EntitySearchContainerNode 
                         }))
                     }
                 case let .category(value):
-                    let resultSignal = self.context.engine.stickers.searchEmoji(emojiString: value)
+                    let resultSignal = self.context.engine.stickers.searchEmoji(category: value)
                     |> mapToSignal { files, isFinalResult -> Signal<(items: [EmojiPagerContentComponent.ItemGroup], isFinalResult: Bool), NoError> in
                         var items: [EmojiPagerContentComponent.Item] = []
                         
@@ -324,11 +327,12 @@ public final class EmojiSearchContent: ASDisplayNode, EntitySearchContainerNode 
                                 continue
                             }
                             existingIds.insert(itemFile.fileId)
-                            let animationData = EntityKeyboardAnimationData(file: itemFile)
+                            let animationData = EntityKeyboardAnimationData(file: TelegramMediaFile.Accessor(itemFile))
                             let item = EmojiPagerContentComponent.Item(
                                 animationData: animationData,
                                 content: .animation(animationData),
-                                itemFile: itemFile, subgroupId: nil,
+                                itemFile: TelegramMediaFile.Accessor(itemFile),
+                                subgroupId: nil,
                                 icon: .none,
                                 tintMode: animationData.isTemplate ? .primary : .none
                             )
@@ -340,11 +344,13 @@ public final class EmojiSearchContent: ASDisplayNode, EntitySearchContainerNode 
                             groupId: "search",
                             title: nil,
                             subtitle: nil,
+                            badge: nil,
                             actionButtonTitle: nil,
                             isFeatured: false,
                             isPremiumLocked: false,
                             isEmbedded: false,
                             hasClear: false,
+                            hasEdit: false,
                             collapsedLineCount: nil,
                             displayPremiumBadges: false,
                             headerItem: nil,
@@ -373,22 +379,24 @@ public final class EmojiSearchContent: ASDisplayNode, EntitySearchContainerNode 
                                     groupId: "search",
                                     title: nil,
                                     subtitle: nil,
+                                    badge: nil,
                                     actionButtonTitle: nil,
                                     isFeatured: false,
                                     isPremiumLocked: false,
                                     isEmbedded: false,
                                     hasClear: false,
+                                    hasEdit: false,
                                     collapsedLineCount: nil,
                                     displayPremiumBadges: false,
                                     headerItem: nil,
                                     fillWithLoadingPlaceholders: true,
                                     items: []
                                 )
-                            ], id: AnyHashable(value), version: version, isPreset: true), isSearching: false)
+                            ], id: AnyHashable(value.id), version: version, isPreset: true), isSearching: false)
                             return
                         }
                         
-                        self.emojiSearchStateValue = EmojiSearchState(result: EmojiSearchResult(groups: result.items, id: AnyHashable(value), version: version, isPreset: false), isSearching: false)
+                        self.emojiSearchStateValue = EmojiSearchState(result: EmojiSearchResult(groups: result.items, id: AnyHashable(value.id), version: version, isPreset: false), isSearching: false)
                         version += 1
                     }))
                 }
@@ -431,17 +439,17 @@ public final class EmojiSearchContent: ASDisplayNode, EntitySearchContainerNode 
         self.dataDisposable?.dispose()
     }
     
-    private func update(transition: Transition) {
+    private func update(transition: ComponentTransition) {
         if let params = self.params {
             self.update(size: params.size, leftInset: params.leftInset, rightInset: params.rightInset, bottomInset: params.bottomInset, inputHeight: params.inputHeight, deviceMetrics: params.deviceMetrics, transition: transition)
         }
     }
     
     public func updateLayout(size: CGSize, leftInset: CGFloat, rightInset: CGFloat, bottomInset: CGFloat, inputHeight: CGFloat, deviceMetrics: DeviceMetrics, transition: ContainedViewLayoutTransition) {
-        self.update(size: size, leftInset: leftInset, rightInset: rightInset, bottomInset: bottomInset, inputHeight: inputHeight, deviceMetrics: deviceMetrics, transition: Transition(transition))
+        self.update(size: size, leftInset: leftInset, rightInset: rightInset, bottomInset: bottomInset, inputHeight: inputHeight, deviceMetrics: deviceMetrics, transition: ComponentTransition(transition))
     }
      
-    private func update(size: CGSize, leftInset: CGFloat, rightInset: CGFloat, bottomInset: CGFloat, inputHeight: CGFloat, deviceMetrics: DeviceMetrics, transition: Transition) {
+    private func update(size: CGSize, leftInset: CGFloat, rightInset: CGFloat, bottomInset: CGFloat, inputHeight: CGFloat, deviceMetrics: DeviceMetrics, transition: ComponentTransition) {
         self.backgroundColor = self.presentationData.theme.list.plainBackgroundColor
         
         let params = Params(size: size, leftInset: leftInset, rightInset: rightInset, bottomInset: bottomInset, inputHeight: inputHeight, deviceMetrics: deviceMetrics)
@@ -466,6 +474,7 @@ public final class EmojiSearchContent: ASDisplayNode, EntitySearchContainerNode 
             searchInitiallyHidden: false,
             searchAlwaysActive: true,
             searchIsPlaceholderOnly: false,
+            searchUnicodeEmojiOnly: false,
             emptySearchResults: nil,
             enableLongPress: false,
             selectedItems: Set(),

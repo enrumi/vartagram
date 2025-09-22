@@ -6,6 +6,7 @@ import ContextUI
 import AccountContext
 import TelegramPresentationData
 import Photos
+import MediaAssetsContext
 
 struct MediaGroupItem {
     let collection: PHAssetCollection
@@ -14,7 +15,7 @@ struct MediaGroupItem {
 }
 
 final class MediaGroupsContextMenuContent: ContextControllerItemsContent {
-    private final class GroupsListNode: ASDisplayNode, UIScrollViewDelegate {
+    private final class GroupsListNode: ASDisplayNode, ASScrollViewDelegate {
         private final class ItemNode: HighlightTrackingButtonNode {
             let context: AccountContext
             let highlightBackgroundNode: ASDisplayNode
@@ -170,7 +171,7 @@ final class MediaGroupsContextMenuContent: ContextControllerItemsContent {
             super.init()
 
             self.addSubnode(self.scrollNode)
-            self.scrollNode.view.delegate = self
+            self.scrollNode.view.delegate = self.wrappedScrollViewDelegate
 
             self.clipsToBounds = true
         }

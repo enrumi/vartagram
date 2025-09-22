@@ -34,6 +34,10 @@ public final class SolidRoundedButtonTheme: Equatable {
         self.disabledForegroundColor = disabledForegroundColor
     }
     
+    public func withUpdated(disabledBackgroundColor: UIColor, disabledForegroundColor: UIColor) -> SolidRoundedButtonTheme {
+        return SolidRoundedButtonTheme(backgroundColor: self.backgroundColor, backgroundColors: self.backgroundColors, foregroundColor: self.foregroundColor, disabledBackgroundColor: disabledBackgroundColor, disabledForegroundColor: disabledForegroundColor)
+    }
+    
     public static func ==(lhs: SolidRoundedButtonTheme, rhs: SolidRoundedButtonTheme) -> Bool {
         if lhs.backgroundColor != rhs.backgroundColor {
             return false
@@ -733,7 +737,7 @@ public final class SolidRoundedButtonNode: ASDisplayNode {
         var nextContentOrigin = floor((buttonFrame.width - contentWidth) / 2.0)
         
         let iconFrame: CGRect
-        let titleFrame: CGRect
+        var titleFrame: CGRect
         switch self.iconPosition {
             case .left:
                 iconFrame =  CGRect(origin: CGPoint(x: buttonFrame.minX + nextContentOrigin, y: floor((buttonFrame.height - iconSize.height) / 2.0)), size: iconSize)
@@ -753,7 +757,6 @@ public final class SolidRoundedButtonNode: ASDisplayNode {
         if let animationNode = self.animationNode {
             transition.updateFrame(node: animationNode, frame: iconFrame)
         }
-        transition.updateFrame(node: self.titleNode, frame: titleFrame)
         
         if let badge = self.badge {
             let badgeNode: BadgeNode
@@ -766,11 +769,14 @@ public final class SolidRoundedButtonNode: ASDisplayNode {
             }
             badgeNode.text = badge
             let badgeSize = badgeNode.update(CGSize(width: 100.0, height: 100.0))
-            transition.updateFrame(node: badgeNode, frame: CGRect(origin: CGPoint(x: titleFrame.maxX + 4.0, y: titleFrame.minY + floor((titleFrame.height - badgeSize.height) * 0.5)), size: badgeSize))
+            titleFrame.origin.x -= badgeSize.width / 2.0
+            transition.updateFrame(node: badgeNode, frame: CGRect(origin: CGPoint(x: titleFrame.maxX + 6.0, y: titleFrame.minY + floorToScreenPixels((titleFrame.height - badgeSize.height) * 0.5)), size: badgeSize))
         } else if let badgeNode = self.badgeNode {
             self.badgeNode = nil
             badgeNode.removeFromSupernode()
         }
+        
+        transition.updateFrame(node: self.titleNode, frame: titleFrame)
         
         if self.subtitle != self.subtitleNode.attributedText?.string {
             self.subtitleNode.attributedText = NSAttributedString(string: self.subtitle ?? "", font: Font.regular(14.0), textColor: self.theme.foregroundColor)
@@ -834,8 +840,12 @@ public final class SolidRoundedButtonNode: ASDisplayNode {
                 let diameter: CGFloat = self.buttonHeight - 22.0
                 let progressFrame = CGRect(origin: CGPoint(x: floorToScreenPixels(buttonOffset + (buttonWidth - diameter) / 2.0), y: floorToScreenPixels((self.buttonHeight - diameter) / 2.0)), size: CGSize(width: diameter, height: diameter))
                 progressNode.frame = progressFrame
-                progressNode.image = generateIndefiniteActivityIndicatorImage(color: self.theme.foregroundColor, diameter: diameter, lineWidth: 3.0)
-                    
+            
+                if !self.isEnabled, let disabledForegroundColor = self.theme.disabledForegroundColor {
+                    progressNode.image = generateIndefiniteActivityIndicatorImage(color: disabledForegroundColor, diameter: diameter, lineWidth: 3.0)
+                } else {
+                    progressNode.image = generateIndefiniteActivityIndicatorImage(color: self.theme.foregroundColor, diameter: diameter, lineWidth: 3.0)
+                }
                 self.addSubnode(progressNode)
         }
         
@@ -1402,7 +1412,7 @@ public final class SolidRoundedButtonView: UIView {
         }
         
         self.titleNode.attributedText = titleText
-        self.subtitleNode.attributedText = NSAttributedString(string: self.subtitle ?? "", font: Font.regular(14.0), textColor: theme.foregroundColor)
+        self.subtitleNode.attributedText = NSAttributedString(string: self.subtitle ?? "", font: Font.medium(11.0), textColor: theme.foregroundColor.withAlphaComponent(0.7))
         
         self.iconNode.image = generateTintedImage(image: self.iconNode.image, color: theme.foregroundColor)
         
@@ -1462,7 +1472,7 @@ public final class SolidRoundedButtonView: UIView {
         }
         let titleSize = self.titleNode.updateLayout(buttonSize)
         
-        let spacingOffset: CGFloat = 9.0
+        let spacingOffset: CGFloat = 7.0
         let verticalInset: CGFloat = self.subtitle == nil ? floor((buttonFrame.height - titleSize.height) / 2.0) : floor((buttonFrame.height - titleSize.height) / 2.0) - spacingOffset
         let iconSpacing: CGFloat = self.iconSpacing
         let badgeSpacing: CGFloat = 6.0
@@ -1523,11 +1533,11 @@ public final class SolidRoundedButtonView: UIView {
         }
         
         if self.subtitle != self.subtitleNode.attributedText?.string {
-            self.subtitleNode.attributedText = NSAttributedString(string: self.subtitle ?? "", font: Font.regular(14.0), textColor: self.theme.foregroundColor)
+            self.subtitleNode.attributedText = NSAttributedString(string: self.subtitle ?? "", font: Font.medium(11.0), textColor: self.theme.foregroundColor.withAlphaComponent(0.7))
         }
         
         let subtitleSize = self.subtitleNode.updateLayout(buttonSize)
-        let subtitleFrame = CGRect(origin: CGPoint(x: buttonFrame.minX + floor((buttonFrame.width - subtitleSize.width) / 2.0), y: buttonFrame.minY + floor((buttonFrame.height - titleSize.height) / 2.0) + spacingOffset + 2.0), size: subtitleSize)
+        let subtitleFrame = CGRect(origin: CGPoint(x: buttonFrame.minX + floor((buttonFrame.width - subtitleSize.width) / 2.0), y: buttonFrame.minY + floor((buttonFrame.height - titleSize.height) / 2.0) + spacingOffset + 7.0), size: subtitleSize)
         transition.updateFrame(view: self.subtitleNode, frame: subtitleFrame)
         
         if previousSubtitle == nil && self.subtitle != nil {

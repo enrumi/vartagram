@@ -6,7 +6,7 @@ objc_library(
     srcs = glob([
         "Sources/**/*.m",
         "Sources/**/*.h",
-    ]),
+    ], allow_empty=True),
     hdrs = glob([
         "Public/**/*.h",
     ]),
@@ -17,7 +17,10 @@ objc_library(
         "Public",
     ],
     deps = [
-        "//submodules/ffmpeg:ffmpeg",
+        "//submodules/ffmpeg",
+    ],
+    sdk_frameworks = [
+        "CoreMedia",
     ],
     visibility = [
         "//visibility:public",

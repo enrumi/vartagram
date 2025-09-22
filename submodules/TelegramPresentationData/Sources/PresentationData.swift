@@ -4,7 +4,6 @@ import SwiftSignalKit
 import Postbox
 import TelegramCore
 import Contacts
-import AddressBook
 import Display
 import TelegramUIPreferences
 import AppBundle
@@ -69,11 +68,13 @@ public struct PresentationChatBubbleCorners: Equatable, Hashable {
     public var mainRadius: CGFloat
     public var auxiliaryRadius: CGFloat
     public var mergeBubbleCorners: Bool
+    public var hasTails: Bool
     
-    public init(mainRadius: CGFloat, auxiliaryRadius: CGFloat, mergeBubbleCorners: Bool) {
+    public init(mainRadius: CGFloat, auxiliaryRadius: CGFloat, mergeBubbleCorners: Bool, hasTails: Bool = true) {
         self.mainRadius = mainRadius
         self.auxiliaryRadius = auxiliaryRadius
         self.mergeBubbleCorners = mergeBubbleCorners
+        self.hasTails = hasTails
     }
 }
 
@@ -112,6 +113,10 @@ public final class PresentationData: Equatable {
     
     public func withUpdated(chatWallpaper: TelegramWallpaper) -> PresentationData {
         return PresentationData(strings: self.strings, theme: self.theme, autoNightModeTriggered: self.autoNightModeTriggered, chatWallpaper: chatWallpaper, chatFontSize: self.chatFontSize, chatBubbleCorners: self.chatBubbleCorners, listsFontSize: self.listsFontSize, dateTimeFormat: self.dateTimeFormat, nameDisplayOrder: self.nameDisplayOrder, nameSortOrder: self.nameSortOrder, reduceMotion: self.reduceMotion, largeEmoji: self.largeEmoji)
+    }
+    
+    public func withUpdate(listsFontSize: PresentationFontSize) -> PresentationData {
+        return PresentationData(strings: self.strings, theme: self.theme, autoNightModeTriggered: self.autoNightModeTriggered, chatWallpaper: self.chatWallpaper, chatFontSize: self.chatFontSize, chatBubbleCorners: self.chatBubbleCorners, listsFontSize: listsFontSize, dateTimeFormat: self.dateTimeFormat, nameDisplayOrder: self.nameDisplayOrder, nameSortOrder: self.nameSortOrder, reduceMotion: self.reduceMotion, largeEmoji: self.largeEmoji)
     }
     
     public static func ==(lhs: PresentationData, rhs: PresentationData) -> Bool {
@@ -195,19 +200,11 @@ private func currentDateTimeFormat() -> PresentationDateTimeFormat {
 }
 
 private func currentPersonNameSortOrder() -> PresentationPersonNameOrder {
-    if #available(iOSApplicationExtension 9.0, iOS 9.0, *) {
-        switch CNContactsUserDefaults.shared().sortOrder {
-            case .givenName:
-                return .firstLast
-            default:
-                return .lastFirst
-        }
-    } else {
-        if ABPersonGetSortOrdering() == kABPersonSortByFirstName {
+    switch CNContactsUserDefaults.shared().sortOrder {
+        case .givenName:
             return .firstLast
-        } else {
+        default:
             return .lastFirst
-        }
     }
 }
 

@@ -111,7 +111,7 @@ private func updatedContextQueryResultStateForQuery(context: AccountContext, cha
                 case .installed:
                     scope = [.installed]
             }
-            return context.engine.stickers.searchStickers(query: [query.basicEmoji.0], scope: scope)
+            return context.engine.stickers.searchStickers(query: nil, emoticon: [query.basicEmoji.0], scope: scope)
             |> map { items -> [FoundStickerItem] in
                 return items.items
             }
@@ -130,10 +130,10 @@ private func updatedContextQueryResultStateForQuery(context: AccountContext, cha
                 case .hashtag:
                     break
                 default:
-                    signal = .single({ _ in return .hashtags([]) })
+                    signal = .single({ _ in return .hashtags([], query) })
             }
         } else {
-            signal = .single({ _ in return .hashtags([]) })
+            signal = .single({ _ in return .hashtags([], query) })
         }
         
         let hashtags: Signal<(ChatPresentationInputQueryResult?) -> ChatPresentationInputQueryResult?, ChatContextQueryError> = context.engine.messages.recentlyUsedHashtags()
@@ -145,7 +145,7 @@ private func updatedContextQueryResultStateForQuery(context: AccountContext, cha
                     result.append(hashtag)
                 }
             }
-            return { _ in return .hashtags(result) }
+            return { _ in return .hashtags(result, query) }
         }
         |> castError(ChatContextQueryError.self)
         
@@ -257,18 +257,13 @@ private func updatedContextQueryResultStateForQuery(context: AccountContext, cha
                 var result: [(String, TelegramMediaFile?, String)] = []
                 
                 for entry in view.entries {
-                    guard let item = entry.item as? StickerPackItem else {
+                    guard let item = entry.item as? StickerPackItem, !item.file.isPremiumEmoji || hasPremium else {
                         continue
                     }
-                    for attribute in item.file.attributes {
-                        switch attribute {
-                        case let .CustomEmoji(_, _, alt, _):
-                            if alt == query {
-                                if !item.file.isPremiumEmoji || hasPremium {
-                                    result.append((alt, item.file, alt))
-                                }
-                            }
-                        default:
+                    let stringRepresentations = item.getStringRepresentationsOfIndexKeys()
+                    for stringRepresentation in stringRepresentations {
+                        if stringRepresentation == query {
+                            result.append((stringRepresentation, item.file._parse(), stringRepresentation))
                             break
                         }
                     }
@@ -312,18 +307,13 @@ private func updatedContextQueryResultStateForQuery(context: AccountContext, cha
                     }
                     
                     for entry in view.entries {
-                        guard let item = entry.item as? StickerPackItem else {
+                        guard let item = entry.item as? StickerPackItem, !item.file.isPremiumEmoji || hasPremium else {
                             continue
                         }
-                        for attribute in item.file.attributes {
-                            switch attribute {
-                            case let .CustomEmoji(_, _, alt, _):
-                                if !alt.isEmpty, let keyword = allEmoticons[alt] {
-                                    if !item.file.isPremiumEmoji || hasPremium {
-                                        result.append((alt, item.file, keyword))
-                                    }
-                                }
-                            default:
+                        let stringRepresentations = item.getStringRepresentationsOfIndexKeys()
+                        for stringRepresentation in stringRepresentations {
+                            if let keyword = allEmoticons[stringRepresentation] {
+                                result.append((stringRepresentation, item.file._parse(), keyword))
                                 break
                             }
                         }

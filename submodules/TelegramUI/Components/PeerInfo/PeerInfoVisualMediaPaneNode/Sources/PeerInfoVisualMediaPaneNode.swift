@@ -1,5 +1,6 @@
 import AsyncDisplayKit
 import AVFoundation
+import UIKit
 import Display
 import TelegramCore
 import SwiftSignalKit
@@ -330,6 +331,10 @@ private final class GenericItemLayer: CALayer, ItemLayer {
         super.init()
 
         self.contentsGravity = .resize
+    }
+    
+    override init(layer: Any) {
+        super.init(layer: layer)
     }
 
     required init?(coder: NSCoder) {
@@ -705,7 +710,8 @@ private final class SparseItemGridBindingImpl: SparseItemGridBinding, ListShimme
                 immediateThumbnailData: nil,
                 mimeType: "image/jpeg",
                 size: nil,
-                attributes: [.FileName(fileName: "file")]
+                attributes: [.FileName(fileName: "file")],
+                alternativeRepresentations: []
             )
             let fakeMessage = Message(
                 stableId: 1,
@@ -719,6 +725,7 @@ private final class SparseItemGridBindingImpl: SparseItemGridBinding, ListShimme
                 tags: [],
                 globalTags: [],
                 localTags: [],
+                customTags: [],
                 forwardInfo: nil,
                 author: nil,
                 text: "",
@@ -865,7 +872,10 @@ private final class SparseItemGridBindingImpl: SparseItemGridBinding, ListShimme
                 }
 
                 let message = item.message
-                let hasSpoiler = message.attributes.contains(where: { $0 is MediaSpoilerMessageAttribute }) && !self.revealedSpoilerMessageIds.contains(message.id)
+                var hasSpoiler = message.attributes.contains(where: { $0 is MediaSpoilerMessageAttribute }) && !self.revealedSpoilerMessageIds.contains(message.id)
+                if message.isSensitiveContent(platform: "ios") {
+                    hasSpoiler = true
+                }
                 layer.updateHasSpoiler(hasSpoiler: hasSpoiler)
                 
                 var selectedMedia: Media?
@@ -874,7 +884,11 @@ private final class SparseItemGridBindingImpl: SparseItemGridBinding, ListShimme
                         selectedMedia = image
                         break
                     } else if let file = media as? TelegramMediaFile {
-                        selectedMedia = file
+                        if let cover = file.videoCover {
+                            selectedMedia = cover
+                        } else {
+                            selectedMedia = file
+                        }
                         break
                     }
                 }
@@ -1007,6 +1021,9 @@ private final class SparseItemGridBindingImpl: SparseItemGridBinding, ListShimme
             return .never()
         }
     }
+    
+    func reorderIfPossible(item: SparseItemGrid.Item, toIndex: Int) {
+    }
 
     func onTap(item: SparseItemGrid.Item, itemLayer: CALayer, point: CGPoint) {
         guard let item = item as? VisualMediaItem else {
@@ -1025,6 +1042,9 @@ private final class SparseItemGridBindingImpl: SparseItemGridBinding, ListShimme
 
     func coveringInsetOffsetUpdated(transition: ContainedViewLayoutTransition) {
         self.coveringInsetOffsetUpdatedImpl?(transition)
+    }
+    
+    func scrollingOffsetUpdated(transition: ContainedViewLayoutTransition) {
     }
 
     func onBeginFastScrolling() {
@@ -1063,7 +1083,7 @@ public protocol PeerInfoScreenNodeProtocol: AnyObject {
     func displaySharedMediaFastScrollingTooltip()
 }
 
-public final class PeerInfoVisualMediaPaneNode: ASDisplayNode, PeerInfoPaneNode, UIScrollViewDelegate, UIGestureRecognizerDelegate {
+public final class PeerInfoVisualMediaPaneNode: ASDisplayNode, PeerInfoPaneNode, ASScrollViewDelegate, ASGestureRecognizerDelegate {
     public enum ContentType {
         case photoOrVideo
         case photo
@@ -1114,7 +1134,7 @@ public final class PeerInfoVisualMediaPaneNode: ASDisplayNode, PeerInfoPaneNode,
         return self._itemInteraction!
     }
     
-    private var currentParams: (size: CGSize, topInset: CGFloat, sideInset: CGFloat, bottomInset: CGFloat, deviceMetrics: DeviceMetrics, visibleHeight: CGFloat, isScrollingLockedAtTop: Bool, expandProgress: CGFloat, presentationData: PresentationData)?
+    private var currentParams: (size: CGSize, topInset: CGFloat, sideInset: CGFloat, bottomInset: CGFloat, deviceMetrics: DeviceMetrics, visibleHeight: CGFloat, isScrollingLockedAtTop: Bool, expandProgress: CGFloat, navigationHeight: CGFloat, presentationData: PresentationData)?
     
     private let ready = Promise<Bool>()
     private var didSetReady: Bool = false
@@ -1198,13 +1218,13 @@ public final class PeerInfoVisualMediaPaneNode: ASDisplayNode, PeerInfoPaneNode,
                 chatControllerInteraction.toggleMessagesSelection(messageId, selected)
             },
             openUrl: { url, concealed, external, message in
-                chatControllerInteraction.openUrl(ChatControllerInteraction.OpenUrl(url: url, concealed: concealed, external: external, message: message))
+                chatControllerInteraction.openUrl(ChatControllerInteraction.OpenUrl(url: url, concealed: concealed, external: external, message: message, progress: Promise()))
             },
             openInstantPage: { message, data in
                 chatControllerInteraction.openInstantPage(message, data)
             },
             longTap: { action, message in
-                chatControllerInteraction.longTap(action, message)
+                chatControllerInteraction.longTap(action, ChatControllerInteraction.LongTapParams(message: message))
             },
             getHiddenMedia: {
                 return chatControllerInteraction.hiddenMedia
@@ -1231,7 +1251,7 @@ public final class PeerInfoVisualMediaPaneNode: ASDisplayNode, PeerInfoPaneNode,
         if threadId == nil {
             switch contentType {
             case .photoOrVideo, .photo, .video:
-                self.calendarSource = self.context.engine.messages.sparseMessageCalendar(peerId: self.peerId, threadId: threadId, tag: tagMaskForType(self.contentType))
+                self.calendarSource = self.context.engine.messages.sparseMessageCalendar(peerId: self.peerId, threadId: threadId, tag: tagMaskForType(self.contentType), displayMedia: true)
             default:
                 self.calendarSource = nil
             }
@@ -1274,7 +1294,11 @@ public final class PeerInfoVisualMediaPaneNode: ASDisplayNode, PeerInfoPaneNode,
                 }
                 strongSelf.chatControllerInteraction.toggleMessagesSelection([item.message.id], toggledValue)
             } else {
-                let _ = strongSelf.chatControllerInteraction.openMessage(item.message, OpenMessageParams(mode: .default))
+                if item.message.isSensitiveContent(platform: "ios") {
+//                    strongSelf.context.currentContentSettings.with { $0 }.ignoreContentRestrictionReasons
+                } else {
+                    let _ = strongSelf.chatControllerInteraction.openMessage(item.message, OpenMessageParams(mode: .default))
+                }
             }
         }
 
@@ -1618,7 +1642,7 @@ public final class PeerInfoVisualMediaPaneNode: ASDisplayNode, PeerInfoPaneNode,
 
         self.presentationDataDisposable = (self.context.sharedContext.presentationData
         |> deliverOnMainQueue).start(next: { [weak self] presentationData in
-            guard let strongSelf = self, let (size, topInset, sideInset, bottomInset, _, _, _, _, _) = strongSelf.currentParams  else {
+            guard let strongSelf = self, let (size, topInset, sideInset, bottomInset, _, _, _, _, _, _) = strongSelf.currentParams  else {
                 return
             }
             strongSelf.itemGridBinding.updatePresentationData(presentationData: presentationData)
@@ -1756,12 +1780,12 @@ public final class PeerInfoVisualMediaPaneNode: ASDisplayNode, PeerInfoPaneNode,
     private func updateHistory(items: SparseItemGrid.Items, synchronous: Bool, reloadAtTop: Bool) {
         self.items = items
 
-        if let (size, topInset, sideInset, bottomInset, deviceMetrics, visibleHeight, isScrollingLockedAtTop, expandProgress, presentationData) = self.currentParams {
+        if let (size, topInset, sideInset, bottomInset, deviceMetrics, visibleHeight, isScrollingLockedAtTop, expandProgress, navigationHeight, presentationData) = self.currentParams {
             var gridSnapshot: UIView?
             if reloadAtTop {
                 gridSnapshot = self.itemGrid.view.snapshotView(afterScreenUpdates: false)
             }
-            self.update(size: size, topInset: topInset, sideInset: sideInset, bottomInset: bottomInset, deviceMetrics: deviceMetrics, visibleHeight: visibleHeight, isScrollingLockedAtTop: isScrollingLockedAtTop, expandProgress: expandProgress, presentationData: presentationData, synchronous: false, transition: .immediate)
+            self.update(size: size, topInset: topInset, sideInset: sideInset, bottomInset: bottomInset, deviceMetrics: deviceMetrics, visibleHeight: visibleHeight, isScrollingLockedAtTop: isScrollingLockedAtTop, expandProgress: expandProgress, navigationHeight: navigationHeight, presentationData: presentationData, synchronous: false, transition: .immediate)
             if let gridSnapshot = gridSnapshot {
                 self.view.addSubview(gridSnapshot)
                 gridSnapshot.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.2, removeOnCompletion: false, completion: { [weak gridSnapshot] _ in
@@ -2050,7 +2074,7 @@ public final class PeerInfoVisualMediaPaneNode: ASDisplayNode, PeerInfoPaneNode,
         switch self.contentType {
         case .files, .music, .voiceAndVideoMessages:
             self.itemGrid.forEachVisibleItem { item in
-                guard let itemView = item.view as? ItemView, let (size, topInset, sideInset, bottomInset, _, _, _, _, _) = self.currentParams else {
+                guard let itemView = item.view as? ItemView, let (size, topInset, sideInset, bottomInset, _, _, _, _, _, _) = self.currentParams else {
                     return
                 }
                 if let item = itemView.item {
@@ -2080,7 +2104,7 @@ public final class PeerInfoVisualMediaPaneNode: ASDisplayNode, PeerInfoPaneNode,
             if isSelecting {
                 if self.gridSelectionGesture == nil {
                     let selectionGesture = MediaPickerGridSelectionGesture<EngineMessage.Id>()
-                    selectionGesture.delegate = self
+                    selectionGesture.delegate = self.wrappedGestureRecognizerDelegate
                     selectionGesture.sideInset = 44.0
                     selectionGesture.updateIsScrollEnabled = { [weak self] isEnabled in
                         self?.itemGrid.isScrollEnabled = isEnabled
@@ -2107,8 +2131,8 @@ public final class PeerInfoVisualMediaPaneNode: ASDisplayNode, PeerInfoPaneNode,
         }
     }
     
-    public func update(size: CGSize, topInset: CGFloat, sideInset: CGFloat, bottomInset: CGFloat, deviceMetrics: DeviceMetrics, visibleHeight: CGFloat, isScrollingLockedAtTop: Bool, expandProgress: CGFloat, presentationData: PresentationData, synchronous: Bool, transition: ContainedViewLayoutTransition) {
-        self.currentParams = (size, topInset, sideInset, bottomInset, deviceMetrics, visibleHeight, isScrollingLockedAtTop, expandProgress, presentationData)
+    public func update(size: CGSize, topInset: CGFloat, sideInset: CGFloat, bottomInset: CGFloat, deviceMetrics: DeviceMetrics, visibleHeight: CGFloat, isScrollingLockedAtTop: Bool, expandProgress: CGFloat, navigationHeight: CGFloat, presentationData: PresentationData, synchronous: Bool, transition: ContainedViewLayoutTransition) {
+        self.currentParams = (size, topInset, sideInset, bottomInset, deviceMetrics, visibleHeight, isScrollingLockedAtTop, expandProgress, navigationHeight, presentationData)
 
         transition.updateFrame(node: self.contextGestureContainerNode, frame: CGRect(origin: CGPoint(x: 0.0, y: 0.0), size: CGSize(width: size.width, height: size.height)))
 
@@ -2129,7 +2153,8 @@ public final class PeerInfoVisualMediaPaneNode: ASDisplayNode, PeerInfoPaneNode,
                     immediateThumbnailData: nil,
                     mimeType: "image/jpeg",
                     size: nil,
-                    attributes: [.FileName(fileName: "file")]
+                    attributes: [.FileName(fileName: "file")],
+                    alternativeRepresentations: []
                 )
                 let fakeMessage = Message(
                     stableId: 1,
@@ -2143,6 +2168,7 @@ public final class PeerInfoVisualMediaPaneNode: ASDisplayNode, PeerInfoPaneNode,
                     tags: [],
                     globalTags: [],
                     localTags: [],
+                    customTags: [],
                     forwardInfo: nil,
                     author: nil,
                     text: "",

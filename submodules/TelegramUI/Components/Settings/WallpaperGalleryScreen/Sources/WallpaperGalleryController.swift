@@ -14,7 +14,7 @@ import AccountContext
 import ShareController
 import GalleryUI
 import HexColor
-import CounterContollerTitleView
+import CounterControllerTitleView
 import UndoUI
 import LegacyComponents
 import LegacyMediaPickerUI
@@ -350,8 +350,8 @@ public class WallpaperGalleryController: ViewController {
         self.centralItemAttributesDisposable.add(self.centralItemSubtitle.get().start(next: { [weak self] subtitle in
             if let strongSelf = self {
                 if let subtitle = subtitle {
-                    let titleView = CounterContollerTitleView(theme: strongSelf.presentationData.theme)
-                    titleView.title = CounterContollerTitle(title: strongSelf.presentationData.strings.WallpaperPreview_Title, counter: subtitle)
+                    let titleView = CounterControllerTitleView(theme: strongSelf.presentationData.theme)
+                    titleView.title = CounterControllerTitle(title: strongSelf.presentationData.strings.WallpaperPreview_Title, counter: subtitle)
                     strongSelf.navigationItem.titleView = titleView
                     strongSelf.title = nil
                 } else {
@@ -446,7 +446,7 @@ public class WallpaperGalleryController: ViewController {
         }, controller: { [weak self] in
             return self
         })
-        self.displayNode = WallpaperGalleryControllerNode(controllerInteraction: controllerInteraction, pageGap: 0.0, disableTapNavigation: true)
+        self.displayNode = WallpaperGalleryControllerNode(context: self.context, controllerInteraction: controllerInteraction, pageGap: 0.0, disableTapNavigation: true)
         self.displayNodeDidLoad()
 
         (self.displayNode as? WallpaperGalleryControllerNode)?.nativeStatusBar = self.statusBar
@@ -527,10 +527,10 @@ public class WallpaperGalleryController: ViewController {
                 if forBoth && !strongSelf.context.isPremium {
                     let context = strongSelf.context
                     var replaceImpl: ((ViewController) -> Void)?
-                    let controller = context.sharedContext.makePremiumDemoController(context: context, subject: .wallpapers, action: {
+                    let controller = context.sharedContext.makePremiumDemoController(context: context, subject: .wallpapers, forceDark: false, action: {
                         let controller = context.sharedContext.makePremiumIntroController(context: context, source: .wallpapers, forceDark: false, dismissed: nil)
                         replaceImpl?(controller)
-                    })
+                    }, dismissed: nil)
                     replaceImpl = { [weak controller] c in
                         controller?.replace(with: c)
                     }
@@ -1127,7 +1127,7 @@ public class WallpaperGalleryController: ViewController {
                         let shareController = ShareController(context: context, subject: .url("https://t.me/bg/\(file.slug)\(optionsString)"))
                         shareController.actionCompleted = { [weak self] in
                             let presentationData = context.sharedContext.currentPresentationData.with { $0 }
-                            self?.present(UndoOverlayController(presentationData: presentationData, content: .linkCopied(text: presentationData.strings.Conversation_LinkCopied), elevatedLayout: false, animateInAsReplacement: false, action: { _ in return false }), in: .window(.root))
+                            self?.present(UndoOverlayController(presentationData: presentationData, content: .linkCopied(title: nil, text: presentationData.strings.Conversation_LinkCopied), elevatedLayout: false, animateInAsReplacement: false, action: { _ in return false }), in: .window(.root))
                         }
                         self?.present(shareController, in: .window(.root), blockInteraction: true)
                     }
@@ -1187,7 +1187,7 @@ public class WallpaperGalleryController: ViewController {
         if let controller = controller {
             controller.actionCompleted = { [weak self] in
                 let presentationData = context.sharedContext.currentPresentationData.with { $0 }
-                self?.present(UndoOverlayController(presentationData: presentationData, content: .linkCopied(text: presentationData.strings.Conversation_LinkCopied), elevatedLayout: false, animateInAsReplacement: false, action: { _ in return false }), in: .window(.root))
+                self?.present(UndoOverlayController(presentationData: presentationData, content: .linkCopied(title: nil, text: presentationData.strings.Conversation_LinkCopied), elevatedLayout: false, animateInAsReplacement: false, action: { _ in return false }), in: .window(.root))
             }
             self.present(controller, in: .window(.root), blockInteraction: true)
         }

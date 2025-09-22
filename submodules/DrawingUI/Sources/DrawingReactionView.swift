@@ -110,7 +110,7 @@ public class DrawingReactionEntityView: DrawingStickerEntityView {
     
     private weak var reactionContextNode: ReactionContextNode?
     fileprivate func presentReactionSelection() {
-        guard let containerView = self.containerView, let superview = containerView.superview?.superview?.superview?.superview, self.reactionContextNode == nil else {
+        guard let containerView = self.containerView, let superview = containerView.superview?.superview?.superview?.superview?.superview?.superview, self.reactionContextNode == nil else {
             return
         }
         
@@ -127,16 +127,18 @@ public class DrawingReactionEntityView: DrawingStickerEntityView {
             reactionContextNode.updateLayout(size: availableSize, insets: insets, anchorRect: anchorRect, centerAligned: true, isCoveredByInput: false, isAnimatingOut: false, transition: transition)
         }
         
-        let reactionContextNodeTransition: Transition = .immediate
+        let reactionContextNodeTransition: ComponentTransition = .immediate
         let reactionContextNode: ReactionContextNode
         reactionContextNode = ReactionContextNode(
             context: self.context,
             animationCache: self.context.animationCache,
             presentationData: self.context.sharedContext.currentPresentationData.with({ $0 }).withUpdated(theme: defaultDarkPresentationTheme),
-            items: reactionItems.map(ReactionContextItem.reaction),
+            items: reactionItems.map { ReactionContextItem.reaction(item: $0, icon: .none) },
             selectedItems: Set(),
             title: nil,
+            reactionsLocked: false,
             alwaysAllowPremiumReactions: false,
+            allPresetReactionsAreAvailable: false,
             getEmojiContent: { [weak self] animationCache, animationRenderer in
                 guard let self else {
                     preconditionFailure()
@@ -175,7 +177,7 @@ public class DrawingReactionEntityView: DrawingStickerEntityView {
         reactionContextNode.forceTailToRight = true
         reactionContextNode.forceDark = true
         self.reactionContextNode = reactionContextNode
-        
+                
         reactionContextNode.reactionSelected = { [weak self] updateReaction, _ in
             guard let self else {
                 return
@@ -187,7 +189,7 @@ public class DrawingReactionEntityView: DrawingStickerEntityView {
                 }
                 
                 if case let .file(_, type) = self.stickerEntity.content, case let .reaction(_, style) = type {
-                    self.stickerEntity.content = .file(animation, .reaction(updateReaction.reaction, style))
+                    self.stickerEntity.content = .file(.standalone(media: animation), .reaction(updateReaction.reaction, style))
                 }
                 
                 var nodeToTransitionOut: ASDisplayNode?
@@ -243,7 +245,7 @@ public class DrawingReactionEntityView: DrawingStickerEntityView {
                     var animation: TelegramMediaFile?
                     for reaction in availableReactions.reactions {
                         if reaction.value == updateReaction.reaction {
-                            animation = reaction.selectAnimation
+                            animation = reaction.selectAnimation._parse()
                             break
                         }
                     }
@@ -262,6 +264,24 @@ public class DrawingReactionEntityView: DrawingStickerEntityView {
                         }
                     })
                 }
+            case .stars:
+                let _ = (self.context.engine.stickers.availableReactions()
+                |> take(1)
+                |> deliverOnMainQueue).start(next: { availableReactions in
+                    guard let availableReactions else {
+                        return
+                    }
+                    var animation: TelegramMediaFile?
+                    for reaction in availableReactions.reactions {
+                        if reaction.value == updateReaction.reaction {
+                            animation = reaction.selectAnimation._parse()
+                            break
+                        }
+                    }
+                    if let animation {
+                        continueWithAnimationFile(animation)
+                    }
+                })
             }
         }
         
@@ -274,7 +294,7 @@ public class DrawingReactionEntityView: DrawingStickerEntityView {
                 let context = self.context
                 let presentationData = context.sharedContext.currentPresentationData.with { $0 }
                 
-                let controller = UndoOverlayController(presentationData: presentationData, content: .sticker(context: context, file: file, loop: true, title: nil, text: presentationData.strings.Story_Editor_TooltipPremiumReaction, undoText: nil, customAction: nil), elevatedLayout: true, animateInAsReplacement: false, blurred: true, action: { [weak self] action in
+                let controller = UndoOverlayController(presentationData: presentationData, content: .sticker(context: context, file: file, loop: true, title: nil, text: presentationData.strings.Story_Editor_TooltipPremiumReaction, undoText: nil, customAction: nil), elevatedLayout: true, animateInAsReplacement: false, appearance: UndoOverlayController.Appearance(isBlurred: true), action: { [weak self] action in
                     if case .info = action, let self {
                         let controller = context.sharedContext.makePremiumIntroController(context: context, source: .storiesExpirationDurations, forceDark: true, dismissed: nil)
                         self.containerView?.push(controller)

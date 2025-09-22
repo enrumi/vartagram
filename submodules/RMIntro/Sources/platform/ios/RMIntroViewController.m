@@ -19,6 +19,9 @@
 
 #import <LegacyComponents/LegacyComponents.h>
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+
 typedef enum {
     Inch35 = 0,
     Inch4 = 1,
@@ -325,7 +328,6 @@ typedef enum {
     if ([EAGLContext currentContext] == _glkView.context)
         [EAGLContext setCurrentContext:nil];
 
-    _glkView.context = nil;
     _context = nil;
     [_glkView removeFromSuperview];
     _glkView = nil;
@@ -777,3 +779,5 @@ NSInteger _current_page_end;
 }
 
 @end
+
+#pragma clang diagnostic pop

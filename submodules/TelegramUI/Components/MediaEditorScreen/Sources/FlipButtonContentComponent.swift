@@ -32,7 +32,7 @@ final class FlipButtonContentComponent: Component {
         private let icon = SimpleLayer()
         
         init() {
-            self.backgroundView = BlurredBackgroundView(color: UIColor(white: 0.0, alpha: 0.5), enableBlur: true)
+            self.backgroundView = BlurredBackgroundView(color: UIColor(white: 0.2, alpha: 0.45), enableBlur: true)
             
             super.init(frame: CGRect())
             
@@ -61,7 +61,7 @@ final class FlipButtonContentComponent: Component {
             self.icon.add(animation, forKey: "transform.rotation.z")
         }
         
-        func update(component: FlipButtonContentComponent, availableSize: CGSize, transition: Transition) -> CGSize {
+        func update(component: FlipButtonContentComponent, availableSize: CGSize, transition: ComponentTransition) -> CGSize {
             self.component = component
             
             let size = CGSize(width: 48.0, height: 48.0)
@@ -82,7 +82,7 @@ final class FlipButtonContentComponent: Component {
         return View()
     }
 
-    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, transition: transition)
     }
 }

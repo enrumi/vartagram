@@ -28,6 +28,10 @@ func _internal_clearRecentlySearchedPeers(postbox: Postbox) -> Signal<Void, NoEr
 
 public struct RecentlySearchedPeerSubpeerSummary: Equatable {
     public let count: Int
+    
+    public init(count: Int) {
+        self.count = count
+    }
 }
 
 public struct RecentlySearchedPeer: Equatable {
@@ -36,6 +40,14 @@ public struct RecentlySearchedPeer: Equatable {
     public let notificationSettings: TelegramPeerNotificationSettings?
     public let unreadCount: Int32
     public let subpeerSummary: RecentlySearchedPeerSubpeerSummary?
+    
+    public init(peer: RenderedPeer, presence: TelegramUserPresence?, notificationSettings: TelegramPeerNotificationSettings?, unreadCount: Int32, subpeerSummary: RecentlySearchedPeerSubpeerSummary?) {
+        self.peer = peer
+        self.presence = presence
+        self.notificationSettings = notificationSettings
+        self.unreadCount = unreadCount
+        self.subpeerSummary = subpeerSummary
+    }
 }
 
 public func _internal_recentlySearchedPeers(postbox: Postbox) -> Signal<[RecentlySearchedPeer], NoError> {
@@ -70,8 +82,15 @@ public func _internal_recentlySearchedPeers(postbox: Postbox) -> Signal<[Recentl
                 if let peerView = view.views[.peer(peerId: peerId, components: .all)] as? PeerView {
                     var presence: TelegramUserPresence?
                     var unreadCount = unreadCounts[peerId] ?? 0
+                    var subpeerSummary: RecentlySearchedPeerSubpeerSummary?
+                    
+                    if let cachedData = peerView.cachedData as? CachedChannelData {
+                        let count: Int32 = cachedData.participantsSummary.memberCount ?? 0
+                        subpeerSummary = RecentlySearchedPeerSubpeerSummary(count: Int(count))
+                    }
+                    
                     if let peer = peerView.peers[peerId] {
-                        if let associatedPeerId = peer.associatedPeerId {
+                        if peer is TelegramSecretChat, let associatedPeerId = peer.associatedPeerId {
                             presence = peerView.peerPresences[associatedPeerId] as? TelegramUserPresence
                         } else {
                             presence = peerView.peerPresences[peerId] as? TelegramUserPresence
@@ -82,17 +101,20 @@ public func _internal_recentlySearchedPeers(postbox: Postbox) -> Signal<[Recentl
                             } else {
                                 unreadCount = 0
                             }
+                            
+                            if channel.isMonoForum, let linkedMonoforumId = channel.linkedMonoforumId {
+                                subpeerSummary = nil
+                                
+                                if let cachedData = peerView.associatedCachedData[linkedMonoforumId] as? CachedChannelData {
+                                    let count: Int32 = cachedData.participantsSummary.memberCount ?? 0
+                                    subpeerSummary = RecentlySearchedPeerSubpeerSummary(count: Int(count))
+                                }
+                            }
                         }
                         
                         if let group = peer as? TelegramGroup, let migrationReference = group.migrationReference {
                             migratedPeerIds = [group.id: migrationReference.peerId]
                         }
-                    }
-                    
-                    var subpeerSummary: RecentlySearchedPeerSubpeerSummary?
-                    if let cachedData = peerView.cachedData as? CachedChannelData {
-                        let count: Int32 = cachedData.participantsSummary.memberCount ?? 0
-                        subpeerSummary = RecentlySearchedPeerSubpeerSummary(count: Int(count))
                     }
                     
                     result.append(RecentlySearchedPeer(peer: RenderedPeer(peerId: peerId, peers: SimpleDictionary(peerView.peers), associatedMedia: peerView.media), presence: presence, notificationSettings: peerView.notificationSettings as? TelegramPeerNotificationSettings, unreadCount: unreadCount, subpeerSummary: subpeerSummary))

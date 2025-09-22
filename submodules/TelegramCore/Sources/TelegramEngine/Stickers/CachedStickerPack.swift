@@ -6,17 +6,17 @@ import MurMurHash32
 public enum CachedStickerPackResult {
     case none
     case fetching
-    case result(StickerPackCollectionInfo, [StickerPackItem], Bool)
+    case result(StickerPackCollectionInfo.Accessor, [StickerPackItem], Bool)
 }
 
 func cacheStickerPack(transaction: Transaction, info: StickerPackCollectionInfo, items: [StickerPackItem], reference: StickerPackReference? = nil) {
-    if let entry = CodableEntry(CachedStickerPack(info: info, items: items, hash: info.hash)) {
-        transaction.putItemCacheEntry(id: ItemCacheEntryId(collectionId: Namespaces.CachedItemCollection.cachedStickerPacks, key: CachedStickerPack.cacheKey(info.id)), entry: entry)
-    }
-    if let entry = CodableEntry(CachedStickerPack(info: info, items: items, hash: info.hash)) {
-        transaction.putItemCacheEntry(id: ItemCacheEntryId(collectionId: Namespaces.CachedItemCollection.cachedStickerPacks, key: CachedStickerPack.cacheKey(shortName: info.shortName.lowercased())), entry: entry)
+    guard let entry = CodableEntry(CachedStickerPack(info: info, items: items, hash: info.hash)) else {
+        return
     }
     
+    transaction.putItemCacheEntry(id: ItemCacheEntryId(collectionId: Namespaces.CachedItemCollection.cachedStickerPacks, key: CachedStickerPack.cacheKey(info.id)), entry: entry)
+    transaction.putItemCacheEntry(id: ItemCacheEntryId(collectionId: Namespaces.CachedItemCollection.cachedStickerPacks, key: CachedStickerPack.cacheKey(shortName: info.shortName.lowercased())), entry: entry)
+        
     if let reference = reference {
         var namespace: Int32?
         var id: ItemCollectionId.Id?
@@ -55,19 +55,20 @@ func cacheStickerPack(transaction: Transaction, info: StickerPackCollectionInfo,
             case .name:
                 namespace = info.id.namespace
                 id = info.id.id
+            case .tonGifts:
+                namespace = Namespaces.ItemCollection.CloudTonGifts
+                id = 0
         }
         if let namespace = namespace, let id = id {
-            if let entry = CodableEntry(CachedStickerPack(info: info, items: items, hash: info.hash)) {
-                transaction.putItemCacheEntry(id: ItemCacheEntryId(collectionId: Namespaces.CachedItemCollection.cachedStickerPacks, key: CachedStickerPack.cacheKey(ItemCollectionId(namespace: namespace, id: id))), entry: entry)
-            }
+            transaction.putItemCacheEntry(id: ItemCacheEntryId(collectionId: Namespaces.CachedItemCollection.cachedStickerPacks, key: CachedStickerPack.cacheKey(ItemCollectionId(namespace: namespace, id: id))), entry: entry)
         }
     }
 }
 
-func _internal_cachedStickerPack(postbox: Postbox, network: Network, reference: StickerPackReference, forceRemote: Bool) -> Signal<CachedStickerPackResult, NoError> {
+func _internal_cachedStickerPack(postbox: Postbox, network: Network, reference: StickerPackReference, forceRemote: Bool, ignoreCache: Bool = false) -> Signal<CachedStickerPackResult, NoError> {
     return postbox.transaction { transaction -> CachedStickerPackResult? in
         if let (info, items, local) = cachedStickerPack(transaction: transaction, reference: reference) {
-            if local {
+            if local && !ignoreCache {
                 return .result(info, items, true)
             }
         }
@@ -161,6 +162,20 @@ func _internal_cachedStickerPack(postbox: Postbox, network: Network, reference: 
                         } else {
                             return (.fetching, true, nil)
                         }
+                    case .tonGifts:
+                        let namespace = Namespaces.ItemCollection.CloudTonGifts
+                        let id: ItemCollectionId.Id = 0
+                        if let cached = transaction.retrieveItemCacheEntry(id: ItemCacheEntryId(collectionId: Namespaces.CachedItemCollection.cachedStickerPacks, key: CachedStickerPack.cacheKey(ItemCollectionId(namespace: namespace, id: id))))?.get(CachedStickerPack.self), let info = cached.info {
+                            previousHash = cached.hash
+                            let current: CachedStickerPackResult = .result(info, cached.items, false)
+                            if cached.hash != info.hash {
+                                return (current, true, previousHash)
+                            } else {
+                                return (current, false, previousHash)
+                            }
+                        } else {
+                            return (.fetching, true, nil)
+                        }
                     case .emojiGenericAnimations:
                         let namespace = Namespaces.ItemCollection.CloudEmojiGenericAnimations
                         let id: ItemCollectionId.Id = 0
@@ -230,7 +245,7 @@ func _internal_cachedStickerPack(postbox: Postbox, network: Network, reference: 
                             if let result = result {
                                 cacheStickerPack(transaction: transaction, info: result.0, items: result.1, reference: reference)
                                 let currentInfo = transaction.getItemCollectionInfo(collectionId: result.0.id) as? StickerPackCollectionInfo
-                                return .result(result.0, result.1, currentInfo != nil)
+                                return .result(StickerPackCollectionInfo.Accessor(result.0), result.1, currentInfo != nil)
                             } else {
                                 return .none
                             }
@@ -246,7 +261,7 @@ func _internal_cachedStickerPack(postbox: Postbox, network: Network, reference: 
     }
 }
     
-func cachedStickerPack(transaction: Transaction, reference: StickerPackReference) -> (StickerPackCollectionInfo, [StickerPackItem], Bool)? {
+func cachedStickerPack(transaction: Transaction, reference: StickerPackReference) -> (StickerPackCollectionInfo.Accessor, [StickerPackItem], Bool)? {
     let namespaces: [Int32] = [Namespaces.ItemCollection.CloudStickerPacks, Namespaces.ItemCollection.CloudMaskPacks, Namespaces.ItemCollection.CloudEmojiPacks]
     switch reference {
         case let .id(id, _):
@@ -254,7 +269,7 @@ func cachedStickerPack(transaction: Transaction, reference: StickerPackReference
                 if let currentInfo = transaction.getItemCollectionInfo(collectionId: ItemCollectionId(namespace: namespace, id: id)) as? StickerPackCollectionInfo {
                     let items = transaction.getItemCollectionItems(collectionId: ItemCollectionId(namespace: namespace, id: id))
                     if !items.isEmpty {
-                        return (currentInfo, items.compactMap { $0 as? StickerPackItem }, true)
+                        return (StickerPackCollectionInfo.Accessor(currentInfo), items.compactMap { $0 as? StickerPackItem }, true)
                     }
                 }
                 if let cached = transaction.retrieveItemCacheEntry(id: ItemCacheEntryId(collectionId: Namespaces.CachedItemCollection.cachedStickerPacks, key: CachedStickerPack.cacheKey(ItemCollectionId(namespace: namespace, id: id))))?.get(CachedStickerPack.self), let info = cached.info {
@@ -269,7 +284,7 @@ func cachedStickerPack(transaction: Transaction, reference: StickerPackReference
                         if info.shortName.lowercased() == shortName {
                             let items = transaction.getItemCollectionItems(collectionId: info.id)
                             if !items.isEmpty {
-                                return (info, items.compactMap { $0 as? StickerPackItem }, true)
+                                return (StickerPackCollectionInfo.Accessor(info), items.compactMap { $0 as? StickerPackItem }, true)
                             }
                         }
                     }
@@ -284,7 +299,7 @@ func cachedStickerPack(transaction: Transaction, reference: StickerPackReference
             if let currentInfo = transaction.getItemCollectionInfo(collectionId: ItemCollectionId(namespace: namespace, id: id)) as? StickerPackCollectionInfo {
                 let items = transaction.getItemCollectionItems(collectionId: ItemCollectionId(namespace: namespace, id: id))
                 if !items.isEmpty {
-                    return (currentInfo, items.compactMap { $0 as? StickerPackItem }, true)
+                    return (StickerPackCollectionInfo.Accessor(currentInfo), items.compactMap { $0 as? StickerPackItem }, true)
                 }
             }
             if let cached = transaction.retrieveItemCacheEntry(id: ItemCacheEntryId(collectionId: Namespaces.CachedItemCollection.cachedStickerPacks, key: CachedStickerPack.cacheKey(ItemCollectionId(namespace: namespace, id: id))))?.get(CachedStickerPack.self), let info = cached.info {
@@ -296,7 +311,7 @@ func cachedStickerPack(transaction: Transaction, reference: StickerPackReference
             if let currentInfo = transaction.getItemCollectionInfo(collectionId: ItemCollectionId(namespace: namespace, id: id)) as? StickerPackCollectionInfo {
                 let items = transaction.getItemCollectionItems(collectionId: ItemCollectionId(namespace: namespace, id: id))
                 if !items.isEmpty {
-                    return (currentInfo, items.compactMap { $0 as? StickerPackItem }, true)
+                    return (StickerPackCollectionInfo.Accessor(currentInfo), items.compactMap { $0 as? StickerPackItem }, true)
                 }
             }
             if let cached = transaction.retrieveItemCacheEntry(id: ItemCacheEntryId(collectionId: Namespaces.CachedItemCollection.cachedStickerPacks, key: CachedStickerPack.cacheKey(ItemCollectionId(namespace: namespace, id: id))))?.get(CachedStickerPack.self), let info = cached.info {
@@ -308,7 +323,7 @@ func cachedStickerPack(transaction: Transaction, reference: StickerPackReference
             if let currentInfo = transaction.getItemCollectionInfo(collectionId: ItemCollectionId(namespace: namespace, id: id)) as? StickerPackCollectionInfo {
                 let items = transaction.getItemCollectionItems(collectionId: ItemCollectionId(namespace: namespace, id: id))
                 if !items.isEmpty {
-                    return (currentInfo, items.compactMap { $0 as? StickerPackItem }, true)
+                    return (StickerPackCollectionInfo.Accessor(currentInfo), items.compactMap { $0 as? StickerPackItem }, true)
                 }
             }
             if let cached = transaction.retrieveItemCacheEntry(id: ItemCacheEntryId(collectionId: Namespaces.CachedItemCollection.cachedStickerPacks, key: CachedStickerPack.cacheKey(ItemCollectionId(namespace: namespace, id: id))))?.get(CachedStickerPack.self), let info = cached.info {
@@ -320,19 +335,31 @@ func cachedStickerPack(transaction: Transaction, reference: StickerPackReference
             if let currentInfo = transaction.getItemCollectionInfo(collectionId: ItemCollectionId(namespace: namespace, id: id)) as? StickerPackCollectionInfo {
                 let items = transaction.getItemCollectionItems(collectionId: ItemCollectionId(namespace: namespace, id: id))
                 if !items.isEmpty {
-                    return (currentInfo, items.compactMap { $0 as? StickerPackItem }, true)
+                    return (StickerPackCollectionInfo.Accessor(currentInfo), items.compactMap { $0 as? StickerPackItem }, true)
                 }
             }
             if let cached = transaction.retrieveItemCacheEntry(id: ItemCacheEntryId(collectionId: Namespaces.CachedItemCollection.cachedStickerPacks, key: CachedStickerPack.cacheKey(ItemCollectionId(namespace: namespace, id: id))))?.get(CachedStickerPack.self), let info = cached.info {
                 return (info, cached.items, false)
             }
+    case .tonGifts:
+        let namespace = Namespaces.ItemCollection.CloudTonGifts
+        let id: ItemCollectionId.Id = 0
+        if let currentInfo = transaction.getItemCollectionInfo(collectionId: ItemCollectionId(namespace: namespace, id: id)) as? StickerPackCollectionInfo {
+            let items = transaction.getItemCollectionItems(collectionId: ItemCollectionId(namespace: namespace, id: id))
+            if !items.isEmpty {
+                return (StickerPackCollectionInfo.Accessor(currentInfo), items.compactMap { $0 as? StickerPackItem }, true)
+            }
+        }
+        if let cached = transaction.retrieveItemCacheEntry(id: ItemCacheEntryId(collectionId: Namespaces.CachedItemCollection.cachedStickerPacks, key: CachedStickerPack.cacheKey(ItemCollectionId(namespace: namespace, id: id))))?.get(CachedStickerPack.self), let info = cached.info {
+            return (info, cached.items, false)
+        }
         case .emojiGenericAnimations:
             let namespace = Namespaces.ItemCollection.CloudEmojiGenericAnimations
             let id: ItemCollectionId.Id = 0
             if let currentInfo = transaction.getItemCollectionInfo(collectionId: ItemCollectionId(namespace: namespace, id: id)) as? StickerPackCollectionInfo {
                 let items = transaction.getItemCollectionItems(collectionId: ItemCollectionId(namespace: namespace, id: id))
                 if !items.isEmpty {
-                    return (currentInfo, items.compactMap { $0 as? StickerPackItem }, true)
+                    return (StickerPackCollectionInfo.Accessor(currentInfo), items.compactMap { $0 as? StickerPackItem }, true)
                 }
             }
             if let cached = transaction.retrieveItemCacheEntry(id: ItemCacheEntryId(collectionId: Namespaces.CachedItemCollection.cachedStickerPacks, key: CachedStickerPack.cacheKey(ItemCollectionId(namespace: namespace, id: id))))?.get(CachedStickerPack.self), let info = cached.info {
@@ -344,7 +371,7 @@ func cachedStickerPack(transaction: Transaction, reference: StickerPackReference
             if let currentInfo = transaction.getItemCollectionInfo(collectionId: ItemCollectionId(namespace: namespace, id: id)) as? StickerPackCollectionInfo {
                 let items = transaction.getItemCollectionItems(collectionId: ItemCollectionId(namespace: namespace, id: id))
                 if !items.isEmpty {
-                    return (currentInfo, items.compactMap { $0 as? StickerPackItem }, true)
+                    return (StickerPackCollectionInfo.Accessor(currentInfo), items.compactMap { $0 as? StickerPackItem }, true)
                 }
             }
             if let cached = transaction.retrieveItemCacheEntry(id: ItemCacheEntryId(collectionId: Namespaces.CachedItemCollection.cachedStickerPacks, key: CachedStickerPack.cacheKey(ItemCollectionId(namespace: namespace, id: id))))?.get(CachedStickerPack.self), let info = cached.info {
@@ -356,7 +383,7 @@ func cachedStickerPack(transaction: Transaction, reference: StickerPackReference
             if let currentInfo = transaction.getItemCollectionInfo(collectionId: ItemCollectionId(namespace: namespace, id: id)) as? StickerPackCollectionInfo {
                 let items = transaction.getItemCollectionItems(collectionId: ItemCollectionId(namespace: namespace, id: id))
                 if !items.isEmpty {
-                    return (currentInfo, items.compactMap { $0 as? StickerPackItem }, true)
+                    return (StickerPackCollectionInfo.Accessor(currentInfo), items.compactMap { $0 as? StickerPackItem }, true)
                 }
             }
             if let cached = transaction.retrieveItemCacheEntry(id: ItemCacheEntryId(collectionId: Namespaces.CachedItemCollection.cachedStickerPacks, key: CachedStickerPack.cacheKey(ItemCollectionId(namespace: namespace, id: id))))?.get(CachedStickerPack.self), let info = cached.info {
@@ -368,7 +395,7 @@ func cachedStickerPack(transaction: Transaction, reference: StickerPackReference
             if let currentInfo = transaction.getItemCollectionInfo(collectionId: ItemCollectionId(namespace: namespace, id: id)) as? StickerPackCollectionInfo {
                 let items = transaction.getItemCollectionItems(collectionId: ItemCollectionId(namespace: namespace, id: id))
                 if !items.isEmpty {
-                    return (currentInfo, items.compactMap { $0 as? StickerPackItem }, true)
+                    return (StickerPackCollectionInfo.Accessor(currentInfo), items.compactMap { $0 as? StickerPackItem }, true)
                 }
             }
             if let cached = transaction.retrieveItemCacheEntry(id: ItemCacheEntryId(collectionId: Namespaces.CachedItemCollection.cachedStickerPacks, key: CachedStickerPack.cacheKey(ItemCollectionId(namespace: namespace, id: id))))?.get(CachedStickerPack.self), let info = cached.info {

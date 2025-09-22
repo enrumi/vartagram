@@ -4,6 +4,9 @@ import SceneKit
 import Display
 import AppBundle
 import SwiftSignalKit
+import PremiumStarComponent
+
+private let sceneVersion: Int = 1
 
 final class SwirlStarsView: UIView, PhoneDemoDecorationView {
     private let sceneView: SCNView
@@ -13,8 +16,8 @@ final class SwirlStarsView: UIView, PhoneDemoDecorationView {
     override init(frame: CGRect) {
         self.sceneView = SCNView(frame: CGRect(origin: .zero, size: frame.size))
         self.sceneView.backgroundColor = .clear
-        if let url = getAppBundle().url(forResource: "swirl", withExtension: "scn") {
-            self.sceneView.scene = try? SCNScene(url: url, options: nil)
+        if let scene = loadCompressedScene(name: "swirl", version: sceneVersion) {
+            self.sceneView.scene = scene
         }
         self.sceneView.isUserInteractionEnabled = false
         self.sceneView.preferredFramesPerSecond = 60

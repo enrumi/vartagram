@@ -6,18 +6,10 @@ build --apple_crosstool_top=@local_config_apple_cc//:toolchain
 build --crosstool_top=@local_config_apple_cc//:toolchain
 build --host_crosstool_top=@local_config_apple_cc//:toolchain
 
-build --cxxopt='-std=c++17'
-build --per_file_copt="third-party/webrtc/.*\.cpp$","@-std=c++17"
-build --per_file_copt="third-party/webrtc/.*\.cc$","@-std=c++17"
-build --per_file_copt="third-party/webrtc/.*\.mm$","@-std=c++17"
-build --per_file_copt="submodules/LottieMeshSwift/LottieMeshBinding/Sources/.*\.mm$","@-std=c++17"
-
-build --swiftcopt=-whole-module-optimization
+#build --swiftcopt=-whole-module-optimization
 
 build --per_file_copt=".*\.m$","@-fno-objc-msgsend-selector-stubs"
 build --per_file_copt=".*\.mm$","@-fno-objc-msgsend-selector-stubs"
-
-build --linkopt="-ld_classic"
 
 build --features=debug_prefix_map_pwd_is_dot
 build --features=swift.cacheable_swiftmodules

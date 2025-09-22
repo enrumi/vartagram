@@ -419,8 +419,6 @@ public class AvatarGalleryController: ViewController, StandalonePresentableContr
     private let centralItemAttributesDisposable = DisposableSet();
     
     public var openAvatarSetup: ((@escaping () -> Void) -> Void)?
-    public var avatarPhotoEditCompletion: ((UIImage) -> Void)?
-    public var avatarVideoEditCompletion: ((UIImage, URL, TGVideoEditAdjustments?) -> Void)?
     
     public var removedEntry: ((AvatarGalleryEntry) -> Void)?
     
@@ -633,7 +631,7 @@ public class AvatarGalleryController: ViewController, StandalonePresentableContr
         }, controller: { [weak self] in
             return self
         })
-        self.displayNode = GalleryControllerNode(controllerInteraction: controllerInteraction)
+        self.displayNode = GalleryControllerNode(context: self.context, controllerInteraction: controllerInteraction)
         self.displayNodeDidLoad()
         
         self.galleryNode.pager.updateOnReplacement = true

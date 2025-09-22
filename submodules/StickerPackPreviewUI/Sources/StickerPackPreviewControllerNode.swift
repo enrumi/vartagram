@@ -28,7 +28,7 @@ private struct StickerPackPreviewGridEntry: Comparable, Identifiable {
     }
     
     func item(context: AccountContext, interaction: StickerPackPreviewInteraction, theme: PresentationTheme) -> StickerPackPreviewGridItem {
-        return StickerPackPreviewGridItem(context: context, stickerItem: self.stickerItem, interaction: interaction, theme: theme, isPremium: false, isLocked: false, isEmpty: false)
+        return StickerPackPreviewGridItem(context: context, stickerItem: self.stickerItem, interaction: interaction, theme: theme, isPremium: false, isLocked: false, isEmpty: false, isEditable: false, isEditing: false)
     }
 }
 
@@ -46,7 +46,7 @@ private struct StickerPackPreviewGridTransaction {
     }
 }
 
-final class StickerPackPreviewControllerNode: ViewControllerTracingNode, UIScrollViewDelegate {
+final class StickerPackPreviewControllerNode: ViewControllerTracingNode, ASScrollViewDelegate {
     private let context: AccountContext
     private let openShare: (() -> Void)?
     private var presentationData: PresentationData
@@ -144,7 +144,7 @@ final class StickerPackPreviewControllerNode: ViewControllerTracingNode, UIScrol
         
         super.init()
         
-        self.interaction = StickerPackPreviewInteraction(playAnimatedStickers: false, addStickerPack: { _, _ in }, removeStickerPack: { _ in }, emojiSelected: { _, _ in }, emojiLongPressed: { _, _, _, _ in })
+        self.interaction = StickerPackPreviewInteraction(playAnimatedStickers: false, addStickerPack: { _, _ in }, removeStickerPack: { _ in }, emojiSelected: { _, _ in }, emojiLongPressed: { _, _, _, _ in }, addPressed: {})
         
         self.backgroundColor = nil
         self.isOpaque = false
@@ -152,7 +152,7 @@ final class StickerPackPreviewControllerNode: ViewControllerTracingNode, UIScrol
         self.dimNode.view.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(self.dimTapGesture(_:))))
         self.addSubnode(self.dimNode)
         
-        self.wrappingScrollNode.view.delegate = self
+        self.wrappingScrollNode.view.delegate = self.wrappedScrollViewDelegate
         self.addSubnode(self.wrappingScrollNode)
         
         self.wrappingScrollNode.addSubnode(self.cancelButtonNode)
@@ -222,9 +222,9 @@ final class StickerPackPreviewControllerNode: ViewControllerTracingNode, UIScrol
                                     menuItems.append(.action(ContextMenuActionItem(text: strongSelf.presentationData.strings.StickerPack_Send, icon: { theme in generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Resend"), color: theme.contextMenu.primaryColor) }, action: { [weak self] _, f in
                                         if let strongSelf = self, let peekController = strongSelf.peekController {
                                             if let animationNode = (peekController.contentNode as? StickerPreviewPeekContentNode)?.animationNode {
-                                                let _ = strongSelf.sendSticker?(.standalone(media: item.file), animationNode.view, animationNode.bounds)
+                                                let _ = strongSelf.sendSticker?(.standalone(media: item.file._parse()), animationNode.view, animationNode.bounds)
                                             } else if let imageNode = (peekController.contentNode as? StickerPreviewPeekContentNode)?.imageNode {
-                                                let _ = strongSelf.sendSticker?(.standalone(media: item.file), imageNode.view, imageNode.bounds)
+                                                let _ = strongSelf.sendSticker?(.standalone(media: item.file._parse()), imageNode.view, imageNode.bounds)
                                             }
                                         }
                                         f(.default)
@@ -234,13 +234,13 @@ final class StickerPackPreviewControllerNode: ViewControllerTracingNode, UIScrol
                                     f(.default)
                                     
                                     if let strongSelf = self {
-                                        let _ = strongSelf.context.engine.stickers.toggleStickerSaved(file: item.file, saved: !isStarred).start(next: { result in
+                                        let _ = strongSelf.context.engine.stickers.toggleStickerSaved(file: item.file._parse(), saved: !isStarred).start(next: { result in
                                             
                                         })
                                     }
                                 })))
                             }
-                            return (itemNode.view, itemNode.bounds, StickerPreviewPeekContent(context: strongSelf.context, theme: strongSelf.presentationData.theme, strings: strongSelf.presentationData.strings, item: .pack(item.file), isLocked: item.file.isPremiumSticker && !hasPremium, menu: menuItems, openPremiumIntro: {
+                            return (itemNode.view, itemNode.bounds, StickerPreviewPeekContent(context: strongSelf.context, theme: strongSelf.presentationData.theme, strings: strongSelf.presentationData.strings, item: .pack(item.file._parse()), isLocked: item.file.isPremiumSticker && !hasPremium, menu: menuItems, openPremiumIntro: {
                                 
                             }))
                         } else {
@@ -539,11 +539,12 @@ final class StickerPackPreviewControllerNode: ViewControllerTracingNode, UIScrol
                             guard let strongSelf = self, let (positionInList, _) = indexAndItems else {
                                 return
                             }
-                            strongSelf.actionPerformed?(info, items, .remove(positionInList: positionInList))
+                            strongSelf.actionPerformed?(info._parse(), items, .remove(positionInList: positionInList))
                         })
                     } else {
-                        let _ = self.context.engine.stickers.addStickerPackInteractively(info: info, items: items).start()
-                        self.actionPerformed?(info, items, .add)
+                        let parsedInfo = info._parse()
+                        let _ = self.context.engine.stickers.addStickerPackInteractively(info: parsedInfo, items: items).start()
+                        self.actionPerformed?(parsedInfo, items, .add)
                     }
                     self.cancelButtonPressed()
                 default:

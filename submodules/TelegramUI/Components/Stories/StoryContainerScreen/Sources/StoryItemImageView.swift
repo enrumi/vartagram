@@ -66,7 +66,7 @@ final class StoryItemImageView: UIView {
         }
     }
     
-    func update(context: AccountContext, strings: PresentationStrings, peer: EnginePeer, storyId: Int32, media: EngineMedia, size: CGSize, isCaptureProtected: Bool, attemptSynchronous: Bool, transition: Transition) {
+    func update(context: AccountContext, strings: PresentationStrings, peer: EnginePeer, storyId: Int32, media: EngineMedia, size: CGSize, isCaptureProtected: Bool, attemptSynchronous: Bool, transition: ComponentTransition) {
         self.backgroundColor = isCaptureProtected ? UIColor(rgb: 0x181818) : nil
         
         var dimensions: CGSize?
@@ -164,8 +164,18 @@ final class StoryItemImageView: UIView {
                         }
                     }
                     
-                    self.disposable = (context.account.postbox.mediaBox.cachedResourceRepresentation(file.resource, representation: CachedVideoFirstFrameRepresentation(), complete: true, fetch: true, attemptSynchronously: false)
-                    |> map { result -> UIImage? in
+                    let fullSize = context.account.postbox.mediaBox.cachedResourceRepresentation(file.resource, representation: CachedVideoFirstFrameRepresentation(), complete: true, fetch: true, attemptSynchronously: false)
+                    var previewSize: Signal<MediaResourceData?, NoError> = .single(nil)
+                    if let representation = file.previewRepresentations.first {
+                        previewSize = context.account.postbox.mediaBox.resourceData(representation.resource, option: .complete(waitUntilFetchStatus: false))
+                        |> map(Optional.init)
+                    }
+                    
+                    self.disposable = (combineLatest(
+                        fullSize,
+                        previewSize
+                    )
+                    |> map { result, previewResult -> UIImage? in
                         if result.complete {
                             if #available(iOS 15.0, *) {
                                 if let image = UIImage(contentsOfFile: result.path)?.preparingForDisplay() {
@@ -175,6 +185,20 @@ final class StoryItemImageView: UIView {
                                 }
                             } else {
                                 if let image = UIImage(contentsOfFile: result.path)?.precomposed() {
+                                    return image
+                                } else {
+                                    return nil
+                                }
+                            }
+                        } else if let previewResult, previewResult.complete {
+                            if #available(iOS 15.0, *) {
+                                if let image = UIImage(contentsOfFile: previewResult.path)?.preparingForDisplay() {
+                                    return image
+                                } else {
+                                    return nil
+                                }
+                            } else {
+                                if let image = UIImage(contentsOfFile: previewResult.path)?.precomposed() {
                                     return image
                                 } else {
                                     return nil
@@ -272,7 +296,7 @@ final class CaptureProtectedInfoComponent: Component {
             fatalError("init(coder:) has not been implemented")
         }
         
-        func update(component: CaptureProtectedInfoComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+        func update(component: CaptureProtectedInfoComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
             let iconSize = self.icon.update(
                 transition: transition,
                 component: AnyComponent(BundleIconComponent(
@@ -343,7 +367,7 @@ final class CaptureProtectedInfoComponent: Component {
         return View(frame: CGRect())
     }
     
-    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
 }

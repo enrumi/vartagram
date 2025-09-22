@@ -347,6 +347,7 @@ public final class MetalEngineSubjectContext {
     fileprivate var computeOperations: [ComputeOperation] = []
     fileprivate var renderToLayerOperationsGroupedByState: [ObjectIdentifier: [RenderToLayerOperation]] = [:]
     fileprivate var freeResourcesOnCompletion: [MetalEngineResource] = []
+    fileprivate var customCompletions: [() -> Void] = []
     
     fileprivate init(device: MTLDevice, impl: MetalEngine.Impl) {
         self.device = device
@@ -445,6 +446,10 @@ public final class MetalEngineSubjectContext {
         return self.compute(state: state, inputs: noInputPlaceholder, commands: { commandBuffer, state, _ in
             return commands(commandBuffer, state)
         })
+    }
+    
+    public func addCustomCompletion(_ customCompletion: @escaping () -> Void) {
+        self.customCompletions.append(customCompletion)
     }
 }
 
@@ -686,17 +691,7 @@ public final class MetalEngine {
             }
             library = try? device.makeDefaultLibrary(bundle: bundle)
             #else
-            let mainBundle = Bundle(for: Impl.self)
-            guard let path = mainBundle.path(forResource: "MetalEngineMetalSourcesBundle", ofType: "bundle") else {
-                return nil
-            }
-            guard let bundle = Bundle(path: path) else {
-                return nil
-            }
-            guard let path = bundle.path(forResource: "MetalEngineShaders", ofType: "metallib") else {
-                return nil
-            }
-            library = try? device.makeLibrary(URL: .init(fileURLWithPath: path))
+            library = try? device.makeDefaultLibrary(bundle: Bundle.module)
             #endif
             
             
@@ -1049,12 +1044,16 @@ public final class MetalEngine {
                 }
             }
             
-            if !subjectContext.freeResourcesOnCompletion.isEmpty {
+            if !subjectContext.freeResourcesOnCompletion.isEmpty || !subjectContext.customCompletions.isEmpty {
                 let freeResourcesOnCompletion = subjectContext.freeResourcesOnCompletion
+                let customCompletions = subjectContext.customCompletions
                 commandBuffer.addCompletedHandler { _ in
                     DispatchQueue.main.async {
                         for resource in freeResourcesOnCompletion {
                             resource.free()
+                        }
+                        for customCompletion in customCompletions {
+                            customCompletion()
                         }
                     }
                 }

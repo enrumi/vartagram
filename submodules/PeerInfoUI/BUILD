@@ -67,7 +67,6 @@ swift_library(
         "//submodules/TelegramIntents:TelegramIntents",
         "//submodules/SolidRoundedButtonNode:SolidRoundedButtonNode",
         "//submodules/ChatListSearchItemHeader:ChatListSearchItemHeader",
-        "//submodules/StatisticsUI:StatisticsUI",
         "//submodules/ChatListFilterSettingsHeaderItem:ChatListFilterSettingsHeaderItem",
         "//submodules/InviteLinksUI:InviteLinksUI",
         "//submodules/UIKitRuntimeUtils:UIKitRuntimeUtils",
@@ -77,6 +76,10 @@ swift_library(
         "//submodules/Components/ReactionImageComponent:ReactionImageComponent",
         "//submodules/Components/LottieAnimationComponent:LottieAnimationComponent",
         "//submodules/TelegramUI/Components/SendInviteLinkScreen",
+        "//submodules/TelegramUI/Components/GroupStickerPackSetupController",
+        "//submodules/TelegramUI/Components/PeerManagement/OwnershipTransferController",
+        "//submodules/TelegramUI/Components/PeerManagement/OldChannelsController",
+        "//submodules/TelegramUI/Components/PeerInfo/MessagePriceItem",
     ],
     visibility = [
         "//visibility:public",

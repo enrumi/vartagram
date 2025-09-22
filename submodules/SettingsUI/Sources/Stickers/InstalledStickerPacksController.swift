@@ -60,6 +60,7 @@ private final class InstalledStickerPacksControllerArguments {
 }
 
 private enum InstalledStickerPacksSection: Int32 {
+    case info
     case categories
     case settings
     case stickers
@@ -83,6 +84,7 @@ private enum InstalledStickerPacksEntryId: Hashable {
 }
 
 private indirect enum InstalledStickerPacksEntry: ItemListNodeEntry {
+    case info(PresentationTheme, String)
     case suggestOptions(PresentationTheme, String, String)
     case largeEmoji(PresentationTheme, String, Bool)
     case trending(PresentationTheme, String, Int32)
@@ -100,6 +102,8 @@ private indirect enum InstalledStickerPacksEntry: ItemListNodeEntry {
     
     var section: ItemListSectionId {
         switch self {
+            case .info:
+                return InstalledStickerPacksSection.info.rawValue
             case .trending, .masks, .emoji, .quickReaction, .archived:
                 return InstalledStickerPacksSection.categories.rawValue
             case .suggestOptions, .largeEmoji, .suggestAnimatedEmoji, .suggestAnimatedEmojiInfo, .packOrder, .packOrderInfo:
@@ -111,6 +115,8 @@ private indirect enum InstalledStickerPacksEntry: ItemListNodeEntry {
     
     var stableId: InstalledStickerPacksEntryId {
         switch self {
+            case .info:
+                return .index(-1)
             case .trending:
                 return .index(0)
             case .archived:
@@ -144,6 +150,12 @@ private indirect enum InstalledStickerPacksEntry: ItemListNodeEntry {
     
     static func ==(lhs: InstalledStickerPacksEntry, rhs: InstalledStickerPacksEntry) -> Bool {
         switch lhs {
+            case let .info(lhsTheme, lhsText):
+                if case let .info(rhsTheme, rhsText) = rhs, lhsTheme === rhsTheme, lhsText == rhsText {
+                    return true
+                } else {
+                    return false
+                }
             case let .suggestOptions(lhsTheme, lhsText, lhsValue):
                 if case let .suggestOptions(rhsTheme, rhsText, rhsValue) = rhs, lhsTheme === rhsTheme, lhsText == rhsText, lhsValue == rhsValue {
                     return true
@@ -263,86 +275,93 @@ private indirect enum InstalledStickerPacksEntry: ItemListNodeEntry {
     
     static func <(lhs: InstalledStickerPacksEntry, rhs: InstalledStickerPacksEntry) -> Bool {
         switch lhs {
+        case .info:
+            switch rhs {
+            case .info:
+                return false
+            default:
+                return true
+            }
         case .trending:
             switch rhs {
-            case .trending:
+            case .info, .trending:
                 return false
             default:
                 return true
             }
         case .archived:
             switch rhs {
-            case .trending, .archived:
+            case .info, .trending, .archived:
                 return false
             default:
                 return true
             }
         case .masks:
             switch rhs {
-            case .trending, .archived, .masks:
+            case .info, .trending, .archived, .masks:
                 return false
             default:
                 return true
             }
         case .emoji:
             switch rhs {
-            case .trending, .archived, .masks, .emoji:
+            case .info, .trending, .archived, .masks, .emoji:
                 return false
             default:
                 return true
             }
         case .quickReaction:
             switch rhs {
-            case .trending, .archived, .masks, .emoji, .quickReaction:
+            case .info, .trending, .archived, .masks, .emoji, .quickReaction:
                 return false
             default:
                 return true
             }
         case .suggestOptions:
             switch rhs {
-            case .trending, .archived, .masks, .emoji, .quickReaction, .suggestOptions:
+            case .info, .trending, .archived, .masks, .emoji, .quickReaction, .suggestOptions:
                 return false
             default:
                 return true
             }
         case .largeEmoji:
             switch rhs {
-            case .trending, .archived, .masks, .emoji, .quickReaction, .suggestOptions, .largeEmoji:
+            case .info, .trending, .archived, .masks, .emoji, .quickReaction, .suggestOptions, .largeEmoji:
                 return false
             default:
                 return true
             }
         case .packOrder:
             switch rhs {
-            case .trending, .archived, .masks, .emoji, .quickReaction, .suggestOptions, .largeEmoji, .packOrder:
+            case .info, .trending, .archived, .masks, .emoji, .quickReaction, .suggestOptions, .largeEmoji, .packOrder:
                 return false
             default:
                 return true
             }
         case .packOrderInfo:
             switch rhs {
-            case .trending, .archived, .masks, .emoji, .quickReaction, .suggestOptions, .largeEmoji, .packOrder, .packOrderInfo:
+            case .info, .trending, .archived, .masks, .emoji, .quickReaction, .suggestOptions, .largeEmoji, .packOrder, .packOrderInfo:
                 return false
             default:
                 return true
             }
         case .suggestAnimatedEmoji:
             switch rhs {
-            case .trending, .archived, .masks, .emoji, .quickReaction, .suggestOptions, .largeEmoji, .packOrder, .packOrderInfo, .suggestAnimatedEmoji:
+            case .info, .trending, .archived, .masks, .emoji, .quickReaction, .suggestOptions, .largeEmoji, .packOrder, .packOrderInfo, .suggestAnimatedEmoji:
                 return false
             default:
                 return true
             }
         case .suggestAnimatedEmojiInfo:
             switch rhs {
-            case .trending, .archived, .masks, .emoji, .quickReaction, .suggestOptions, .largeEmoji, .packOrder, .packOrderInfo, .suggestAnimatedEmoji, .suggestAnimatedEmojiInfo:
+            case .info, .trending, .archived, .masks, .emoji, .quickReaction, .suggestOptions, .largeEmoji, .packOrder, .packOrderInfo, .suggestAnimatedEmoji, .suggestAnimatedEmojiInfo:
                 return false
             default:
                 return true
             }
         case .packsTitle:
             switch rhs {
-            case .trending, .archived, .masks, .emoji, .quickReaction, .suggestOptions, .largeEmoji, .packOrder, .packOrderInfo, .suggestAnimatedEmoji, .suggestAnimatedEmojiInfo, .packsTitle:
+            case .info, .trending, .archived, .masks, .emoji, .quickReaction, .suggestOptions, .largeEmoji, .packOrder, .packOrderInfo, .suggestAnimatedEmoji, .suggestAnimatedEmojiInfo, .packsTitle:
                 return false
             default:
                 return true
@@ -369,6 +388,8 @@ private indirect enum InstalledStickerPacksEntry: ItemListNodeEntry {
     func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
         let arguments = arguments as! InstalledStickerPacksControllerArguments
         switch self {
+            case let .info(_, text):
+                return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
             case let .suggestOptions(_, text, value):
                 return ItemListDisclosureItem(presentationData: presentationData, title: text, label: value, sectionId: self.section, style: .blocks, action: {
                     arguments.openSuggestOptions()
@@ -412,7 +433,7 @@ private indirect enum InstalledStickerPacksEntry: ItemListNodeEntry {
             case let .packsTitle(_, text):
                 return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
             case let .pack(_, _, _, info, topItem, count, animatedStickers, enabled, editing, selected):
-                return ItemListStickerPackItem(presentationData: presentationData, context: arguments.context, packInfo: info, itemCount: count, topItem: topItem, unread: false, control: editing.editing ? .check(checked: selected ?? false) : .none, editing: editing, enabled: enabled, playAnimatedStickers: animatedStickers, sectionId: self.section, action: {
+                return ItemListStickerPackItem(presentationData: presentationData, context: arguments.context, packInfo: StickerPackCollectionInfo.Accessor(info), itemCount: count, topItem: topItem, unread: false, control: editing.editing ? .check(checked: selected ?? false) : .none, editing: editing, enabled: enabled, playAnimatedStickers: animatedStickers, sectionId: self.section, action: {
                     arguments.openStickerPack(info)
                 }, setPackIdWithRevealedOptions: { current, previous in
                     arguments.setPackIdWithRevealedOptions(current, previous)
@@ -600,12 +621,12 @@ private func installedStickerPacksControllerEntries(context: AccountContext, pre
     
     var markdownString: String
     switch mode {
-        case .general, .modal:
-            markdownString = presentationData.strings.StickerPacksSettings_ManagingHelp
-        case .masks:
-            markdownString = presentationData.strings.MaskStickerSettings_Info
-        case .emoji:
-            markdownString = presentationData.strings.EmojiStickerSettings_Info
+    case .general, .modal:
+        markdownString = presentationData.strings.StickerPacksSettings_ManagingHelp
+    case .masks:
+        markdownString = presentationData.strings.MaskStickerSettings_Info
+    case .emoji:
+        markdownString = presentationData.strings.EmojiStickerSettings_Info
     }
     let entities = generateTextEntities(markdownString, enabledTypes: [.mention])
     if let entity = entities.first {
@@ -618,7 +639,12 @@ private func installedStickerPacksControllerEntries(context: AccountContext, pre
 }
 
 public func installedStickerPacksController(context: AccountContext, mode: InstalledStickerPacksControllerMode, archivedPacks: [ArchivedStickerPackItem]? = nil, updatedPacks: @escaping ([ArchivedStickerPackItem]?) -> Void = { _ in }, focusOnItemTag: InstalledStickerPacksEntryTag? = nil, forceTheme: PresentationTheme? = nil) -> ViewController {
-    let initialState = InstalledStickerPacksControllerState().withUpdatedEditing(mode == .modal).withUpdatedSelectedPackIds(mode == .modal ? Set() : nil)
+    var initialEditing = false
+    if case .modal = mode {
+        initialEditing = true
+    }
+    
+    let initialState = InstalledStickerPacksControllerState().withUpdatedEditing(initialEditing).withUpdatedSelectedPackIds(initialEditing ? Set() : nil)
     let statePromise = ValuePromise(initialState, ignoreRepeated: true)
     let stateValue = Atomic(value: initialState)
     let updateState: ((InstalledStickerPacksControllerState) -> InstalledStickerPacksControllerState) -> Void = { f in
@@ -733,7 +759,7 @@ public func installedStickerPacksController(context: AccountContext, mode: Insta
         ])
         presentControllerImpl?(controller, ViewControllerPresentationArguments(presentationAnimation: .modalSheet))
     }, openStickersBot: {
-        resolveDisposable.set((context.engine.peers.resolvePeerByName(name: "stickers")
+        resolveDisposable.set((context.engine.peers.resolvePeerByName(name: "stickers", referrer: nil)
         |> mapToSignal { result -> Signal<EnginePeer?, NoError> in
             guard case let .result(result) = result else {
                 return .complete()
@@ -827,7 +853,7 @@ public func installedStickerPacksController(context: AccountContext, mode: Insta
                     if installed {
                         return .complete()
                     } else {
-                        return context.engine.stickers.addStickerPackInteractively(info: info, items: items)
+                        return context.engine.stickers.addStickerPackInteractively(info: info._parse(), items: items)
                     }
                 case .fetching:
                     break
@@ -1036,7 +1062,7 @@ public func installedStickerPacksController(context: AccountContext, mode: Insta
                 } else {
                     rightNavigationButton = ItemListNavigationButton(content: .text(presentationData.strings.Common_Edit), style: .regular, enabled: true, action: {
                         updateState {
-                            $0.withUpdatedEditing(true).withUpdatedSelectedPackIds(Set())
+                            $0.withUpdatedEditing(true).withUpdatedPackIdWithRevealedOptions(nil).withUpdatedSelectedPackIds(Set())
                         }
                     })
                 }

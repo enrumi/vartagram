@@ -279,13 +279,13 @@ private func premiumSearchableItems(context: AccountContext) -> [SettingsSearcha
     var result: [SettingsSearchableItem] = []
         
     result.append(SettingsSearchableItem(id: .premium(0), title: strings.Settings_Premium, alternate: synonyms(strings.SettingsSearch_Synonyms_Premium), icon: icon, breadcrumbs: [], present: { context, _, present in
-        present(.push, PremiumIntroScreen(context: context, modal: false, source: .settings))
+        present(.push, PremiumIntroScreen(context: context, source: .settings, modal: false))
     }))
     
     let presentDemo: (PremiumDemoScreen.Subject, (SettingsSearchableItemPresentation, ViewController?) -> Void) -> Void = { subject, present in
         var replaceImpl: ((ViewController) -> Void)?
         let controller = PremiumDemoScreen(context: context, subject: subject, action: {
-            let controller = PremiumIntroScreen(context: context, modal: false, source: .settings)
+            let controller = PremiumIntroScreen(context: context, source: .settings, modal: false)
             replaceImpl?(controller)
         })
         replaceImpl = { [weak controller] c in
@@ -595,9 +595,13 @@ private func privacySearchableItems(context: AccountContext, privacySettings: Ac
                     current = info.voiceMessages
                 case .bio:
                     current = info.bio
+                case .birthday:
+                    current = info.birthday
+                case .giftsAutoSave:
+                    current = info.giftsAutoSave
             }
 
-            present(.push, selectivePrivacySettingsController(context: context, kind: kind, current: current, callSettings: callSettings != nil ? (info.voiceCallsP2P, callSettings!.0) : nil, voipConfiguration: callSettings?.1, callIntegrationAvailable: CallKitIntegration.isAvailable, updated: { updated, updatedCallSettings, _ in
+            present(.push, selectivePrivacySettingsController(context: context, kind: kind, current: current, callSettings: callSettings != nil ? (info.voiceCallsP2P, callSettings!.0) : nil, voipConfiguration: callSettings?.1, callIntegrationAvailable: CallKitIntegration.isAvailable, updated: { updated, updatedCallSettings, _, _ in
                     if let (_, updatedCallSettings) = updatedCallSettings  {
                         let _ = updateVoiceCallSettingsSettingsInteractively(accountManager: context.sharedContext.accountManager, { _ in
                             return updatedCallSettings
@@ -893,9 +897,6 @@ private func languageSearchableItems(context: AccountContext, localizations: [Lo
 }
 
 func settingsSearchableItems(context: AccountContext, notificationExceptionsList: Signal<NotificationExceptionsList?, NoError>, archivedStickerPacks: Signal<[ArchivedStickerPackItem]?, NoError>, privacySettings: Signal<AccountPrivacySettings?, NoError>, hasTwoStepAuth: Signal<Bool?, NoError>, twoStepAuthData: Signal<TwoStepVerificationAccessConfiguration?, NoError>, activeSessionsContext: Signal<ActiveSessionsContext?, NoError>, webSessionsContext: Signal<WebSessionsContext?, NoError>) -> Signal<[SettingsSearchableItem], NoError> {
-    let watchAppInstalled = (context.watchManager?.watchAppInstalled ?? .single(false))
-    |> take(1)
-
     let canAddAccount = activeAccountsAndPeers(context: context)
     |> take(1)
     |> map { accountsAndPeers -> Bool in
@@ -989,8 +990,8 @@ func settingsSearchableItems(context: AccountContext, notificationExceptionsList
         }
     }
     
-    return combineLatest(watchAppInstalled, canAddAccount, localizations, notificationSettings, notificationExceptionsList, archivedStickerPacks, proxyServers, privacySettings, hasTwoStepAuth, twoStepAuthData, activeSessionsContext, activeWebSessionsContext)
-    |> map { watchAppInstalled, canAddAccount, localizations, notificationSettings, notificationExceptionsList, archivedStickerPacks, proxyServers, privacySettings, hasTwoStepAuth, twoStepAuthData, activeSessionsContext, activeWebSessionsContext in
+    return combineLatest(canAddAccount, localizations, notificationSettings, notificationExceptionsList, archivedStickerPacks, proxyServers, privacySettings, hasTwoStepAuth, twoStepAuthData, activeSessionsContext, activeWebSessionsContext)
+    |> map { canAddAccount, localizations, notificationSettings, notificationExceptionsList, archivedStickerPacks, proxyServers, privacySettings, hasTwoStepAuth, twoStepAuthData, activeSessionsContext, activeWebSessionsContext in
         let strings = context.sharedContext.currentPresentationData.with { $0 }.strings
         
         var allItems: [SettingsSearchableItem] = []
@@ -999,7 +1000,7 @@ func settingsSearchableItems(context: AccountContext, notificationExceptionsList
         allItems.append(contentsOf: profileItems)
         
         let savedMessages = SettingsSearchableItem(id: .savedMessages(0), title: strings.Settings_SavedMessages, alternate: synonyms(strings.SettingsSearch_Synonyms_SavedMessages), icon: .savedMessages, breadcrumbs: [], present: { context, _, present in
-            present(.push, context.sharedContext.makeChatController(context: context, chatLocation: .peer(id: context.account.peerId), subject: nil, botStart: nil, mode: .standard(.default)))
+            present(.push, context.sharedContext.makeChatController(context: context, chatLocation: .peer(id: context.account.peerId), subject: nil, botStart: nil, mode: .standard(.default), params: nil))
         })
         allItems.append(savedMessages)
         
@@ -1041,13 +1042,6 @@ func settingsSearchableItems(context: AccountContext, notificationExceptionsList
         let storiesItems = storiesSearchableItems(context: context)
         allItems.append(contentsOf: storiesItems)
         
-        if watchAppInstalled {
-            let watch = SettingsSearchableItem(id: .watch(0), title: strings.Settings_AppleWatch, alternate: synonyms(strings.SettingsSearch_Synonyms_Watch), icon: .watch, breadcrumbs: [], present: { context, _, present in
-                present(.push, watchSettingsController(context: context))
-            })
-            allItems.append(watch)
-        }
-        
         if let hasTwoStepAuth = hasTwoStepAuth, hasTwoStepAuth {
             let passport = SettingsSearchableItem(id: .passport(0), title: strings.Settings_Passport, alternate: synonyms(strings.SettingsSearch_Synonyms_Passport), icon: .passport, breadcrumbs: [], present: { context, _, present in
                 present(.modal, SecureIdAuthController(context: context, mode: .list))
@@ -1059,7 +1053,7 @@ func settingsSearchableItems(context: AccountContext, notificationExceptionsList
             let _ = (context.engine.peers.supportPeerId()
             |> deliverOnMainQueue).start(next: { peerId in
                 if let peerId = peerId {
-                    present(.push, context.sharedContext.makeChatController(context: context, chatLocation: .peer(id: peerId), subject: nil, botStart: nil, mode: .standard(.default)))
+                    present(.push, context.sharedContext.makeChatController(context: context, chatLocation: .peer(id: peerId), subject: nil, botStart: nil, mode: .standard(.default), params: nil))
                 }
             })
         })
@@ -1068,8 +1062,8 @@ func settingsSearchableItems(context: AccountContext, notificationExceptionsList
         let faq = SettingsSearchableItem(id: .faq(0), title: strings.Settings_FAQ, alternate: synonyms(strings.SettingsSearch_Synonyms_FAQ), icon: .faq, breadcrumbs: [], present: { context, navigationController, present in
             let _ = (cachedFaqInstantPage(context: context)
             |> deliverOnMainQueue).start(next: { resolvedUrl in
-                context.sharedContext.openResolvedUrl(resolvedUrl, context: context, urlContext: .generic, navigationController: navigationController, forceExternal: false, openPeer: { peer, navigation in
-                }, sendFile: nil, sendSticker: nil, requestMessageActionUrlAuth: nil, joinVoiceChat: nil, present: { controller, arguments in
+                context.sharedContext.openResolvedUrl(resolvedUrl, context: context, urlContext: .generic, navigationController: navigationController, forceExternal: false, forceUpdate: false, openPeer: { peer, navigation in
+                }, sendFile: nil, sendSticker: nil, sendEmoji: nil, requestMessageActionUrlAuth: nil, joinVoiceChat: nil, present: { controller, arguments in
                     present(.push, controller)
                 }, dismissInput: {}, contentContext: nil, progress: nil, completion: nil)
             })

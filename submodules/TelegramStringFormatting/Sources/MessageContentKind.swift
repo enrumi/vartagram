@@ -24,11 +24,13 @@ public enum MessageContentKindKey {
     case expiredVoiceMessage
     case expiredVideoMessage
     case poll
+    case todo
     case restricted
     case dice
     case invoice
     case story
     case giveaway
+    case paidContent
 }
 
 public enum MessageContentKind: Equatable {
@@ -49,6 +51,7 @@ public enum MessageContentKind: Equatable {
     case expiredVoiceMessage
     case expiredVideoMessage
     case poll(String)
+    case todo(String)
     case restricted(String)
     case dice(String)
     case invoice(String)
@@ -159,6 +162,12 @@ public enum MessageContentKind: Equatable {
             } else {
                 return false
             }
+        case .todo:
+            if case .todo = other {
+                return true
+            } else {
+                return false
+            }
         case .restricted:
             if case .restricted = other {
                 return true
@@ -228,6 +237,8 @@ public enum MessageContentKind: Equatable {
             return .expiredVideoMessage
         case .poll:
             return .poll
+        case .todo:
+            return .todo
         case .restricted:
             return .restricted
         case .dice:
@@ -298,8 +309,12 @@ public func mediaContentKind(_ media: EngineMedia, message: EngineMessage? = nil
         switch expiredMedia.data {
         case .image:
             return .expiredImage
-        case .file, .videoMessage, .voiceMessage:
+        case .file:
             return .expiredVideo
+        case .voiceMessage:
+            return .expiredVoiceMessage
+        case .videoMessage:
+            return .expiredVideoMessage
         }
     case .image:
         return .image
@@ -325,7 +340,7 @@ public func mediaContentKind(_ media: EngineMedia, message: EngineMessage? = nil
                         return .file(performer)
                     }
                 }
-            case let .Video(_, _, flags, _):
+            case let .Video(_, _, flags, _, _, _):
                 if file.isAnimated {
                     result = .animation
                 } else {
@@ -364,6 +379,8 @@ public func mediaContentKind(_ media: EngineMedia, message: EngineMessage? = nil
         }
     case let .poll(poll):
         return .poll(poll.text)
+    case let .todo(todo):
+        return .todo(todo.text)
     case let .dice(dice):
         return .dice(dice.emoji)
     case let .invoice(invoice):
@@ -374,12 +391,31 @@ public func mediaContentKind(_ media: EngineMedia, message: EngineMessage? = nil
         }
     case .story:
         return .story
-    case .giveaway:
+    case .giveaway, .giveawayResults:
         return .giveaway
     case let .webpage(webpage):
         if let message, message.text.isEmpty, case let .Loaded(content) = webpage.content {
             return .text(NSAttributedString(string: content.displayUrl))
         } else {
+            return nil
+        }
+    case let .paidContent(paidContent):
+        switch paidContent.extendedMedia.first {
+        case let .preview(_, _, videoDuration):
+            if let _ = videoDuration {
+                return .video
+            } else {
+                return .image
+            }
+        case let .full(media):
+            if media is TelegramMediaImage {
+                return .image
+            } else if media is TelegramMediaFile {
+                return .video
+            } else {
+                return nil
+            }
+        default:
             return nil
         }
     default:
@@ -431,6 +467,8 @@ public func stringForMediaKind(_ kind: MessageContentKind, strings: Presentation
         return (NSAttributedString(string: strings.Message_VideoMessageExpired), true)
     case let .poll(text):
         return (NSAttributedString(string: "📊 \(text)"), false)
+    case let .todo(text):
+        return (NSAttributedString(string: "☑️ \(text)"), false)
     case let .restricted(text):
         return (NSAttributedString(string: text), false)
     case let .dice(emoji):

@@ -222,12 +222,14 @@ private final class PeerChannelMemberCategoriesContextsManagerImpl {
             self.profileDataPhotoPreloadContexts[peerId] = context
             
             disposable.set((fetch |> deliverOnMainQueue).start(next: { [weak context] value in
-                guard let context = context else {
-                    return
-                }
-                context.value = value
-                for f in context.subscribers.copyItems() {
-                    f(value)
+                Queue.mainQueue().async {
+                    guard let context = context else {
+                        return
+                    }
+                    context.value = value
+                    for f in context.subscribers.copyItems() {
+                        f(value)
+                    }
                 }
             }))
         }
@@ -319,7 +321,7 @@ public final class PeerChannelMemberCategoriesContextsManager {
         self.impl.with { impl in
             for (contextPeerId, context) in impl.contexts {
                 if contextPeerId == peerId {
-                    context.replayUpdates([(.member(id: memberId, invitedAt: 0, adminInfo: nil, banInfo: nil, rank: nil), nil, nil)])
+                    context.replayUpdates([(.member(id: memberId, invitedAt: 0, adminInfo: nil, banInfo: nil, rank: nil, subscriptionUntilDate: nil), nil, nil)])
                 }
             }
         }
@@ -548,7 +550,7 @@ public final class PeerChannelMemberCategoriesContextsManager {
         |> runOn(Queue.mainQueue())
     }
     
-    public func recentOnlineSmall(engine: TelegramEngine, postbox: Postbox, network: Network, accountPeerId: PeerId, peerId: PeerId) -> Signal<Int32, NoError> {
+    public func recentOnlineSmall(engine: TelegramEngine, postbox: Postbox, network: Network, accountPeerId: PeerId, peerId: PeerId) -> Signal<(total: Int32, recent: Int32), NoError> {
         return Signal { [weak self] subscriber in
             var previousIds: Set<PeerId>?
             let statusesDisposable = MetaDisposable()
@@ -585,7 +587,7 @@ public final class PeerChannelMemberCategoriesContextsManager {
                     }
                     |> distinctUntilChanged
                     |> deliverOnMainQueue).start(next: { count in
-                        subscriber.putNext(count)
+                        subscriber.putNext((Int32(updatedIds.count), count))
                     }))
                 }
             })

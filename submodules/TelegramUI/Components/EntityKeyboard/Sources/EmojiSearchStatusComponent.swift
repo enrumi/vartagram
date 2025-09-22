@@ -430,7 +430,7 @@ final class EmojiSearchStatusComponent: Component {
             }
         }
         
-        func update(component: EmojiSearchStatusComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+        func update(component: EmojiSearchStatusComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
             self.component = component
             
             let displaySize = CGSize(width: availableSize.width * UIScreenScale, height: availableSize.height * UIScreenScale)
@@ -443,7 +443,7 @@ final class EmojiSearchStatusComponent: Component {
                 overlayColor = component.useOpaqueTheme ? component.theme.chat.inputMediaPanel.panelContentOpaqueSearchOverlayColor : component.theme.chat.inputMediaPanel.panelContentVibrantSearchOverlayColor
             }
             
-            let baseColor: UIColor = .white
+            let baseColor: UIColor = .black
             
             if self.contentView.tintColor != overlayColor {
                 self.contentView.tintColor = overlayColor
@@ -791,7 +791,7 @@ final class EmojiSearchStatusComponent: Component {
         return View(frame: CGRect())
     }
     
-    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
 }

@@ -13,6 +13,7 @@ import TelegramNotices
 import PresentationDataUtils
 import TelegramCallsUI
 import AttachmentUI
+import WebUI
 
 func updateChatPresentationInterfaceStateImpl(
     selfController: ChatControllerImpl,
@@ -22,6 +23,11 @@ func updateChatPresentationInterfaceStateImpl(
     _ f: (ChatPresentationInterfaceState) -> ChatPresentationInterfaceState,
     completion externalCompletion: @escaping (ContainedViewLayoutTransition) -> Void
 ) {
+    var transition = transition
+    if !selfController.didAppear {
+        transition = .immediate
+    }
+    
     var completion = externalCompletion
     var temporaryChatPresentationInterfaceState = f(selfController.presentationInterfaceState)
     
@@ -38,7 +44,8 @@ func updateChatPresentationInterfaceStateImpl(
                     temporaryChatPresentationInterfaceState = temporaryChatPresentationInterfaceState.updatedInterfaceState({
                         $0.withUpdatedReplyMessageSubject(ChatInterfaceState.ReplyMessageSubject(
                             messageId: keyboardButtonsMessage.id,
-                            quote: nil
+                            quote: nil,
+                            todoItemId: nil
                         )).withUpdatedMessageActionsState({ value in
                         var value = value
                         value.processedSetupReplyMessageId = keyboardButtonsMessage.id
@@ -61,7 +68,8 @@ func updateChatPresentationInterfaceStateImpl(
         if temporaryChatPresentationInterfaceState.interfaceState.replyMessageSubject == nil && temporaryChatPresentationInterfaceState.interfaceState.messageActionsState.processedSetupReplyMessageId != keyboardButtonsMessage.id  {
             temporaryChatPresentationInterfaceState = temporaryChatPresentationInterfaceState.updatedInterfaceState({ $0.withUpdatedReplyMessageSubject(ChatInterfaceState.ReplyMessageSubject(
                 messageId: keyboardButtonsMessage.id,
-                quote: nil
+                quote: nil,
+                todoItemId: nil
             )).withUpdatedMessageActionsState({ value in
                 var value = value
                 value.processedSetupReplyMessageId = keyboardButtonsMessage.id
@@ -220,7 +228,19 @@ func updateChatPresentationInterfaceStateImpl(
         }
     }
     
-    if let (updatedUrlPreviewState, updatedUrlPreviewSignal) = urlPreviewStateForInputText(updatedChatPresentationInterfaceState.interfaceState.composeInputState.inputText, context: selfController.context, currentQuery: selfController.urlPreviewQueryState?.0, forPeerId: selfController.chatLocation.peerId) {
+    var canHaveUrlPreview = true
+    if case let .customChatContents(customChatContents) = updatedChatPresentationInterfaceState.subject {
+        switch customChatContents.kind {
+        case .hashTagSearch:
+            break
+        case .quickReplyMessageInput:
+            break
+        case .businessLinkSetup:
+            canHaveUrlPreview = false
+        }
+    }
+    
+    if canHaveUrlPreview, let (updatedUrlPreviewState, updatedUrlPreviewSignal) = urlPreviewStateForInputText(updatedChatPresentationInterfaceState.interfaceState.composeInputState.inputText, context: selfController.context, currentQuery: selfController.urlPreviewQueryState?.0, forPeerId: selfController.chatLocation.peerId) {
         selfController.urlPreviewQueryState?.1.dispose()
         var inScope = true
         var inScopeResult: ((TelegramMediaWebpage?) -> (TelegramMediaWebpage, String)?)?
@@ -397,6 +417,28 @@ func updateChatPresentationInterfaceStateImpl(
         selfController.updateNextChannelToReadVisibility()
     }
     
+    if updatedChatPresentationInterfaceState.displayHistoryFilterAsList {
+        var canDisplayAsList = false
+        if updatedChatPresentationInterfaceState.search != nil {
+            if updatedChatPresentationInterfaceState.search?.resultsState != nil {
+                canDisplayAsList = true
+            }
+            if updatedChatPresentationInterfaceState.historyFilter != nil {
+                canDisplayAsList = true
+            }
+            if case .peer(selfController.context.account.peerId) = updatedChatPresentationInterfaceState.chatLocation {
+                canDisplayAsList = true
+            }
+        }
+        if selfController.alwaysShowSearchResultsAsList {
+            canDisplayAsList = true
+        }
+        
+        if !canDisplayAsList {
+            updatedChatPresentationInterfaceState = updatedChatPresentationInterfaceState.updatedDisplayHistoryFilterAsList(false)
+        }
+    }
+    
     selfController.presentationInterfaceState = updatedChatPresentationInterfaceState
     
     selfController.updateSlowmodeStatus()
@@ -407,6 +449,8 @@ func updateChatPresentationInterfaceStateImpl(
     default:
         selfController.chatDisplayNode.collapseInput()
     }
+    
+    selfController.tempHideAccessoryPanels = selfController.presentationInterfaceState.search != nil
     
     if selfController.isNodeLoaded {
         selfController.chatDisplayNode.updateChatPresentationInterfaceState(updatedChatPresentationInterfaceState, transition: transition, interactive: interactive, completion: completion)
@@ -444,29 +488,61 @@ func updateChatPresentationInterfaceStateImpl(
                 animated = false
             }
             animated = false
-            selfController.navigationItem.setLeftBarButton(button.buttonItem, animated: animated)
+            selfController.navigationItem.setLeftBarButton(button.buttonItem, animated: animated && selfController.currentChatSwitchDirection == nil)
             selfController.leftNavigationButton = button
         }
     } else if let _ = selfController.leftNavigationButton {
-        selfController.navigationItem.setLeftBarButton(nil, animated: transition.isAnimated)
+        selfController.navigationItem.setLeftBarButton(nil, animated: transition.isAnimated && selfController.currentChatSwitchDirection == nil)
         selfController.leftNavigationButton = nil
     }
     
+    var buttonsAnimated = transition.isAnimated
     if let button = rightNavigationButtonForChatInterfaceState(context: selfController.context, presentationInterfaceState: updatedChatPresentationInterfaceState, strings: updatedChatPresentationInterfaceState.strings, currentButton: selfController.rightNavigationButton, target: selfController, selector: #selector(selfController.rightNavigationButtonAction), chatInfoNavigationButton: selfController.chatInfoNavigationButton, moreInfoNavigationButton: selfController.moreInfoNavigationButton) {
         if selfController.rightNavigationButton != button {
-            var animated = transition.isAnimated
             if let currentButton = selfController.rightNavigationButton?.action, currentButton == button.action {
-                animated = false
+                buttonsAnimated = false
             }
-            if case .replyThread = selfController.chatLocation {
-                animated = false
-            }
-            selfController.navigationItem.setRightBarButton(button.buttonItem, animated: animated)
             selfController.rightNavigationButton = button
         }
     } else if let _ = selfController.rightNavigationButton {
-        selfController.navigationItem.setRightBarButton(nil, animated: transition.isAnimated)
         selfController.rightNavigationButton = nil
+    }
+    
+    if let button = secondaryRightNavigationButtonForChatInterfaceState(context: selfController.context, presentationInterfaceState: updatedChatPresentationInterfaceState, strings: updatedChatPresentationInterfaceState.strings, currentButton: selfController.secondaryRightNavigationButton, target: selfController, selector: #selector(selfController.secondaryRightNavigationButtonAction), chatInfoNavigationButton: selfController.chatInfoNavigationButton, moreInfoNavigationButton: selfController.moreInfoNavigationButton) {
+        if selfController.secondaryRightNavigationButton != button {
+            if let currentButton = selfController.secondaryRightNavigationButton?.action, currentButton == button.action {
+                buttonsAnimated = false
+            }
+            if case .replyThread = selfController.chatLocation {
+                buttonsAnimated = false
+            }
+            selfController.secondaryRightNavigationButton = button
+        }
+    } else if let _ = selfController.secondaryRightNavigationButton {
+        selfController.secondaryRightNavigationButton = nil
+    }
+    
+    var rightBarButtons: [UIBarButtonItem] = []
+    if let rightNavigationButton = selfController.rightNavigationButton {
+        rightBarButtons.append(rightNavigationButton.buttonItem)
+    }
+    if let secondaryRightNavigationButton = selfController.secondaryRightNavigationButton {
+        rightBarButtons.append(secondaryRightNavigationButton.buttonItem)
+    }
+    var rightBarButtonsUpdated = false
+    let currentRightBarButtons = selfController.navigationItem.rightBarButtonItems ?? []
+    if rightBarButtons.count != currentRightBarButtons.count {
+        rightBarButtonsUpdated = true
+    } else {
+        for i in 0 ..< rightBarButtons.count {
+            if rightBarButtons[i] !== currentRightBarButtons[i] {
+                rightBarButtonsUpdated = true
+                break
+            }
+        }
+    }
+    if rightBarButtonsUpdated {
+        selfController.navigationItem.setRightBarButtonItems(rightBarButtons, animated: buttonsAnimated)
     }
     
     if let controllerInteraction = selfController.controllerInteraction {
@@ -503,14 +579,31 @@ func updateChatPresentationInterfaceStateImpl(
             controller.updateVisibility()
         }
     }
- 
-    if let currentMenuWebAppController = selfController.currentMenuWebAppController, !selfController.presentationInterfaceState.showWebView {
-        selfController.currentMenuWebAppController = nil
-        if let currentMenuWebAppController = currentMenuWebAppController as? AttachmentController {
-            currentMenuWebAppController.ensureUnfocused = false
+     
+    selfController.presentationInterfaceStatePromise.set(selfController.presentationInterfaceState)
+    
+    if case .tag = selfController.chatDisplayNode.historyNode.tag {
+    } else {
+        if let historyFilter = selfController.presentationInterfaceState.historyFilter, historyFilter.isActive {
+            selfController.chatDisplayNode.historyNode.updateTag(tag: .customTag(historyFilter.customTag, nil))
+        } else {
+            selfController.chatDisplayNode.historyNode.updateTag(tag: nil)
         }
-        currentMenuWebAppController.dismiss(animated: true, completion: nil)
     }
     
-    selfController.presentationInterfaceStatePromise.set(selfController.presentationInterfaceState)
+    selfController.updateDownButtonVisibility()
+    
+    if selfController.presentationInterfaceState.hasBirthdayToday {
+        selfController.displayBirthdayTooltip()
+    }
+        
+    if case .standard(.embedded) = selfController.presentationInterfaceState.mode, let controllerInteraction = selfController.controllerInteraction, let interfaceInteraction = selfController.interfaceInteraction {
+        if let titleAccessoryPanelNode = titlePanelForChatPresentationInterfaceState(selfController.presentationInterfaceState, context: selfController.context, currentPanel: selfController.customNavigationPanelNode as? ChatTitleAccessoryPanelNode, controllerInteraction: controllerInteraction, interfaceInteraction: interfaceInteraction, force: true) {
+            selfController.customNavigationPanelNode = titleAccessoryPanelNode as? ChatControllerCustomNavigationPanelNode
+        } else {
+            selfController.customNavigationPanelNode = nil
+        }
+    }
+    
+    selfController.stateUpdated?(transition)
 }

@@ -3,14 +3,18 @@
 #import <Foundation/Foundation.h>
 #import <Accelerate/Accelerate.h>
 
-static uint8_t permuteMap[4] = { 3, 2, 1, 0};
+static uint8_t permuteMap[4] = { 3, 2, 1, 0 };
+static uint8_t invertedPermuteMap[4] = { 3, 0, 1, 2 };
 
-void splitRGBAIntoYUVAPlanes(uint8_t const *argb, uint8_t *outY, uint8_t *outU, uint8_t *outV, uint8_t *outA, int width, int height, int bytesPerRow) {
+void splitRGBAIntoYUVAPlanes(uint8_t const *argb, uint8_t *outY, uint8_t *outU, uint8_t *outV, uint8_t *outA, int width, int height, int bytesPerRow, bool restrictedRange, bool keepColorsOrder) {
     static vImage_ARGBToYpCbCr info;
+    static vImage_ARGBToYpCbCr restrictedInfo;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         vImage_YpCbCrPixelRange pixelRange = (vImage_YpCbCrPixelRange){ 0, 128, 255, 255, 255, 1, 255, 0 };
+        vImage_YpCbCrPixelRange restrictedPixelRange = (vImage_YpCbCrPixelRange){ 16, 128, 235, 240, 255, 0, 255, 0 };
         vImageConvert_ARGBToYpCbCr_GenerateConversion(kvImage_ARGBToYpCbCrMatrix_ITU_R_709_2, &pixelRange, &info, kvImageARGB8888, kvImage420Yp8_Cb8_Cr8, 0);
+        vImageConvert_ARGBToYpCbCr_GenerateConversion(kvImage_ARGBToYpCbCrMatrix_ITU_R_709_2, &restrictedPixelRange, &restrictedInfo, kvImageARGB8888, kvImage420Yp8_Cb8_Cr8, 0);
     });
     
     vImage_Error error = kvImageNoError;
@@ -45,7 +49,7 @@ void splitRGBAIntoYUVAPlanes(uint8_t const *argb, uint8_t *outY, uint8_t *outU, 
     destA.height = height;
     destA.rowBytes = width;
     
-    error = vImageConvert_ARGB8888To420Yp8_Cb8_Cr8(&src, &destYp, &destCb, &destCr, &info, permuteMap, kvImageDoNotTile);
+    error = vImageConvert_ARGB8888To420Yp8_Cb8_Cr8(&src, &destYp, &destCb, &destCr, restrictedRange ? &restrictedInfo : &info, keepColorsOrder ? invertedPermuteMap : permuteMap, kvImageDoNotTile);
     if (error != kvImageNoError) {
         return;
     }
@@ -60,8 +64,6 @@ void combineYUVAPlanesIntoARGB(uint8_t *argb, uint8_t const *inY, uint8_t const 
         vImage_YpCbCrPixelRange pixelRange = (vImage_YpCbCrPixelRange){ 0, 128, 255, 255, 255, 1, 255, 0 };
         vImageConvert_YpCbCrToARGB_GenerateConversion(kvImage_YpCbCrToARGBMatrix_ITU_R_709_2, &pixelRange, &info, kvImage420Yp8_Cb8_Cr8, kvImageARGB8888, 0);
     });
-    
-    vImage_Error error = kvImageNoError;
     
     vImage_Buffer destArgb;
     destArgb.data = (void *)argb;
@@ -93,15 +95,8 @@ void combineYUVAPlanesIntoARGB(uint8_t *argb, uint8_t const *inY, uint8_t const 
     srcA.height = height;
     srcA.rowBytes = width;
     
-    error = vImageConvert_420Yp8_Cb8_Cr8ToARGB8888(&srcYp, &srcCb, &srcCr, &destArgb, &info, permuteMap, 255, kvImageDoNotTile);
-    error = vImageOverwriteChannels_ARGB8888(&srcA, &destArgb, &destArgb, 1 << 0, kvImageDoNotTile);
-    
-    if (error != kvImageNoError) {
-    }
-    
-    //error = vImageOverwriteChannels_ARGB8888(&srcYp, &destArgb, &destArgb, 1 << 1, kvImageDoNotTile);
-    //error = vImageOverwriteChannels_ARGB8888(&srcYp, &destArgb, &destArgb, 1 << 2, kvImageDoNotTile);
-    //error = vImageOverwriteChannels_ARGB8888(&srcYp, &destArgb, &destArgb, 1 << 3, kvImageDoNotTile);
+    vImageConvert_420Yp8_Cb8_Cr8ToARGB8888(&srcYp, &srcCb, &srcCr, &destArgb, &info, permuteMap, 255, kvImageDoNotTile);
+    vImageOverwriteChannels_ARGB8888(&srcA, &destArgb, &destArgb, 1 << 0, kvImageDoNotTile);
 }
 
 void scaleImagePlane(uint8_t *outPlane, int outWidth, int outHeight, int outBytesPerRow, uint8_t const *inPlane, int inWidth, int inHeight, int inBytesPerRow) {

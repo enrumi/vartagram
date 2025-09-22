@@ -109,6 +109,10 @@ func messageFilterForTagMask(_ tagMask: MessageTags) -> Api.MessagesFilter? {
         return Api.MessagesFilter.inputMessagesFilterGif
     } else if tagMask == .pinned {
         return Api.MessagesFilter.inputMessagesFilterPinned
+    } else if tagMask == .voice {
+        return Api.MessagesFilter.inputMessagesFilterVoice
+    } else if tagMask == .roundVideo {
+        return Api.MessagesFilter.inputMessagesFilterRoundVideo
     } else {
         return nil
     }
@@ -170,7 +174,7 @@ func resolveUnknownEmojiFiles<T>(postbox: Postbox, source: FetchMessageHistoryHo
                         for documentSet in documentSets {
                             if let documentSet = documentSet {
                                 for document in documentSet {
-                                    if let file = telegramMediaFileFromApiDocument(document) {
+                                    if let file = telegramMediaFileFromApiDocument(document, altDocuments: []) {
                                         transaction.storeMediaIfNotPresent(media: file)
                                     }
                                 }
@@ -185,11 +189,12 @@ func resolveUnknownEmojiFiles<T>(postbox: Postbox, source: FetchMessageHistoryHo
     }
 }
 
-func withResolvedAssociatedMessages<T>(postbox: Postbox, source: FetchMessageHistoryHoleSource, accountPeerId: PeerId, parsedPeers: AccumulatedPeers, storeMessages: [StoreMessage], _ f: @escaping (Transaction, AccumulatedPeers, [StoreMessage]) -> T) -> Signal<T, NoError> {
+func withResolvedAssociatedMessages<T>(postbox: Postbox, source: FetchMessageHistoryHoleSource, accountPeerId: PeerId, parsedPeers: AccumulatedPeers, storeMessages: [StoreMessage], resolveThreads: Bool, _ f: @escaping (Transaction, AccumulatedPeers, [StoreMessage]) -> T) -> Signal<T, NoError> {
     return postbox.transaction { transaction -> Signal<T, NoError> in
         var storedIds = Set<MessageId>()
         var referencedReplyIds = ReferencedReplyMessageIds()
         var referencedGeneralIds = Set<MessageId>()
+        var threadIds = Set<PeerAndBoundThreadId>()
         for message in storeMessages {
             guard case let .Id(id) = message.id else {
                 continue
@@ -201,6 +206,9 @@ func withResolvedAssociatedMessages<T>(postbox: Postbox, source: FetchMessageHis
                 } else {
                     referencedGeneralIds.formUnion(attribute.associatedMessageIds)
                 }
+            }
+            if let threadId = message.threadId {
+                threadIds.insert(PeerAndBoundThreadId(peerId: id.peerId, threadId: threadId))
             }
         }
         
@@ -216,8 +224,17 @@ func withResolvedAssociatedMessages<T>(postbox: Postbox, source: FetchMessageHis
             |> mapToSignal { _ -> Signal<T, NoError> in
                 return resolveAssociatedStories(postbox: postbox, source: source, accountPeerId: accountPeerId, messages: storeMessages, additionalPeers: parsedPeers, result: Void())
                 |> mapToSignal { _ -> Signal<T, NoError> in
-                    return postbox.transaction { transaction -> T in
-                        return f(transaction, parsedPeers, [])
+                    if resolveThreads && !threadIds.isEmpty {
+                        return resolveForumThreads(accountPeerId: accountPeerId, postbox: postbox, source: source, additionalPeers: parsedPeers, ids: Array(threadIds))
+                        |> mapToSignal { _ -> Signal<T, NoError> in
+                            return postbox.transaction { transaction -> T in
+                                return f(transaction, parsedPeers, [])
+                            }
+                        }
+                    } else {
+                        return postbox.transaction { transaction -> T in
+                            return f(transaction, parsedPeers, [])
+                        }
                     }
                 }
             }
@@ -239,7 +256,7 @@ func withResolvedAssociatedMessages<T>(postbox: Postbox, source: FetchMessageHis
                             switch result {
                                 case let .messages(messages, chats, users):
                                     return (peer, messages, chats, users)
-                                case let .messagesSlice(_, _, _, _, messages, chats, users):
+                                case let .messagesSlice(_, _, _, _, _, messages, chats, users):
                                     return (peer, messages, chats, users)
                                 case let .channelMessages(_, _, _, _, messages, apiTopics, chats, users):
                                     let _ = apiTopics
@@ -270,7 +287,7 @@ func withResolvedAssociatedMessages<T>(postbox: Postbox, source: FetchMessageHis
                             switch result {
                                 case let .messages(messages, chats, users):
                                     return (peer, messages, chats, users)
-                                case let .messagesSlice(_, _, _, _, messages, chats, users):
+                                case let .messagesSlice(_, _, _, _, _, messages, chats, users):
                                     return (peer, messages, chats, users)
                                 case let .channelMessages(_, _, _, _, messages, apiTopics, chats, users):
                                     let _ = apiTopics
@@ -297,7 +314,7 @@ func withResolvedAssociatedMessages<T>(postbox: Postbox, source: FetchMessageHis
                     for (peer, messages, chats, users) in results {
                         if !messages.isEmpty {
                             for message in messages {
-                                if let message = StoreMessage(apiMessage: message, accountPeerId: accountPeerId, peerIsForum: peer.isForum) {
+                                if let message = StoreMessage(apiMessage: message, accountPeerId: accountPeerId, peerIsForum: peer.isForumOrMonoForum) {
                                     additionalMessages.append(message)
                                 }
                             }
@@ -305,12 +322,30 @@ func withResolvedAssociatedMessages<T>(postbox: Postbox, source: FetchMessageHis
                         additionalPeers = additionalPeers.union(with: AccumulatedPeers(transaction: transaction, chats: chats, users: users))
                     }
                     
-                    return resolveUnknownEmojiFiles(postbox: postbox, source: source, messages: storeMessages + additionalMessages, reactions: [], result: Void())
+                    let combinedMessages = storeMessages + additionalMessages
+                    return resolveUnknownEmojiFiles(postbox: postbox, source: source, messages: combinedMessages, reactions: [], result: Void())
                     |> mapToSignal { _ -> Signal<T, NoError> in
-                        return resolveAssociatedStories(postbox: postbox, source: source, accountPeerId: accountPeerId, messages: storeMessages + additionalMessages, additionalPeers: parsedPeers.union(with: additionalPeers), result: Void())
+                        let additionalPeers = parsedPeers.union(with: additionalPeers)
+                        return resolveAssociatedStories(postbox: postbox, source: source, accountPeerId: accountPeerId, messages: storeMessages + additionalMessages, additionalPeers: additionalPeers, result: Void())
                         |> mapToSignal { _ -> Signal<T, NoError> in
-                            return postbox.transaction { transaction -> T in
-                                return f(transaction, additionalPeers, additionalMessages)
+                            var threadIds = Set<PeerAndBoundThreadId>()
+                            for message in combinedMessages {
+                                if case let .Id(id) = message.id, let threadId = message.threadId {
+                                    threadIds.insert(PeerAndBoundThreadId(peerId: id.peerId, threadId: threadId))
+                                }
+                            }
+                            
+                            if resolveThreads && !threadIds.isEmpty {
+                                return resolveForumThreads(accountPeerId: accountPeerId, postbox: postbox, source: source, additionalPeers: additionalPeers, ids: Array(threadIds))
+                                |> mapToSignal { _ -> Signal<T, NoError> in
+                                    return postbox.transaction { transaction -> T in
+                                        return f(transaction, parsedPeers, [])
+                                    }
+                                }
+                            } else {
+                                return postbox.transaction { transaction -> T in
+                                    return f(transaction, additionalPeers, additionalMessages)
+                                }
                             }
                         }
                     }
@@ -335,9 +370,12 @@ enum FetchMessageHistoryHoleThreadInput: CustomStringConvertible {
         }
     }
     
-    func requestThreadId(accountPeerId: PeerId) -> Int64? {
+    func requestThreadId(accountPeerId: PeerId, peer: Peer) -> Int64? {
         switch self {
         case let .direct(peerId, threadId):
+            if let channel = peer as? TelegramChannel, channel.flags.contains(.isMonoforum) {
+                return nil
+            }
             if let threadId = threadId, peerId != accountPeerId {
                 return threadId
             } else {
@@ -348,10 +386,12 @@ enum FetchMessageHistoryHoleThreadInput: CustomStringConvertible {
         }
     }
     
-    func requestSubPeerId(accountPeerId: PeerId) -> PeerId? {
+    func requestSubPeerId(accountPeerId: PeerId, peer: Peer) -> PeerId? {
         switch self {
         case let .direct(peerId, threadId):
-            if let threadId = threadId, peerId == accountPeerId {
+            if let threadId, peerId == accountPeerId {
+                return PeerId(threadId)
+            } else if let threadId, let channel = peer as? TelegramChannel, channel.flags.contains(.isMonoforum) {
                 return PeerId(threadId)
             } else {
                 return nil
@@ -370,7 +410,7 @@ struct FetchMessageHistoryHoleResult: Equatable {
     var ids: [MessageId]
 }
 
-func fetchMessageHistoryHole(accountPeerId: PeerId, source: FetchMessageHistoryHoleSource, postbox: Postbox, peerInput: FetchMessageHistoryHoleThreadInput, namespace: MessageId.Namespace, direction: MessageHistoryViewRelativeHoleDirection, space: MessageHistoryHoleSpace, count rawCount: Int) -> Signal<FetchMessageHistoryHoleResult?, NoError> {
+func fetchMessageHistoryHole(accountPeerId: PeerId, source: FetchMessageHistoryHoleSource, postbox: Postbox, peerInput: FetchMessageHistoryHoleThreadInput, namespace: MessageId.Namespace, direction: MessageHistoryViewRelativeHoleDirection, space: MessageHistoryHoleOperationSpace, count rawCount: Int) -> Signal<FetchMessageHistoryHoleResult?, NoError> {
     let count = min(100, rawCount)
     
     return postbox.stateView()
@@ -386,7 +426,12 @@ func fetchMessageHistoryHole(accountPeerId: PeerId, source: FetchMessageHistoryH
         return postbox.transaction { transaction -> (Peer?, Int64, Peer?) in
             switch peerInput {
             case let .direct(peerId, _):
-                return (transaction.getPeer(peerId), 0, peerInput.requestSubPeerId(accountPeerId: accountPeerId).flatMap(transaction.getPeer))
+                let peer = transaction.getPeer(peerId)
+                var subPeerId: PeerId?
+                if let peer {
+                    subPeerId = peerInput.requestSubPeerId(accountPeerId: accountPeerId, peer: peer)
+                }
+                return (peer, 0, subPeerId.flatMap(transaction.getPeer))
             case let .threadFromChannel(channelMessageId):
                 return (transaction.getPeer(channelMessageId.peerId), 0, nil)
             }
@@ -407,7 +452,7 @@ func fetchMessageHistoryHole(accountPeerId: PeerId, source: FetchMessageHistoryH
             
             switch space {
             case .everywhere:
-                if let requestThreadId = peerInput.requestThreadId(accountPeerId: accountPeerId) {
+                if let requestThreadId = peerInput.requestThreadId(accountPeerId: accountPeerId, peer: peer) {
                     let offsetId: Int32
                     let addOffset: Int32
                     let selectedLimit = count
@@ -455,7 +500,7 @@ func fetchMessageHistoryHole(accountPeerId: PeerId, source: FetchMessageHistoryH
                     }
                     
                     request = source.request(Api.functions.messages.getReplies(peer: inputPeer, msgId: Int32(clamping: requestThreadId), offsetId: offsetId, offsetDate: 0, addOffset: addOffset, limit: Int32(selectedLimit), maxId: maxId, minId: minId, hash: hash))
-                } else if let subPeerId = peerInput.requestSubPeerId(accountPeerId: accountPeerId) {
+                } else if let subPeerId = peerInput.requestSubPeerId(accountPeerId: accountPeerId, peer: peer) {
                     guard let subPeer, subPeer.id == subPeerId, let inputSubPeer = apiInputPeer(subPeer) else {
                         Logger.shared.log("fetchMessageHistoryHole", "subPeer not available")
                         return .never()
@@ -507,7 +552,14 @@ func fetchMessageHistoryHole(accountPeerId: PeerId, source: FetchMessageHistoryH
                         minMaxRange = 1 ... (Int32.max - 1)
                     }
                     
-                    request = source.request(Api.functions.messages.getSavedHistory(peer: inputSubPeer, offsetId: offsetId, offsetDate: 0, addOffset: addOffset, limit: Int32(selectedLimit), maxId: maxId, minId: minId, hash: hash))
+                    var getSavedHistoryFlags: Int32 = 0
+                    var parentPeer: Api.InputPeer?
+                    if peer.id != accountPeerId {
+                        getSavedHistoryFlags |= 1 << 0
+                        parentPeer = inputPeer
+                    }
+                    
+                    request = source.request(Api.functions.messages.getSavedHistory(flags: getSavedHistoryFlags, parentPeer: parentPeer, peer: inputSubPeer, offsetId: offsetId, offsetDate: 0, addOffset: addOffset, limit: Int32(selectedLimit), maxId: maxId, minId: minId, hash: hash))
                 } else {
                     let offsetId: Int32
                     let addOffset: Int32
@@ -607,7 +659,7 @@ func fetchMessageHistoryHole(accountPeerId: PeerId, source: FetchMessageHistoryH
                     
                     var flags: Int32 = 0
                     var topMsgId: Int32?
-                    if let threadId = peerInput.requestThreadId(accountPeerId: accountPeerId) {
+                    if let threadId = peerInput.requestThreadId(accountPeerId: accountPeerId, peer: peer) {
                         flags |= (1 << 1)
                         topMsgId = Int32(clamping: threadId)
                     }
@@ -662,12 +714,20 @@ func fetchMessageHistoryHole(accountPeerId: PeerId, source: FetchMessageHistoryH
                     
                     var flags: Int32 = 0
                     var topMsgId: Int32?
-                    if let threadId = peerInput.requestThreadId(accountPeerId: accountPeerId) {
+                    if let threadId = peerInput.requestThreadId(accountPeerId: accountPeerId, peer: peer) {
                         flags |= (1 << 0)
                         topMsgId = Int32(clamping: threadId)
                     }
+                    var savedPeerId: Api.InputPeer?
+                    if let subPeerId = peerInput.requestSubPeerId(accountPeerId: accountPeerId, peer: peer), let subPeer = subPeer, subPeer.id == subPeerId {
+                        flags |= (1 << 1)
+                        if let inputPeer = apiInputPeer(subPeer) {
+                            flags |= 1 << 2
+                            savedPeerId = inputPeer
+                        }
+                    }
                     
-                    request = source.request(Api.functions.messages.getUnreadReactions(flags: flags, peer: inputPeer, topMsgId: topMsgId, offsetId: offsetId, addOffset: addOffset, limit: Int32(selectedLimit), maxId: maxId, minId: minId))
+                    request = source.request(Api.functions.messages.getUnreadReactions(flags: flags, peer: inputPeer, topMsgId: topMsgId, savedPeerId: savedPeerId, offsetId: offsetId, addOffset: addOffset, limit: Int32(selectedLimit), maxId: maxId, minId: minId))
                 } else if tag == .liveLocation {
                     let selectedLimit = count
                     
@@ -726,24 +786,106 @@ func fetchMessageHistoryHole(accountPeerId: PeerId, source: FetchMessageHistoryH
                     
                     var flags: Int32 = 0
                     var topMsgId: Int32?
-                    if let threadId = peerInput.requestThreadId(accountPeerId: accountPeerId) {
+                    if let threadId = peerInput.requestThreadId(accountPeerId: accountPeerId, peer: peer) {
                         flags |= (1 << 1)
                         topMsgId = Int32(clamping: threadId)
                     }
                     
                     var savedPeerId: Api.InputPeer?
-                    if let subPeerId = peerInput.requestSubPeerId(accountPeerId: accountPeerId), let subPeer = subPeer, subPeer.id == subPeerId {
+                    if let subPeerId = peerInput.requestSubPeerId(accountPeerId: accountPeerId, peer: peer), let subPeer = subPeer, subPeer.id == subPeerId {
                         if let inputPeer = apiInputPeer(subPeer) {
                             flags |= 1 << 2
                             savedPeerId = inputPeer
                         }
                     }
                     
-                    request = source.request(Api.functions.messages.search(flags: flags, peer: inputPeer, q: "", fromId: nil, savedPeerId: savedPeerId, topMsgId: topMsgId, filter: filter, minDate: 0, maxDate: 0, offsetId: offsetId, addOffset: addOffset, limit: Int32(selectedLimit), maxId: maxId, minId: minId, hash: 0))
+                    request = source.request(Api.functions.messages.search(flags: flags, peer: inputPeer, q: "", fromId: nil, savedPeerId: savedPeerId, savedReaction: nil, topMsgId: topMsgId, filter: filter, minDate: 0, maxDate: 0, offsetId: offsetId, addOffset: addOffset, limit: Int32(selectedLimit), maxId: maxId, minId: minId, hash: 0))
                 } else {
                     assertionFailure()
                     minMaxRange = 1 ... 1
                     request = .never()
+                }
+            case let .customTag(customTag, regularTag):
+                if let reaction = ReactionsMessageAttribute.reactionFromMessageTag(tag: customTag) {
+                    let offsetId: Int32
+                    let addOffset: Int32
+                    let selectedLimit = count
+                    let maxId: Int32
+                    let minId: Int32
+                    
+                    switch direction {
+                    case let .range(start, end):
+                        if start.id <= end.id {
+                            offsetId = start.id <= 1 ? 1 : (start.id - 1)
+                            addOffset = Int32(-selectedLimit)
+                            maxId = end.id
+                            minId = start.id - 1
+                            
+                            let rangeStartId = start.id
+                            let rangeEndId = min(end.id, Int32.max - 1)
+                            if rangeStartId <= rangeEndId {
+                                minMaxRange = rangeStartId ... rangeEndId
+                            } else {
+                                minMaxRange = rangeStartId ... rangeStartId
+                                assertionFailure()
+                            }
+                        } else {
+                            offsetId = start.id == Int32.max ? start.id : (start.id + 1)
+                            addOffset = 0
+                            maxId = start.id == Int32.max ? start.id : (start.id + 1)
+                            minId = end.id
+                            
+                            let rangeStartId = end.id
+                            let rangeEndId = min(start.id, Int32.max - 1)
+                            if rangeStartId <= rangeEndId {
+                                minMaxRange = rangeStartId ... rangeEndId
+                            } else {
+                                minMaxRange = rangeStartId ... rangeStartId
+                                assertionFailure()
+                            }
+                        }
+                    case let .aroundId(id):
+                        offsetId = id.id
+                        addOffset = Int32(-selectedLimit / 2)
+                        maxId = Int32.max
+                        minId = 1
+                        
+                        minMaxRange = 1 ... (Int32.max - 1)
+                    }
+                    
+                    var flags: Int32 = 0
+                    var topMsgId: Int32?
+                    if let threadId = peerInput.requestThreadId(accountPeerId: accountPeerId, peer: peer) {
+                        flags |= (1 << 1)
+                        topMsgId = Int32(clamping: threadId)
+                    }
+                    
+                    var savedPeerId: Api.InputPeer?
+                    if let subPeerId = peerInput.requestSubPeerId(accountPeerId: accountPeerId, peer: peer), let subPeer = subPeer, subPeer.id == subPeerId {
+                        if let inputPeer = apiInputPeer(subPeer) {
+                            flags |= 1 << 2
+                            savedPeerId = inputPeer
+                        }
+                    }
+                    
+                    var mappedFilter: Api.MessagesFilter = .inputMessagesFilterEmpty
+                    if let regularTag {
+                        if let filter = messageFilterForTagMask(regularTag) {
+                            mappedFilter = filter
+                        } else {
+                            Logger.shared.log("fetchMessageHistoryHole", "fetch for \(peerInput) direction \(direction) space \(space): unknown filter for tag \(regularTag.rawValue)")
+                            assertionFailure()
+                            return .never()
+                        }
+                    }
+                    
+                    flags |= 1 << 3
+                    
+                    request = source.request(Api.functions.messages.search(flags: flags, peer: inputPeer, q: "", fromId: nil, savedPeerId: savedPeerId, savedReaction: [reaction.apiReaction], topMsgId: topMsgId, filter: mappedFilter, minDate: 0, maxDate: 0, offsetId: offsetId, addOffset: addOffset, limit: Int32(selectedLimit), maxId: maxId, minId: minId, hash: 0))
+                } else {
+                    assertionFailure()
+                    minMaxRange = 1 ... 1
+                    return .never()
                 }
             }
             
@@ -781,7 +923,7 @@ func fetchMessageHistoryHole(accountPeerId: PeerId, source: FetchMessageHistoryH
                             messages = apiMessages
                             chats = apiChats
                             users = apiUsers
-                        case let .messagesSlice(_, _, _, _, messages: apiMessages, chats: apiChats, users: apiUsers):
+                        case let .messagesSlice(_, _, _, _, _, messages: apiMessages, chats: apiChats, users: apiUsers):
                             messages = apiMessages
                             chats = apiChats
                             users = apiUsers
@@ -802,7 +944,7 @@ func fetchMessageHistoryHole(accountPeerId: PeerId, source: FetchMessageHistoryH
                     var storeMessages: [StoreMessage] = []
                     
                     for message in messages {
-                        if let storeMessage = StoreMessage(apiMessage: message, accountPeerId: accountPeerId, peerIsForum: peer.isForum, namespace: namespace) {
+                        if let storeMessage = StoreMessage(apiMessage: message, accountPeerId: accountPeerId, peerIsForum: peer.isForumOrMonoForum, namespace: namespace) {
                             if let channelPts = channelPts {
                                 var attributes = storeMessage.attributes
                                 attributes.append(ChannelMessageStateVersionAttribute(pts: channelPts))
@@ -813,7 +955,7 @@ func fetchMessageHistoryHole(accountPeerId: PeerId, source: FetchMessageHistoryH
                         }
                     }
                     
-                    return withResolvedAssociatedMessages(postbox: postbox, source: source, accountPeerId: accountPeerId, parsedPeers: parsedPeers, storeMessages: storeMessages, { transaction, additionalParsedPeers, additionalMessages -> FetchMessageHistoryHoleResult? in
+                    return withResolvedAssociatedMessages(postbox: postbox, source: source, accountPeerId: accountPeerId, parsedPeers: parsedPeers, storeMessages: storeMessages, resolveThreads: true, { transaction, additionalParsedPeers, additionalMessages -> FetchMessageHistoryHoleResult? in
                         let _ = transaction.addMessages(storeMessages, location: .Random)
                         let _ = transaction.addMessages(additionalMessages, location: .Random)
                         var filledRange: ClosedRange<MessageId.Id>
@@ -828,6 +970,16 @@ func fetchMessageHistoryHole(accountPeerId: PeerId, source: FetchMessageHistoryH
                                     } else {
                                         return id.id
                                     }
+                                case let .customTag(customTag, regularTag):
+                                    if let regularTag {
+                                        if !message.tags.contains(regularTag) {
+                                            return nil
+                                        }
+                                    }
+                                    if !postbox.seedConfiguration.customTagsFromAttributes(message.attributes).contains(customTag) {
+                                        return nil
+                                    }
+                                    return id.id
                                 case .everywhere:
                                     return id.id
                                 }
@@ -845,6 +997,16 @@ func fetchMessageHistoryHole(accountPeerId: PeerId, source: FetchMessageHistoryH
                                     } else {
                                         return id
                                     }
+                                case let .customTag(customTag, regularTag):
+                                    if let regularTag {
+                                        if !message.tags.contains(regularTag) {
+                                            return nil
+                                        }
+                                    }
+                                    if !postbox.seedConfiguration.customTagsFromAttributes(message.attributes).contains(customTag) {
+                                        return nil
+                                    }
+                                    return id
                                 case .everywhere:
                                     return id
                                 }
@@ -854,9 +1016,6 @@ func fetchMessageHistoryHole(accountPeerId: PeerId, source: FetchMessageHistoryH
                         }
                         
                         print("fetchMessageHistoryHole for \(peerInput) space \(space) done")
-                        if peerInput.requestThreadId(accountPeerId: accountPeerId) != nil, case .everywhere = space, case .aroundId = direction {
-                            assert(true)
-                        }
                         
                         if ids.count == 0 || implicitelyFillHole {
                             filledRange = minMaxRange
@@ -864,32 +1023,40 @@ func fetchMessageHistoryHole(accountPeerId: PeerId, source: FetchMessageHistoryH
                         } else {
                             let messageRange = ids.min()! ... ids.max()!
                             switch direction {
-                                case let .aroundId(aroundId):
-                                    filledRange = min(aroundId.id, messageRange.lowerBound) ... max(aroundId.id, messageRange.upperBound)
-                                    strictFilledIndices = IndexSet(integersIn: Int(min(aroundId.id, messageRange.lowerBound)) ... Int(max(aroundId.id, messageRange.upperBound)))
-                                    if peerInput.requestThreadId(accountPeerId: accountPeerId) != nil {
-                                        if ids.count <= count / 2 - 1 {
-                                            filledRange = minMaxRange
-                                        }
+                            case let .aroundId(aroundId):
+                                filledRange = min(aroundId.id, messageRange.lowerBound) ... max(aroundId.id, messageRange.upperBound)
+                                strictFilledIndices = IndexSet(integersIn: Int(min(aroundId.id, messageRange.lowerBound)) ... Int(max(aroundId.id, messageRange.upperBound)))
+                                var shouldFillAround = false
+                                if peerInput.requestThreadId(accountPeerId: accountPeerId, peer: peer) != nil || peerInput.requestSubPeerId(accountPeerId: accountPeerId, peer: peer) != nil {
+                                    shouldFillAround = true
+                                }
+                                if case .customTag = space {
+                                    shouldFillAround = true
+                                }
+                                
+                                if shouldFillAround {
+                                    if ids.count <= count / 2 - 1 {
+                                        filledRange = minMaxRange
                                     }
-                                case let .range(start, end):
-                                    if start.id <= end.id {
-                                        let minBound = start.id
-                                        let maxBound = messageRange.upperBound
-                                        filledRange = min(minBound, maxBound) ... max(minBound, maxBound)
-                                        
-                                        var maxStrictIndex = max(minBound, maxBound)
-                                        maxStrictIndex = min(maxStrictIndex, messageRange.upperBound)
-                                        strictFilledIndices = IndexSet(integersIn: Int(min(minBound, maxBound)) ... Int(maxStrictIndex))
-                                    } else {
-                                        let minBound = messageRange.lowerBound
-                                        let maxBound = start.id
-                                        filledRange = min(minBound, maxBound) ... max(minBound, maxBound)
-                                        
-                                        var maxStrictIndex = max(minBound, maxBound)
-                                        maxStrictIndex = min(maxStrictIndex, messageRange.upperBound)
-                                        strictFilledIndices = IndexSet(integersIn: Int(min(minBound, maxBound)) ... Int(maxStrictIndex))
-                                    }
+                                }
+                            case let .range(start, end):
+                                if start.id <= end.id {
+                                    let minBound = start.id
+                                    let maxBound = messageRange.upperBound
+                                    filledRange = min(minBound, maxBound) ... max(minBound, maxBound)
+                                    
+                                    var maxStrictIndex = max(minBound, maxBound)
+                                    maxStrictIndex = min(maxStrictIndex, messageRange.upperBound)
+                                    strictFilledIndices = IndexSet(integersIn: Int(min(minBound, maxBound)) ... Int(maxStrictIndex))
+                                } else {
+                                    let minBound = messageRange.lowerBound
+                                    let maxBound = start.id
+                                    filledRange = min(minBound, maxBound) ... max(minBound, maxBound)
+                                    
+                                    var maxStrictIndex = max(minBound, maxBound)
+                                    maxStrictIndex = min(maxStrictIndex, messageRange.upperBound)
+                                    strictFilledIndices = IndexSet(integersIn: Int(min(minBound, maxBound)) ... Int(maxStrictIndex))
+                                }
                             }
                         }
                         
@@ -948,15 +1115,15 @@ func fetchChatListHole(postbox: Postbox, network: Network, accountPeerId: PeerId
             }
             |> ignoreValues
         }
-        return withResolvedAssociatedMessages(postbox: postbox, source: .network(network), accountPeerId: accountPeerId, parsedPeers: fetchedChats.peers, storeMessages: fetchedChats.storeMessages, { transaction, additionalPeers, additionalMessages -> Void in
+        return withResolvedAssociatedMessages(postbox: postbox, source: .network(network), accountPeerId: accountPeerId, parsedPeers: fetchedChats.peers, storeMessages: fetchedChats.storeMessages, resolveThreads: false, { transaction, additionalPeers, additionalMessages -> Void in
             updatePeers(transaction: transaction, accountPeerId: accountPeerId, peers: fetchedChats.peers.union(with: additionalPeers))
             
             for (threadMessageId, data) in fetchedChats.threadInfos {
                 if let entry = StoredMessageHistoryThreadInfo(data.data) {
-                    transaction.setMessageHistoryThreadInfo(peerId: threadMessageId.peerId, threadId: Int64(threadMessageId.id), info: entry)
+                    transaction.setMessageHistoryThreadInfo(peerId: threadMessageId.peerId, threadId: threadMessageId.threadId, info: entry)
                 }
-                transaction.replaceMessageTagSummary(peerId: threadMessageId.peerId, threadId: Int64(threadMessageId.id), tagMask: .unseenPersonalMessage, namespace: Namespaces.Message.Cloud, count: data.unreadMentionCount, maxId: data.topMessageId)
-                transaction.replaceMessageTagSummary(peerId: threadMessageId.peerId, threadId: Int64(threadMessageId.id), tagMask: .unseenReaction, namespace: Namespaces.Message.Cloud, count: data.unreadReactionCount, maxId: data.topMessageId)
+                transaction.replaceMessageTagSummary(peerId: threadMessageId.peerId, threadId: threadMessageId.threadId, tagMask: .unseenPersonalMessage, namespace: Namespaces.Message.Cloud, customTag: nil, count: data.unreadMentionCount, maxId: data.topMessageId)
+                transaction.replaceMessageTagSummary(peerId: threadMessageId.peerId, threadId: threadMessageId.threadId, tagMask: .unseenReaction, namespace: Namespaces.Message.Cloud, customTag: nil, count: data.unreadReactionCount, maxId: data.topMessageId)
             }
             
             transaction.updateCurrentPeerNotificationSettings(fetchedChats.notificationSettings)
@@ -1024,10 +1191,10 @@ func fetchChatListHole(postbox: Postbox, network: Network, accountPeerId: PeerId
             }
             
             for (peerId, summary) in fetchedChats.mentionTagSummaries {
-                transaction.replaceMessageTagSummary(peerId: peerId, threadId: nil, tagMask: .unseenPersonalMessage, namespace: Namespaces.Message.Cloud, count: summary.count, maxId: summary.range.maxId)
+                transaction.replaceMessageTagSummary(peerId: peerId, threadId: nil, tagMask: .unseenPersonalMessage, namespace: Namespaces.Message.Cloud, customTag: nil, count: summary.count, maxId: summary.range.maxId)
             }
             for (peerId, summary) in fetchedChats.reactionTagSummaries {
-                transaction.replaceMessageTagSummary(peerId: peerId, threadId: nil, tagMask: .unseenReaction, namespace: Namespaces.Message.Cloud, count: summary.count, maxId: summary.range.maxId)
+                transaction.replaceMessageTagSummary(peerId: peerId, threadId: nil, tagMask: .unseenReaction, namespace: Namespaces.Message.Cloud, customTag: nil, count: summary.count, maxId: summary.range.maxId)
             }
             
             for (groupId, summary) in fetchedChats.folderSummaries {
@@ -1043,7 +1210,7 @@ func fetchCallListHole(network: Network, postbox: Postbox, accountPeerId: PeerId
     offset = single((holeIndex.timestamp, min(holeIndex.id.id, Int32.max - 1) + 1, Api.InputPeer.inputPeerEmpty), NoError.self)
     return offset
     |> mapToSignal { (timestamp, id, peer) -> Signal<Void, NoError> in
-        let searchResult = network.request(Api.functions.messages.search(flags: 0, peer: .inputPeerEmpty, q: "", fromId: nil, savedPeerId: nil, topMsgId: nil, filter: .inputMessagesFilterPhoneCalls(flags: 0), minDate: 0, maxDate: holeIndex.timestamp, offsetId: 0, addOffset: 0, limit: limit, maxId: holeIndex.id.id, minId: 0, hash: 0))
+        let searchResult = network.request(Api.functions.messages.search(flags: 0, peer: .inputPeerEmpty, q: "", fromId: nil, savedPeerId: nil, savedReaction: nil, topMsgId: nil, filter: .inputMessagesFilterPhoneCalls(flags: 0), minDate: 0, maxDate: holeIndex.timestamp, offsetId: 0, addOffset: 0, limit: limit, maxId: holeIndex.id.id, minId: 0, hash: 0))
         |> retryRequest
         |> mapToSignal { result -> Signal<Void, NoError> in
             let messages: [Api.Message]
@@ -1054,7 +1221,7 @@ func fetchCallListHole(network: Network, postbox: Postbox, accountPeerId: PeerId
                     messages = apiMessages
                     chats = apiChats
                     users = apiUsers
-                case let .messagesSlice(_, _, _, _, messages: apiMessages, chats: apiChats, users: apiUsers):
+                case let .messagesSlice(_, _, _, _, _, messages: apiMessages, chats: apiChats, users: apiUsers):
                     messages = apiMessages
                     chats = apiChats
                     users = apiUsers
@@ -1076,7 +1243,7 @@ func fetchCallListHole(network: Network, postbox: Postbox, accountPeerId: PeerId
                 
                 for message in messages {
                     var peerIsForum = false
-                    if let peerId = message.peerId, let peer = parsedPeers.get(peerId), peer.isForum {
+                    if let peerId = message.peerId, let peer = parsedPeers.get(peerId), peer.isForumOrMonoForum {
                         peerIsForum = true
                     }
                     if let storeMessage = StoreMessage(apiMessage: message, accountPeerId: accountPeerId, peerIsForum: peerIsForum) {

@@ -13,12 +13,14 @@ import ChatControllerInteraction
 import FeaturedStickersScreen
 import ChatTextInputMediaRecordingButton
 import ReplyAccessoryPanelNode
-import ChatMessageItemView
 import ChatMessageStickerItemNode
 import ChatMessageInstantVideoItemNode
 import ChatMessageAnimatedStickerItemNode
 import ChatMessageTransitionNode
 import ChatMessageBubbleItemNode
+import ChatEmptyNode
+import ChatMediaInputStickerGridItem
+import AccountContext
 
 private func convertAnimatingSourceRect(_ rect: CGRect, fromView: UIView, toView: UIView?) -> CGRect {
     if let presentationLayer = fromView.layer.presentation() {
@@ -106,9 +108,9 @@ private final class OverlayTransitionContainerController: ViewController, Standa
 public final class ChatMessageTransitionNodeImpl: ASDisplayNode, ChatMessageTransitionNode, ChatMessageTransitionProtocol {
     static let animationDuration: Double = 0.3
 
-    static let verticalAnimationControlPoints: (Float, Float, Float, Float) = (0.19919472913616398, 0.010644531250000006, 0.27920937042459737, 0.91025390625)
-    static let verticalAnimationCurve: ContainedViewLayoutTransitionCurve = .custom(verticalAnimationControlPoints.0, verticalAnimationControlPoints.1, verticalAnimationControlPoints.2, verticalAnimationControlPoints.3)
-    static let horizontalAnimationCurve: ContainedViewLayoutTransitionCurve = .custom(0.23, 1.0, 0.32, 1.0)
+    public static let verticalAnimationControlPoints: (Float, Float, Float, Float) = (0.19919472913616398, 0.010644531250000006, 0.27920937042459737, 0.91025390625)
+    public static let verticalAnimationCurve: ContainedViewLayoutTransitionCurve = .custom(verticalAnimationControlPoints.0, verticalAnimationControlPoints.1, verticalAnimationControlPoints.2, verticalAnimationControlPoints.3)
+    public static let horizontalAnimationCurve: ContainedViewLayoutTransitionCurve = .custom(0.23, 1.0, 0.32, 1.0)
 
     final class ReplyPanel {
         let titleNode: ASDisplayNode
@@ -239,8 +241,10 @@ public final class ChatMessageTransitionNodeImpl: ASDisplayNode, ChatMessageTran
     }
             
     final class DecorationItemNodeImpl: ASDisplayNode, ChatMessageTransitionNode.DecorationItemNode {
-        let itemNode: ChatMessageItemView
+        let itemNode: ChatMessageItemNodeProtocol
         let contentView: UIView
+        var globalPortalSourceView: PortalSourceView?
+        let aboveEverything: Bool
         private let getContentAreaInScreenSpace: () -> CGRect
         
         private let scrollingContainer: ASDisplayNode
@@ -249,9 +253,10 @@ public final class ChatMessageTransitionNodeImpl: ASDisplayNode, ChatMessageTran
         
         fileprivate weak var overlayController: OverlayTransitionContainerController?
         
-        init(itemNode: ChatMessageItemView, contentView: UIView, getContentAreaInScreenSpace: @escaping () -> CGRect) {
+        init(itemNode: ChatMessageItemNodeProtocol, contentView: UIView, aboveEverything: Bool, getContentAreaInScreenSpace: @escaping () -> CGRect) {
             self.itemNode = itemNode
             self.contentView = contentView
+            self.aboveEverything = aboveEverything
             self.getContentAreaInScreenSpace = getContentAreaInScreenSpace
             
             self.clippingNode = ASDisplayNode()
@@ -265,7 +270,16 @@ public final class ChatMessageTransitionNodeImpl: ASDisplayNode, ChatMessageTran
             self.addSubnode(self.clippingNode)
             self.clippingNode.addSubnode(self.scrollingContainer)
             self.scrollingContainer.addSubnode(self.containerNode)
-            self.containerNode.view.addSubview(self.contentView)
+            
+            if aboveEverything {
+                let globalPortalSourceView = PortalSourceView()
+                globalPortalSourceView.needsGlobalPortal = true
+                self.globalPortalSourceView = globalPortalSourceView
+                globalPortalSourceView.addSubview(self.contentView)
+                self.containerNode.view.addSubview(globalPortalSourceView)
+            } else {
+                self.containerNode.view.addSubview(self.contentView)
+            }
         }
         
         func updateLayout(size: CGSize) {
@@ -273,6 +287,9 @@ public final class ChatMessageTransitionNodeImpl: ASDisplayNode, ChatMessageTran
             
             let absoluteRect = self.itemNode.view.convert(self.itemNode.view.bounds, to: self.itemNode.supernode?.supernode?.view)
             self.containerNode.frame = absoluteRect
+            if let globalPortalSourceView = self.globalPortalSourceView {
+                globalPortalSourceView.frame = CGRect(origin: CGPoint(), size: size)
+            }
         }
         
         func addExternalOffset(offset: CGFloat, transition: ContainedViewLayoutTransition) {
@@ -287,9 +304,19 @@ public final class ChatMessageTransitionNodeImpl: ASDisplayNode, ChatMessageTran
             self.scrollingContainer.bounds = self.scrollingContainer.bounds.offsetBy(dx: 0.0, dy: offset)
         }
     }
+    
+    final class CustomOffsetHandlerImpl {
+        weak var itemNode: ChatMessageItemNodeProtocol?
+        let update: (CGFloat, ContainedViewLayoutTransition) -> Bool
+        
+        init(itemNode: ChatMessageItemNodeProtocol, update: @escaping (CGFloat, ContainedViewLayoutTransition) -> Bool) {
+            self.itemNode = itemNode
+            self.update = update
+        }
+    }
 
     private final class AnimatingItemNode: ASDisplayNode {
-        let itemNode: ChatMessageItemView
+        let itemNode: ChatMessageItemNodeProtocol
         private let contextSourceNode: ContextExtractedContentContainingNode
         private let source: ChatMessageTransitionNodeImpl.Source
         private let getContentAreaInScreenSpace: () -> CGRect
@@ -303,7 +330,7 @@ public final class ChatMessageTransitionNodeImpl: ASDisplayNode, ChatMessageTran
         var animationEnded: (() -> Void)?
         var updateAfterCompletion: Bool = false
 
-        init(itemNode: ChatMessageItemView, contextSourceNode: ContextExtractedContentContainingNode, source: ChatMessageTransitionNodeImpl.Source, getContentAreaInScreenSpace: @escaping () -> CGRect) {
+        init(itemNode: ChatMessageItemNodeProtocol, contextSourceNode: ContextExtractedContentContainingNode, source: ChatMessageTransitionNodeImpl.Source, getContentAreaInScreenSpace: @escaping () -> CGRect) {
             self.itemNode = itemNode
             self.getContentAreaInScreenSpace = getContentAreaInScreenSpace
 
@@ -635,7 +662,7 @@ public final class ChatMessageTransitionNodeImpl: ASDisplayNode, ChatMessageTran
             case let .videoMessage(videoMessage):
                 let combinedTransition = CombinedTransition(horizontal: .animated(duration: horizontalDuration, curve: ChatMessageTransitionNodeImpl.horizontalAnimationCurve), vertical: .animated(duration: verticalDuration, curve: ChatMessageTransitionNodeImpl.verticalAnimationCurve))
 
-                if let itemNode = self.itemNode as? ChatMessageInstantVideoItemNode {
+                if let itemNode = self.itemNode as? ChatMessageBubbleItemNode {
                     itemNode.cancelInsertionAnimations()
 
                     self.contextSourceNode.isExtractedToContextPreview = true
@@ -659,7 +686,7 @@ public final class ChatMessageTransitionNodeImpl: ASDisplayNode, ChatMessageTran
                         strongSelf.endAnimation()
                     })
 
-                    itemNode.animateFromSnapshot(snapshotView: videoMessage.view, transition: combinedTransition)
+                    itemNode.animateInstantVideoFromSnapshot(snapshotView: videoMessage.view, transition: combinedTransition)
                 }
             case let .mediaInput(mediaInput):
                 if let snapshotView = mediaInput.extractSnapshot() {
@@ -856,13 +883,13 @@ public final class ChatMessageTransitionNodeImpl: ASDisplayNode, ChatMessageTran
             self.standaloneReactionAnimation = standaloneReactionAnimation
         }
         
-        func addExternalOffset(offset: CGFloat, transition: ContainedViewLayoutTransition, itemNode: ListViewItemNode?) {
+        func addExternalOffset(offset: CGFloat, transition: ContainedViewLayoutTransition, itemNode: ListViewItemNode?, isRotated: Bool) {
             guard let currentItemNode = self.itemNode else {
                 return
             }
             if itemNode == nil || itemNode === currentItemNode {
                 if let contextController = self.contextController {
-                    contextController.addRelativeContentOffset(CGPoint(x: 0.0, y: -offset), transition: transition)
+                    contextController.addRelativeContentOffset(CGPoint(x: 0.0, y: offset), transition: transition)
                 }
                 if let standaloneReactionAnimation = self.standaloneReactionAnimation {
                     standaloneReactionAnimation.addRelativeContentOffset(CGPoint(x: 0.0, y: -offset), transition: transition)
@@ -898,6 +925,7 @@ public final class ChatMessageTransitionNodeImpl: ASDisplayNode, ChatMessageTran
     private var animatingItemNodes: [AnimatingItemNode] = []
     private var decorationItemNodes: [DecorationItemNodeImpl] = []
     private var messageReactionContexts: [MessageReactionContext] = []
+    private var customOffsetHandlers: [CustomOffsetHandlerImpl] = []
 
     var hasScheduledTransitions: Bool {
         return !self.currentPendingItems.isEmpty
@@ -949,19 +977,13 @@ public final class ChatMessageTransitionNodeImpl: ASDisplayNode, ChatMessageTran
         self.listNode.setCurrentSendAnimationCorrelationIds(correlationIds)
     }
     
-    public func add(decorationView: UIView, itemNode: ChatMessageItemView) -> DecorationItemNode {
-        let decorationItemNode = DecorationItemNodeImpl(itemNode: itemNode, contentView: decorationView, getContentAreaInScreenSpace: self.getContentAreaInScreenSpace)
+    public func add(decorationView: UIView, itemNode: ChatMessageItemNodeProtocol, aboveEverything: Bool) -> DecorationItemNode {
+        let decorationItemNode = DecorationItemNodeImpl(itemNode: itemNode, contentView: decorationView, aboveEverything: aboveEverything, getContentAreaInScreenSpace: self.getContentAreaInScreenSpace)
         decorationItemNode.updateLayout(size: self.bounds.size)
        
         self.decorationItemNodes.append(decorationItemNode)
         self.addSubnode(decorationItemNode)
         
-//        let overlayController = OverlayTransitionContainerController()
-//        overlayController.displayNode.isUserInteractionEnabled = false
-//        overlayController.displayNode.addSubnode(decorationItemNode)
-//        decorationItemNode.overlayController = overlayController
-//        itemNode.item?.context.sharedContext.mainWindow?.presentInGlobalOverlay(overlayController)
-                
         return decorationItemNode
     }
     
@@ -972,8 +994,22 @@ public final class ChatMessageTransitionNodeImpl: ASDisplayNode, ChatMessageTran
             decorationNode.overlayController?.dismiss()
         }
     }
+    
+    public func addCustomOffsetHandler(itemNode: ChatMessageItemNodeProtocol, update: @escaping (CGFloat, ContainedViewLayoutTransition) -> Bool) -> Disposable {
+        let handler = CustomOffsetHandlerImpl(itemNode: itemNode, update: update)
+        self.customOffsetHandlers.append(handler)
+        
+        return ActionDisposable { [weak self, weak handler] in
+            Queue.mainQueue().async {
+                guard let self, let handler else {
+                    return
+                }
+                self.customOffsetHandlers.removeAll(where: { $0 === handler })
+            }
+        }
+    }
 
-    private func beginAnimation(itemNode: ChatMessageItemView, source: Source) {
+    private func beginAnimation(itemNode: ChatMessageItemNodeProtocol, source: Source) {
         var contextSourceNode: ContextExtractedContentContainingNode?
         if let itemNode = itemNode as? ChatMessageBubbleItemNode {
             contextSourceNode = itemNode.mainContextSourceNode
@@ -995,7 +1031,7 @@ public final class ChatMessageTransitionNodeImpl: ASDisplayNode, ChatMessageTran
                 let overlayController = OverlayTransitionContainerController()
                 overlayController.displayNode.addSubnode(animatingItemNode)
                 animatingItemNode.overlayController = overlayController
-                itemNode.item?.context.sharedContext.mainWindow?.presentInGlobalOverlay(overlayController)
+                self.listNode.context.sharedContext.mainWindow?.presentInGlobalOverlay(overlayController)
             default:
                 self.addSubnode(animatingItemNode)
             }
@@ -1010,8 +1046,8 @@ public final class ChatMessageTransitionNodeImpl: ASDisplayNode, ChatMessageTran
                     strongSelf.animatingItemNodes.remove(at: index)
                 }
 
-                if animatingItemNode.updateAfterCompletion, let item = animatingItemNode.itemNode.item {
-                    for (message, _) in item.content {
+                if animatingItemNode.updateAfterCompletion {
+                    for message in animatingItemNode.itemNode.messages() {
                         strongSelf.listNode.requestMessageUpdate(stableId: message.stableId)
                         break
                     }
@@ -1060,14 +1096,9 @@ public final class ChatMessageTransitionNodeImpl: ASDisplayNode, ChatMessageTran
         
         var messageItemNode: ListViewItemNode?
         self.listNode.forEachItemNode { itemNode in
-            if let itemNode = itemNode as? ChatMessageItemView {
-                if let item = itemNode.item {
-                    for (message, _) in item.content {
-                        if message.id == messageId {
-                            messageItemNode = itemNode
-                            break
-                        }
-                    }
+            if let itemNode = itemNode as? ChatMessageItemNodeProtocol {
+                if itemNode.matchesMessage(id: messageId) {
+                    messageItemNode = itemNode
                 }
             }
         }
@@ -1084,7 +1115,7 @@ public final class ChatMessageTransitionNodeImpl: ASDisplayNode, ChatMessageTran
         }
     }
 
-    func addExternalOffset(offset: CGFloat, transition: ContainedViewLayoutTransition, itemNode: ListViewItemNode?) {
+    func addExternalOffset(offset: CGFloat, transition: ContainedViewLayoutTransition, itemNode: ListViewItemNode?, isRotated: Bool) {
         for animatingItemNode in self.animatingItemNodes {
             animatingItemNode.addExternalOffset(offset: offset, transition: transition, itemNode: itemNode)
         }
@@ -1092,9 +1123,18 @@ public final class ChatMessageTransitionNodeImpl: ASDisplayNode, ChatMessageTran
             for decorationItemNode in self.decorationItemNodes {
                 decorationItemNode.addExternalOffset(offset: offset, transition: transition)
             }
+            var removeCustomOffsetHandlers: [CustomOffsetHandlerImpl] = []
+            for customOffsetHandler in self.customOffsetHandlers {
+                if !customOffsetHandler.update(offset, transition) {
+                    removeCustomOffsetHandlers.append(customOffsetHandler)
+                }
+            }
+            for customOffsetHandler in removeCustomOffsetHandlers {
+                self.customOffsetHandlers.removeAll(where: { $0 ===  customOffsetHandler})
+            }
         }
         for messageReactionContext in self.messageReactionContexts {
-            messageReactionContext.addExternalOffset(offset: offset, transition: transition, itemNode: itemNode)
+            messageReactionContext.addExternalOffset(offset: offset, transition: transition, itemNode: itemNode, isRotated: isRotated)
         }
     }
 
@@ -1106,6 +1146,15 @@ public final class ChatMessageTransitionNodeImpl: ASDisplayNode, ChatMessageTran
             for decorationItemNode in self.decorationItemNodes {
                 decorationItemNode.addContentOffset(offset: offset)
             }
+            var removeCustomOffsetHandlers: [CustomOffsetHandlerImpl] = []
+            for customOffsetHandler in self.customOffsetHandlers {
+                if !customOffsetHandler.update(offset, .immediate) {
+                    removeCustomOffsetHandlers.append(customOffsetHandler)
+                }
+            }
+            for customOffsetHandler in removeCustomOffsetHandlers {
+                self.customOffsetHandlers.removeAll(where: { $0 ===  customOffsetHandler})
+            }
         }
         for messageReactionContext in self.messageReactionContexts {
             messageReactionContext.addContentOffset(offset: offset, itemNode: itemNode)
@@ -1114,11 +1163,9 @@ public final class ChatMessageTransitionNodeImpl: ASDisplayNode, ChatMessageTran
 
     func isAnimatingMessage(stableId: UInt32) -> Bool {
         for itemNode in self.animatingItemNodes {
-            if let item = itemNode.itemNode.item {
-                for (message, _) in item.content {
-                    if message.stableId == stableId {
-                        return true
-                    }
+            for message in itemNode.itemNode.messages() {
+                if message.stableId == stableId {
+                    return true
                 }
             }
         }
@@ -1127,11 +1174,9 @@ public final class ChatMessageTransitionNodeImpl: ASDisplayNode, ChatMessageTran
 
     func scheduleUpdateMessageAfterAnimationCompleted(stableId: UInt32) {
         for itemNode in self.animatingItemNodes {
-            if let item = itemNode.itemNode.item {
-                for (message, _) in item.content {
-                    if message.stableId == stableId {
-                        itemNode.updateAfterCompletion = true
-                    }
+            for message in itemNode.itemNode.messages() {
+                if message.stableId == stableId {
+                    itemNode.updateAfterCompletion = true
                 }
             }
         }
@@ -1139,11 +1184,9 @@ public final class ChatMessageTransitionNodeImpl: ASDisplayNode, ChatMessageTran
 
     func hasScheduledUpdateMessageAfterAnimationCompleted(stableId: UInt32) -> Bool {
         for itemNode in self.animatingItemNodes {
-            if let item = itemNode.itemNode.item {
-                for (message, _) in item.content {
-                    if message.stableId == stableId {
-                        return itemNode.updateAfterCompletion
-                    }
+            for message in itemNode.itemNode.messages() {
+                if message.stableId == stableId {
+                    return itemNode.updateAfterCompletion
                 }
             }
         }

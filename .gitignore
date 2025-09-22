@@ -67,3 +67,12 @@ xcodeproj.bazelrc
 build-input/*
 **/*.pyc
 *.pyc
+submodules/OpusBinding/SharedHeaders/*
+submodules/FFMpegBinding/SharedHeaders/*
+submodules/OpenSSLEncryptionProvider/SharedHeaders/*
+submodules/TelegramCore/FlatSerialization/Sources/*
+buildServer.json
+.build/**
+Telegram.LSP.json
+**/.build/**
+spm-files

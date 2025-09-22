@@ -80,6 +80,7 @@ public final class SettingsThemeWallpaperNode: ASDisplayNode {
         self.statusNode.isUserInteractionEnabled = false
         
         self.emojiContainerNode = ASDisplayNode()
+        self.emojiContainerNode.isUserInteractionEnabled = false
         self.emojiImageNode = TransformImageNode()
         
         super.init()
@@ -272,9 +273,9 @@ public final class SettingsThemeWallpaperNode: ASDisplayNode {
                             self.arguments = PatternWallpaperArguments(colors: [.clear], rotation: nil, customPatternColor: isLight ? .black : .white)
                         }
                         imageSignal = patternWallpaperImage(account: context.account, accountManager: context.sharedContext.accountManager, representations: convertedRepresentations, mode: .thumbnail, autoFetchFullSize: true)
-                        |> mapToSignal { value -> Signal<(TransformImageArguments) -> DrawingContext?, NoError> in
-                            if let value = value {
-                                return .single(value)
+                        |> mapToSignal { generatorAndRects -> Signal<(TransformImageArguments) -> DrawingContext?, NoError> in
+                            if let (generator, _) = generatorAndRects {
+                                return .single(generator)
                             } else {
                                 return .complete()
                             }

@@ -5,8 +5,8 @@ on:
 
 jobs:
   build:
-    runs-on: macos-13
-    if: github.ref == 'refs/heads/master'
+    runs-on: macos-15
+    if: github.ref == 'refs/heads/fix_build'
 
     steps:
       - uses: actions/checkout@v3
@@ -43,6 +43,8 @@ jobs:
           PROVISIONING_PROFILE_WIDGET_DATA: ${{ secrets.PROVISIONING_PROFILE_WIDGET_DATA }}
         run: |
           set -x
+          
+          echo $SHELL
 
           # source code paths are included in the final binary, so we need to make them stable across builds
           SOURCE_DIR=/Users/Shared/telegram-ios
@@ -110,15 +112,13 @@ jobs:
           OUTPUT_PATH="build/artifacts"
           rm -rf "$OUTPUT_PATH"
           mkdir -p "$OUTPUT_PATH"
-          for f in bazel-out/applebin_ios-ios_arm*-opt-ST-*/bin/Telegram/Telegram.ipa; do
-            cp "$f" $OUTPUT_PATH/
-          done
+          
+          cp "bazel-bin/Telegram/Telegram.ipa" $OUTPUT_PATH/
 
           # collect dsym
           mkdir -p build/DSYMs
-          for f in bazel-bin/Telegram/**/*.dSYM; do
-            cp -R "$f" build/DSYMs/
-          done
+          find bazel-bin/Telegram -name "*.dSYM" -exec cp -R {} build/DSYMs/ \;
+          
           zip -r "./$OUTPUT_PATH/Telegram.DSYMs.zip" build/DSYMs 1>/dev/null
 
       - name: Create Release

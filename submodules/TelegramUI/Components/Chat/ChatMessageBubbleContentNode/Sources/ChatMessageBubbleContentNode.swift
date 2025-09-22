@@ -10,6 +10,7 @@ import AccountContext
 import ChatMessageBackground
 import ChatControllerInteraction
 import ChatHistoryEntry
+import ChatMessageItem
 import ChatMessageItemCommon
 import SwiftSignalKit
 
@@ -118,7 +119,7 @@ public enum ChatMessageBubbleContentPosition {
 
 public enum ChatMessageBubblePreparePosition {
     case linear(top: ChatMessageBubbleRelativePosition, bottom: ChatMessageBubbleRelativePosition)
-    case mosaic(top: ChatMessageBubbleRelativePosition, bottom: ChatMessageBubbleRelativePosition)
+    case mosaic(top: ChatMessageBubbleRelativePosition, bottom: ChatMessageBubbleRelativePosition, index: Int?)
 }
 
 public struct ChatMessageBubbleContentTapAction {
@@ -141,6 +142,7 @@ public struct ChatMessageBubbleContentTapAction {
     public enum Content {
         case none
         case url(Url)
+        case phone(String)
         case textMention(String)
         case peerMention(peerId: PeerId, mention: String, openProfile: Bool)
         case botCommand(String)
@@ -149,6 +151,7 @@ public struct ChatMessageBubbleContentTapAction {
         case wallpaper
         case theme
         case call(peerId: PeerId, isVideo: Bool)
+        case conferenceCall(message: Message)
         case openMessage
         case timecode(Double, String)
         case tooltip(String, ASDisplayNode?, CGRect?)
@@ -158,14 +161,17 @@ public struct ChatMessageBubbleContentTapAction {
         case copy(String)
         case largeEmoji(String, String?, TelegramMediaFile)
         case customEmoji(TelegramMediaFile)
+        case custom(() -> Void)
     }
     
     public var content: Content
+    public var rects: [CGRect]?
     public var hasLongTapAction: Bool
     public var activate: (() -> Promise<Bool>?)?
     
-    public init(content: Content, hasLongTapAction: Bool = true, activate: (() -> Promise<Bool>?)? = nil) {
+    public init(content: Content, rects: [CGRect]? = nil, hasLongTapAction: Bool = true, activate: (() -> Promise<Bool>?)? = nil) {
         self.content = content
+        self.rects = rects
         self.hasLongTapAction = hasLongTapAction
         self.activate = activate
     }
@@ -176,6 +182,7 @@ public final class ChatMessageBubbleContentItem {
     public let controllerInteraction: ChatControllerInteraction
     public let message: Message
     public let topMessage: Message
+    public let content: ChatMessageItemContent
     public let read: Bool
     public let chatLocation: ChatLocation
     public let presentationData: ChatPresentationData
@@ -184,11 +191,12 @@ public final class ChatMessageBubbleContentItem {
     public let isItemPinned: Bool
     public let isItemEdited: Bool
     
-    public init(context: AccountContext, controllerInteraction: ChatControllerInteraction, message: Message, topMessage: Message, read: Bool, chatLocation: ChatLocation, presentationData: ChatPresentationData, associatedData: ChatMessageItemAssociatedData, attributes: ChatMessageEntryAttributes, isItemPinned: Bool, isItemEdited: Bool) {
+    public init(context: AccountContext, controllerInteraction: ChatControllerInteraction, message: Message, topMessage: Message, content: ChatMessageItemContent, read: Bool, chatLocation: ChatLocation, presentationData: ChatPresentationData, associatedData: ChatMessageItemAssociatedData, attributes: ChatMessageEntryAttributes, isItemPinned: Bool, isItemEdited: Bool) {
         self.context = context
         self.controllerInteraction = controllerInteraction
         self.message = message
         self.topMessage = topMessage
+        self.content = content
         self.read = read
         self.chatLocation = chatLocation
         self.presentationData = presentationData
@@ -204,6 +212,8 @@ open class ChatMessageBubbleContentNode: ASDisplayNode {
         return false
     }
     
+    open var index: Int?
+    
     public weak var itemNode: ChatMessageItemNodeProtocol?
     public weak var bubbleBackgroundNode: ChatMessageBackground?
     public weak var bubbleBackdropNode: ChatMessageBubbleBackdrop?
@@ -213,6 +223,8 @@ open class ChatMessageBubbleContentNode: ASDisplayNode {
     public var item: ChatMessageBubbleContentItem?
     
     public var updateIsTextSelectionActive: ((Bool) -> Void)?
+    public var requestInlineUpdate: (() -> Void)?
+    public var requestFullUpdate: (() -> Void)?
     
     open var disablesClipping: Bool {
         return false
@@ -292,6 +304,10 @@ open class ChatMessageBubbleContentNode: ASDisplayNode {
     }
     
     open func reactionTargetView(value: MessageReaction.Reaction) -> UIView? {
+        return nil
+    }
+    
+    open func messageEffectTargetView() -> UIView? {
         return nil
     }
     

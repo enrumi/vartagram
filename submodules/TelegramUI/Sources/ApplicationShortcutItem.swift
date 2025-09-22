@@ -10,6 +10,7 @@ enum ApplicationShortcutItemType: String {
     case savedMessages
     case account
     case hideAllSecrets
+    case appIcon
 }
 
 struct ApplicationShortcutItem: Equatable {
@@ -39,6 +40,8 @@ extension ApplicationShortcutItem {
                 } else {
                     icon = nil
                 }
+            case .appIcon:
+                icon = UIApplicationShortcutIcon(templateImageName: "Shortcuts/AppIcon")
         }
         return UIApplicationShortcutItem(type: self.type.rawValue, localizedTitle: self.title, localizedSubtitle: self.subtitle, icon: icon, userInfo: nil)
     }
@@ -53,20 +56,14 @@ func applicationShortcutItems(strings: PresentationStrings, otherAccountName: St
             ApplicationShortcutItem(type: .savedMessages, title: strings.Conversation_SavedMessages, subtitle: nil),
             ApplicationShortcutItem(type: .account, title: strings.Shortcut_SwitchAccount, subtitle: otherAccountName)
         ]
-    } else if DeviceAccess.isCameraAccessAuthorized() {
-        return [
-            ApplicationShortcutItem(type: .search, title: strings.Common_Search, subtitle: nil),
-            ApplicationShortcutItem(type: .compose, title: strings.Compose_NewMessage, subtitle: nil),
-            ApplicationShortcutItem(type: .camera, title: strings.Camera_Title, subtitle: nil),
-            ApplicationShortcutItem(type: .savedMessages, title: strings.Conversation_SavedMessages, subtitle: nil)
-        ]
     } else {
 */
         return [
             ApplicationShortcutItem(type: .search, title: strings.Common_Search, subtitle: nil),
             ApplicationShortcutItem(type: .compose, title: strings.Compose_NewMessage, subtitle: nil),
             ApplicationShortcutItem(type: .savedMessages, title: strings.Conversation_SavedMessages, subtitle: nil),
-            ApplicationShortcutItem(type: .hideAllSecrets, title: strings.SecretPasscodeMenu_HideAllSecrets, subtitle: nil)
+            ApplicationShortcutItem(type: .hideAllSecrets, title: strings.SecretPasscodeMenu_HideAllSecrets, subtitle: nil),
+            ApplicationShortcutItem(type: .appIcon, title: strings.Shortcut_AppIcon, subtitle: nil)
         ]
 //    }
 }

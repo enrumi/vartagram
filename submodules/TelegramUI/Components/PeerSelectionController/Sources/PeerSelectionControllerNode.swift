@@ -24,6 +24,7 @@ import SolidRoundedButtonNode
 import ContextUI
 import TextFormat
 import ForwardAccessoryPanelNode
+import CounterControllerTitleView
 
 final class PeerSelectionControllerNode: ASDisplayNode {
     private let context: AccountContext
@@ -32,7 +33,7 @@ final class PeerSelectionControllerNode: ASDisplayNode {
     private let presentInGlobalOverlay: (ViewController, Any?) -> Void
     private let dismiss: () -> Void
     private let filter: ChatListNodePeersFilter
-    private let forumPeerId: EnginePeer.Id?
+    private let forumPeerId: (id: EnginePeer.Id, isMonoforum: Bool)?
     private let hasGlobalSearch: Bool
     private let forwardedMessageIds: [EngineMessage.Id]
     private let hasTypeHeaders: Bool
@@ -80,10 +81,10 @@ final class PeerSelectionControllerNode: ASDisplayNode {
     var requestActivateSearch: (() -> Void)?
     var requestDeactivateSearch: (() -> Void)?
     var requestOpenPeer: ((EnginePeer, Int64?) -> Void)?
-    var requestOpenDisabledPeer: ((EnginePeer, Int64?) -> Void)?
+    var requestOpenDisabledPeer: ((EnginePeer, Int64?, ChatListDisabledPeerReason) -> Void)?
     var requestOpenPeerFromSearch: ((EnginePeer, Int64?) -> Void)?
     var requestOpenMessageFromSearch: ((EnginePeer, Int64?, EngineMessage.Id) -> Void)?
-    var requestSend: (([EnginePeer], [EnginePeer.Id: EnginePeer], NSAttributedString, AttachmentTextInputPanelSendMode, ChatInterfaceForwardOptionsState?) -> Void)?
+    var requestSend: (([EnginePeer], [EnginePeer.Id: EnginePeer], NSAttributedString, AttachmentTextInputPanelSendMode, ChatInterfaceForwardOptionsState?, ChatSendMessageActionSheetController.SendParameters?) -> Void)?
     
     private var presentationData: PresentationData {
         didSet {
@@ -95,6 +96,8 @@ final class PeerSelectionControllerNode: ASDisplayNode {
     private let animationCache: AnimationCache
     private let animationRenderer: MultiAnimationRenderer
     
+    private var countPanelNode: PeersCountPanelNode?
+
     private var readyValue = Promise<Bool>()
     var ready: Signal<Bool, NoError> {
         return self.readyValue.get()
@@ -107,8 +110,8 @@ final class PeerSelectionControllerNode: ASDisplayNode {
     }
     
     private let contactListNodeReadyDisposable = MetaDisposable()
-    
-    init(context: AccountContext, controller: PeerSelectionControllerImpl, presentationData: PresentationData, filter: ChatListNodePeersFilter, forumPeerId: EnginePeer.Id?, hasFilters: Bool, hasChatListSelector: Bool, hasContactSelector: Bool, hasGlobalSearch: Bool, forwardedMessageIds: [EngineMessage.Id], hasTypeHeaders: Bool, requestPeerType: [ReplyMarkupButtonRequestPeerType]?, hasCreation: Bool, createNewGroup: (() -> Void)?, present: @escaping (ViewController, Any?) -> Void,  presentInGlobalOverlay: @escaping (ViewController, Any?) -> Void, dismiss: @escaping () -> Void) {
+
+    init(context: AccountContext, controller: PeerSelectionControllerImpl, presentationData: PresentationData, filter: ChatListNodePeersFilter, forumPeerId: (id: EnginePeer.Id, isMonoforum: Bool)?, hasFilters: Bool, hasChatListSelector: Bool, hasContactSelector: Bool, hasGlobalSearch: Bool, forwardedMessageIds: [EngineMessage.Id], hasTypeHeaders: Bool, requestPeerType: [ReplyMarkupButtonRequestPeerType]?, hasCreation: Bool, createNewGroup: (() -> Void)?, present: @escaping (ViewController, Any?) -> Void, presentInGlobalOverlay: @escaping (ViewController, Any?) -> Void, dismiss: @escaping () -> Void) {
         self.context = context
         self.controller = controller
         self.present = present
@@ -126,7 +129,7 @@ final class PeerSelectionControllerNode: ASDisplayNode {
         self.animationCache = context.animationCache
         self.animationRenderer = context.animationRenderer
         
-        self.presentationInterfaceState = ChatPresentationInterfaceState(chatWallpaper: .builtin(WallpaperSettings()), theme: self.presentationData.theme, strings: self.presentationData.strings, dateTimeFormat: self.presentationData.dateTimeFormat, nameDisplayOrder: self.presentationData.nameDisplayOrder, limitsConfiguration: self.context.currentLimitsConfiguration.with { $0 }, fontSize: self.presentationData.chatFontSize, bubbleCorners: self.presentationData.chatBubbleCorners, accountPeerId: self.context.account.peerId, mode: .standard(.default), chatLocation: .peer(id: PeerId(0)), subject: nil, peerNearbyData: nil, greetingData: nil, pendingUnpinnedAllMessages: false, activeGroupCallInfo: nil, hasActiveGroupCall: false, importState: nil, threadData: nil, isGeneralThreadClosed: nil, replyMessage: nil, accountPeerColor: nil)
+        self.presentationInterfaceState = ChatPresentationInterfaceState(chatWallpaper: .builtin(WallpaperSettings()), theme: self.presentationData.theme, strings: self.presentationData.strings, dateTimeFormat: self.presentationData.dateTimeFormat, nameDisplayOrder: self.presentationData.nameDisplayOrder, limitsConfiguration: self.context.currentLimitsConfiguration.with { $0 }, fontSize: self.presentationData.chatFontSize, bubbleCorners: self.presentationData.chatBubbleCorners, accountPeerId: self.context.account.peerId, mode: .standard(.default), chatLocation: .peer(id: PeerId(0)), subject: nil, peerNearbyData: nil, greetingData: nil, pendingUnpinnedAllMessages: false, activeGroupCallInfo: nil, hasActiveGroupCall: false, importState: nil, threadData: nil, isGeneralThreadClosed: nil, replyMessage: nil, accountPeerColor: nil, businessIntro: nil)
         
         self.presentationInterfaceState = self.presentationInterfaceState.updatedInterfaceState { $0.withUpdatedForwardMessageIds(forwardedMessageIds) }
         self.presentationInterfaceStatePromise.set(self.presentationInterfaceState)
@@ -192,8 +195,12 @@ final class PeerSelectionControllerNode: ASDisplayNode {
         }
         
         let chatListLocation: ChatListControllerLocation
-        if let forumPeerId = self.forumPeerId {
-            chatListLocation = .forum(peerId: forumPeerId)
+        if let (forumPeerId, isMonoforum) = self.forumPeerId {
+            if isMonoforum {
+                chatListLocation = .savedMessagesChats(peerId: forumPeerId)
+            } else {
+                chatListLocation = .forum(peerId: forumPeerId)
+            }
         } else {
             chatListLocation = .chatList(groupId: .root)
         }
@@ -215,6 +222,9 @@ final class PeerSelectionControllerNode: ASDisplayNode {
         } else {
             self.mainContainerNode = nil
             self.chatListNode = ChatListNode(context: context, location: chatListLocation, previewing: false, fillPreloadItems: false, mode: chatListMode, theme: self.presentationData.theme, fontSize: presentationData.listsFontSize, strings: presentationData.strings, dateTimeFormat: presentationData.dateTimeFormat, nameSortOrder: presentationData.nameSortOrder, nameDisplayOrder: presentationData.nameDisplayOrder, animationCache: self.animationCache, animationRenderer: self.animationRenderer, disableAnimations: true, isInlineMode: false, autoSetReady: true, isMainTab: false)
+            if let multipleSelectionLimit = controller.multipleSelectionLimit {
+                self.chatListNode?.selectionLimit = multipleSelectionLimit
+            }
         }
     
         super.init()
@@ -244,16 +254,53 @@ final class PeerSelectionControllerNode: ASDisplayNode {
         }
         
         self.chatListNode?.peerSelected = { [weak self] peer, threadId, _, _, _ in
-            self?.chatListNode?.clearHighlightAnimated(true)
-            self?.requestOpenPeer?(peer, threadId)
+            guard let self else {
+                return
+            }
+
+            if let (peerId, isMonoforum) = self.forumPeerId, isMonoforum {
+                let _ = (self.context.engine.data.get(
+                    TelegramEngine.EngineData.Item.Peer.Peer(id: peerId)
+                )
+                |> deliverOnMainQueue).startStandalone(next: { [weak self] mainPeer in
+                    guard let self, let mainPeer else {
+                        return
+                    }
+                    self.chatListNode?.clearHighlightAnimated(true)
+                    self.requestOpenPeer?(mainPeer, peer.id.toInt64())
+                })
+            } else {
+                self.chatListNode?.clearHighlightAnimated(true)
+                self.requestOpenPeer?(peer, threadId)
+            }
         }
         self.mainContainerNode?.peerSelected = { [weak self] peer, threadId, _, _, _ in
-            self?.chatListNode?.clearHighlightAnimated(true)
-            self?.requestOpenPeer?(peer, threadId)
+            guard let self else {
+                return
+            }
+
+            if let (peerId, isMonoforum) = self.forumPeerId, isMonoforum {
+                let _ = (self.context.engine.data.get(
+                    TelegramEngine.EngineData.Item.Peer.Peer(id: peerId)
+                )
+                |> deliverOnMainQueue).startStandalone(next: { [weak self] mainPeer in
+                    guard let self, let mainPeer else {
+                        return
+                    }
+                    self.chatListNode?.clearHighlightAnimated(true)
+                    self.requestOpenPeer?(mainPeer, peer.id.toInt64())
+                })
+            } else {
+                self.chatListNode?.clearHighlightAnimated(true)
+                self.requestOpenPeer?(peer, threadId)
+            }
         }
         
-        self.chatListNode?.disabledPeerSelected = { [weak self] peer, threadId in
-            self?.requestOpenDisabledPeer?(peer, threadId)
+        self.chatListNode?.disabledPeerSelected = { [weak self] peer, threadId, reason in
+            self?.requestOpenDisabledPeer?(peer, threadId, reason)
+        }
+        self.mainContainerNode?.disabledPeerSelected = { [weak self] peer, threadId, reason in
+            self?.requestOpenDisabledPeer?(peer, threadId, reason)
         }
         
         self.chatListNode?.contentOffsetChanged = { [weak self] offset in
@@ -336,9 +383,10 @@ final class PeerSelectionControllerNode: ASDisplayNode {
             self.indexChanged(1)
         }
              
-        self.interfaceInteraction = ChatPanelInterfaceInteraction(setupReplyMessage: { _, _ in
+        self.interfaceInteraction = ChatPanelInterfaceInteraction(setupReplyMessage: { _, _, _ in
         }, setupEditMessage: { _, _ in
         }, beginMessageSelection: { _, _ in
+        }, cancelMessageSelection: { _ in
         }, deleteSelectedMessages: {
         }, reportSelectedMessages: {
         }, reportMessages: { _, _ in
@@ -375,7 +423,8 @@ final class PeerSelectionControllerNode: ASDisplayNode {
                 chatLocation: .peer(id: strongSelf.context.account.peerId),
                 subject: .messageOptions(peerIds: peerIds, ids: strongSelf.presentationInterfaceState.interfaceState.forwardMessageIds ?? [], info: .forward(ChatControllerSubject.MessageOptionsInfo.Forward(options: forwardOptions))),
                 botStart: nil,
-                mode: .standard(.previewing)
+                mode: .standard(.previewing),
+                params: nil
             )
             chatController.canReadHistory.set(false)
             
@@ -529,7 +578,7 @@ final class PeerSelectionControllerNode: ASDisplayNode {
                         forwardMessageIds = forwardMessageIds.filter { selectedMessageIds.contains($0) }
                         strongSelf.updateChatPresentationInterfaceState(animated: true, { $0.updatedInterfaceState({ $0.withUpdatedForwardMessageIds(forwardMessageIds) }) })
                     }
-                    strongSelf.textInputPanelNode?.sendMessage(.generic)
+                    strongSelf.textInputPanelNode?.sendMessage(.generic, nil)
 
                     f(.default)
                 })))
@@ -549,6 +598,7 @@ final class PeerSelectionControllerNode: ASDisplayNode {
             strongSelf.controller?.presentInGlobalOverlay(contextController)
         }, presentReplyOptions: { _ in
         }, presentLinkOptions: { _ in
+        }, presentSuggestPostOptions: {
         }, shareSelectedMessages: {
         }, updateTextInputStateAndMode: { [weak self] f in
             if let strongSelf = self {
@@ -589,12 +639,15 @@ final class PeerSelectionControllerNode: ASDisplayNode {
         }, sendContextResult: { _, _, _, _ in
             return false
         }, sendBotCommand: { _, _ in
+        }, sendShortcut: { _ in
+        }, openEditShortcuts: {
         }, sendBotStart: { _ in
         }, botSwitchChatWithPayload: { _, _ in
         }, beginMediaRecording: { _ in
         }, finishMediaRecording: { _ in
         }, stopMediaRecording: {
         }, lockMediaRecording: {
+        }, resumeMediaRecording: {
         }, deleteRecordedMedia: {
         }, sendRecordedMedia: { _, _ in
         }, displayRestrictedInfo: { _, _ in
@@ -672,37 +725,75 @@ final class PeerSelectionControllerNode: ASDisplayNode {
                 })
                 strongSelf.present(controller, nil)
             }
-        }, reportPeerIrrelevantGeoLocation: {
         }, displaySlowmodeTooltip: { _, _ in
         }, displaySendMessageOptions: { [weak self] node, gesture in
-            guard let strongSelf = self, let textInputPanelNode = strongSelf.textInputPanelNode else {
+            guard let strongSelf = self else {
                 return
             }
-            textInputPanelNode.loadTextInputNodeIfNeeded()
-            guard let textInputNode = textInputPanelNode.textInputNode else {
-                return
-            }
-            
-            var hasEntityKeyboard = false
-            if case .media = strongSelf.presentationInterfaceState.inputMode {
-                hasEntityKeyboard = true
-            }
-            
-            let controller = ChatSendMessageActionSheetController(context: strongSelf.context, peerId: strongSelf.presentationInterfaceState.chatLocation.peerId, forwardMessageIds: strongSelf.presentationInterfaceState.interfaceState.forwardMessageIds, hasEntityKeyboard: hasEntityKeyboard, gesture: gesture, sourceSendButton: node, textInputView: textInputNode.textView, canSendWhenOnline: false, completion: {
-            }, sendMessage: { [weak textInputPanelNode] mode in
-                switch mode {
-                case .generic:
-                    textInputPanelNode?.sendMessage(.generic)
-                case .silently:
-                    textInputPanelNode?.sendMessage(.silent)
-                case .whenOnline:
-                    textInputPanelNode?.sendMessage(.whenOnline)
+
+            let _ = (ChatSendMessageContextScreen.initialData(context: strongSelf.context, currentMessageEffectId: nil)
+            |> deliverOnMainQueue).start(next: { initialData in
+                guard let strongSelf = self, let textInputPanelNode = strongSelf.textInputPanelNode else {
+                    return
                 }
-            }, schedule: { [weak textInputPanelNode] in
-                textInputPanelNode?.sendMessage(.schedule)
+                textInputPanelNode.loadTextInputNodeIfNeeded()
+                guard let textInputNode = textInputPanelNode.textInputNode else {
+                    return
+                }
+
+                var hasEntityKeyboard = false
+                if case .media = strongSelf.presentationInterfaceState.inputMode {
+                    hasEntityKeyboard = true
+                }
+
+                let controller = makeChatSendMessageActionSheetController(
+                    initialData: initialData,
+                    context: strongSelf.context,
+                    peerId: strongSelf.presentationInterfaceState.chatLocation.peerId,
+                    params: .sendMessage(SendMessageActionSheetControllerParams.SendMessage(
+                        isScheduledMessages: false,
+                        mediaPreview: nil,
+                        mediaCaptionIsAbove: nil,
+                        messageEffect: nil,
+                        attachment: false,
+                        canSendWhenOnline: false,
+                        forwardMessageIds: strongSelf.presentationInterfaceState.interfaceState.forwardMessageIds ?? [],
+                        canMakePaidContent: false,
+                        currentPrice: nil,
+                        hasTimers: false,
+                        sendPaidMessageStars: nil,
+                        isMonoforum: false
+                    )),
+                    hasEntityKeyboard: hasEntityKeyboard,
+                    gesture: gesture,
+                    sourceSendButton: node,
+                    textInputView: textInputNode.textView,
+                    emojiViewProvider: textInputPanelNode.emojiViewProvider,
+                    completion: {
+                    },
+                    sendMessage: { [weak textInputPanelNode] mode, messageEffect in
+                        switch mode {
+                        case .generic:
+                            textInputPanelNode?.sendMessage(.generic, messageEffect)
+                        case .silently:
+                            textInputPanelNode?.sendMessage(.silent, messageEffect)
+                        case .whenOnline:
+                            textInputPanelNode?.sendMessage(.whenOnline, messageEffect)
+                        }
+                    },
+                    schedule: { [weak textInputPanelNode] messageEffect in
+                        textInputPanelNode?.sendMessage(.schedule, messageEffect)
+                    },
+                    editPrice: { _ in },
+                    openPremiumPaywall: { [weak controller] c in
+                        guard let controller else {
+                            return
+                        }
+                        controller.push(c)
+                    }
+                )
+                strongSelf.presentInGlobalOverlay(controller, nil)
             })
-            controller.emojiViewProvider = textInputPanelNode.emojiViewProvider
-            strongSelf.presentInGlobalOverlay(controller, nil)
         }, openScheduledMessages: {
         }, openPeersNearby: {
         }, displaySearchResultsTooltip: { _, _ in
@@ -713,6 +804,7 @@ final class PeerSelectionControllerNode: ASDisplayNode {
         }, joinGroupCall: { _ in
         }, presentInviteMembers: {
         }, presentGigagroupHelp: {
+        }, openMonoforum: {
         }, editMessageMedia: { _, _ in
         }, updateShowCommands: { _ in
         }, updateShowSendAsPeers: { _ in
@@ -730,6 +822,18 @@ final class PeerSelectionControllerNode: ASDisplayNode {
         }, addDoNotTranslateLanguage: { _ in
         }, hideTranslationPanel: {
         }, openPremiumGift: {
+        }, openSuggestPost: { _, _ in
+        }, openPremiumRequiredForMessaging: {
+        }, openStarsPurchase: { _ in
+        }, openMessagePayment: {
+        }, openBoostToUnrestrict: {
+        }, updateRecordingTrimRange: { _, _, _, _ in
+        }, dismissAllTooltips: {
+        }, editTodoMessage: { _, _, _ in
+        }, updateHistoryFilter: { _ in
+        }, updateChatLocationThread: { _, _ in
+        }, toggleChatSidebarMode: {
+        }, updateDisplayHistoryFilterAsList: { _ in
         }, requestLayout: { _ in
         }, chatController: {
             return nil
@@ -743,7 +847,7 @@ final class PeerSelectionControllerNode: ASDisplayNode {
     deinit {
         self.contactListNodeReadyDisposable.dispose()
     }
-    
+
     func updatePresentationData(_ presentationData: PresentationData) {
         self.presentationData = presentationData
         self.updateThemeAndStrings()
@@ -811,35 +915,56 @@ final class PeerSelectionControllerNode: ASDisplayNode {
     }
     
     func beginSelection() {
-        if let _ = self.textInputPanelNode {
-        } else {
-            let forwardAccessoryPanelNode = ForwardAccessoryPanelNode(context: self.context, messageIds: self.forwardedMessageIds, theme: self.presentationData.theme, strings: self.presentationData.strings, fontSize: self.presentationData.chatFontSize, nameDisplayOrder: self.presentationData.nameDisplayOrder, forwardOptionsState: self.presentationInterfaceState.interfaceState.forwardOptionsState, animationCache: nil, animationRenderer: nil)
-            forwardAccessoryPanelNode.interfaceInteraction = self.interfaceInteraction
-            self.addSubnode(forwardAccessoryPanelNode)
-            self.forwardAccessoryPanelNode = forwardAccessoryPanelNode
-            
-            let textInputPanelNode = AttachmentTextInputPanelNode(context: self.context, presentationInterfaceState: self.presentationInterfaceState, presentController: { [weak self] c in self?.present(c, nil) }, makeEntityInputView: {
-                return nil
-            })
-            textInputPanelNode.interfaceInteraction = self.interfaceInteraction
-            textInputPanelNode.sendMessage = { [weak self] mode in
-                guard let strongSelf = self else {
+        guard let controller = self.controller else {
+            return
+        }
+        if controller.immediatelyActivateMultipleSelection {
+            let countPanelNode = PeersCountPanelNode(theme: self.presentationData.theme, strings: self.presentationData.strings, action: { [weak self] in
+                guard let self else {
                     return
                 }
-                
-                let effectiveInputText = strongSelf.presentationInterfaceState.interfaceState.composeInputState.inputText
-                let forwardOptionsState = strongSelf.presentationInterfaceState.interfaceState.forwardOptionsState
-                
-                let (selectedPeers, selectedPeerMap) = strongSelf.selectedPeers
-                if !selectedPeers.isEmpty {
-                    strongSelf.requestSend?(selectedPeers, selectedPeerMap, effectiveInputText, mode, forwardOptionsState)
+                let (selectedPeers, selectedPeerMap) = self.selectedPeers
+                if !self.isEmpty {
+                    self.requestSend?(selectedPeers, selectedPeerMap, NSAttributedString(), .generic, nil, nil)
                 }
-            }
-            self.addSubnode(textInputPanelNode)
-            self.textInputPanelNode = textInputPanelNode
-            
+            })
+            self.addSubnode(countPanelNode)
+            self.countPanelNode = countPanelNode
+
             if let (layout, navigationBarHeight, actualNavigationBarHeight) = self.containerLayout {
-                self.containerLayoutUpdated(layout, navigationBarHeight: navigationBarHeight, actualNavigationBarHeight: actualNavigationBarHeight, transition: .animated(duration: 0.3, curve: .spring))
+                self.containerLayoutUpdated(layout, navigationBarHeight: navigationBarHeight, actualNavigationBarHeight: actualNavigationBarHeight, transition: .immediate)
+            }
+        } else {
+            if let _ = self.textInputPanelNode {
+            } else {
+                let forwardAccessoryPanelNode = ForwardAccessoryPanelNode(context: self.context, messageIds: self.forwardedMessageIds, theme: self.presentationData.theme, strings: self.presentationData.strings, fontSize: self.presentationData.chatFontSize, nameDisplayOrder: self.presentationData.nameDisplayOrder, forwardOptionsState: self.presentationInterfaceState.interfaceState.forwardOptionsState, animationCache: nil, animationRenderer: nil)
+                forwardAccessoryPanelNode.interfaceInteraction = self.interfaceInteraction
+                self.addSubnode(forwardAccessoryPanelNode)
+                self.forwardAccessoryPanelNode = forwardAccessoryPanelNode
+
+                let textInputPanelNode = AttachmentTextInputPanelNode(context: self.context, presentationInterfaceState: self.presentationInterfaceState, presentController: { [weak self] c in self?.present(c, nil) }, makeEntityInputView: {
+                    return nil
+                })
+                textInputPanelNode.interfaceInteraction = self.interfaceInteraction
+                textInputPanelNode.sendMessage = { [weak self] mode, messageEffect in
+                    guard let strongSelf = self else {
+                        return
+                    }
+
+                    let effectiveInputText = strongSelf.presentationInterfaceState.interfaceState.composeInputState.inputText
+                    let forwardOptionsState = strongSelf.presentationInterfaceState.interfaceState.forwardOptionsState
+
+                    let (selectedPeers, selectedPeerMap) = strongSelf.selectedPeers
+                    if !selectedPeers.isEmpty {
+                        strongSelf.requestSend?(selectedPeers, selectedPeerMap, effectiveInputText, mode, forwardOptionsState, messageEffect)
+                    }
+                }
+                self.addSubnode(textInputPanelNode)
+                self.textInputPanelNode = textInputPanelNode
+
+                if let (layout, navigationBarHeight, actualNavigationBarHeight) = self.containerLayout {
+                    self.containerLayoutUpdated(layout, navigationBarHeight: navigationBarHeight, actualNavigationBarHeight: actualNavigationBarHeight, transition: .animated(duration: 0.3, curve: .spring))
+                }
             }
         }
         
@@ -859,6 +984,24 @@ final class PeerSelectionControllerNode: ASDisplayNode {
                     return state
                 })
             } else if let chatListNode = self.chatListNode {
+                chatListNode.selectionCountChanged = { [weak self] count in
+                    if let self {
+                        if let _ = self.controller?.multipleSelectionLimit {
+                            self.countPanelNode?.buttonTitle = self.presentationData.strings.Premium_Gift_ContactSelection_Proceed
+                        } else {
+                            self.countPanelNode?.buttonTitle = self.presentationData.strings.ShareMenu_Send
+                        }
+                        self.countPanelNode?.count = count
+
+                        if let titleView = self.controller?.titleView, let maxCount = self.controller?.multipleSelectionLimit {
+                            titleView.title = CounterControllerTitle(title: titleView.title.title, counter: "\(count)/\(maxCount)")
+                        }
+
+                        if let (layout, navigationBarHeight, actualNavigationBarHeight) = self.containerLayout {
+                            self.containerLayoutUpdated(layout, navigationBarHeight: navigationBarHeight, actualNavigationBarHeight: actualNavigationBarHeight, transition: .animated(duration: 0.3, curve: .spring))
+                        }
+                    }
+                }
                 chatListNode.updateState { state in
                     var state = state
                     state.editing = true
@@ -937,7 +1080,15 @@ final class PeerSelectionControllerNode: ASDisplayNode {
             transition.updateFrame(node: forwardAccessoryPanelNode, frame: panelFrame)
         }
         
-        if let segmentedControlNode = self.segmentedControlNode, let toolbarBackgroundNode = self.toolbarBackgroundNode, let toolbarSeparatorNode = self.toolbarSeparatorNode {
+        if let countPanelNode = self.countPanelNode {
+            let countPanelHeight = countPanelNode.updateLayout(width: layout.size.width, sideInset: layout.safeInsets.left, bottomInset: layout.intrinsicInsets.bottom, transition: transition)
+            if countPanelNode.count == 0 {
+                transition.updateFrame(node: countPanelNode, frame: CGRect(origin: CGPoint(x: 0.0, y: layout.size.height), size: CGSize(width: layout.size.width, height: countPanelHeight)))
+            } else {
+                toolbarHeight = countPanelHeight
+                transition.updateFrame(node: countPanelNode, frame: CGRect(origin: CGPoint(x: 0.0, y: layout.size.height - countPanelHeight), size: CGSize(width: layout.size.width, height: countPanelHeight)))
+            }
+        } else if let segmentedControlNode = self.segmentedControlNode, let toolbarBackgroundNode = self.toolbarBackgroundNode, let toolbarSeparatorNode = self.toolbarSeparatorNode {
             if let textPanelHeight = textPanelHeight {
                 toolbarHeight = textPanelHeight + accessoryHeight
             } else {
@@ -1111,8 +1262,12 @@ final class PeerSelectionControllerNode: ASDisplayNode {
             self.mainContainerNode?.accessibilityElementsHidden = true
             
             let chatListLocation: ChatListControllerLocation
-            if let forumPeerId = self.forumPeerId {
-                chatListLocation = .forum(peerId: forumPeerId)
+            if let (forumPeerId, isMonoforum) = self.forumPeerId {
+                if isMonoforum {
+                    chatListLocation = .savedMessagesChats(peerId: forumPeerId)
+                } else {
+                    chatListLocation = .forum(peerId: forumPeerId)
+                }
             } else {
                 chatListLocation = .chatList(groupId: EngineChatList.Group(.root))
             }
@@ -1179,12 +1334,15 @@ final class PeerSelectionControllerNode: ASDisplayNode {
                         if updated {
                             strongSelf.textInputPanelNode?.updateSendButtonEnabled(count > 0, animated: true)
                             strongSelf.requestDeactivateSearch?()
+                            if let (layout, navigationBarHeight, actualNavigationBarHeight) = strongSelf.containerLayout {
+                                strongSelf.containerLayoutUpdated(layout, navigationBarHeight: navigationBarHeight, actualNavigationBarHeight: actualNavigationBarHeight, transition: .immediate)
+                            }
                         } else if let requestOpenPeerFromSearch = strongSelf.requestOpenPeerFromSearch {
                             requestOpenPeerFromSearch(peer, threadId)
                         }
                     },
-                    openDisabledPeer: { [weak self] peer, threadId in
-                        self?.requestOpenDisabledPeer?(peer, threadId)
+                    openDisabledPeer: { [weak self] peer, threadId, reason in
+                        self?.requestOpenDisabledPeer?(peer, threadId, reason)
                     },
                     openRecentPeerOptions: { _ in
                     },
@@ -1229,7 +1387,7 @@ final class PeerSelectionControllerNode: ASDisplayNode {
             if self.hasGlobalSearch {
                 categories.insert(.global)
             }
-            self.searchDisplayController = SearchDisplayController(presentationData: self.presentationData, contentNode: ContactsSearchContainerNode(context: self.context, updatedPresentationData: self.updatedPresentationData, onlyWriteable: true, categories: categories, addContact: nil, openPeer: { [weak self] peer in
+            self.searchDisplayController = SearchDisplayController(presentationData: self.presentationData, contentNode: ContactsSearchContainerNode(context: self.context, updatedPresentationData: self.updatedPresentationData, onlyWriteable: true, categories: categories, addContact: nil, openPeer: { [weak self] peer, _ in
                 if let strongSelf = self {
                     var updated = false
                     var count = 0
@@ -1274,6 +1432,11 @@ final class PeerSelectionControllerNode: ASDisplayNode {
                         }
                     }
                 }
+            }, openDisabledPeer: { [weak self] peer, reason in
+                guard let self else {
+                    return
+                }
+                self.requestOpenDisabledPeer?(peer, nil, reason)
             }, contextAction: nil), cancel: { [weak self] in
                 if let requestDeactivateSearch = self?.requestDeactivateSearch {
                     requestDeactivateSearch()
@@ -1345,7 +1508,7 @@ final class PeerSelectionControllerNode: ASDisplayNode {
                         self.controller?.containerLayoutUpdated(layout, transition: .immediate)
                     }
                 } else {
-                    let contactListNode = ContactListNode(context: self.context, updatedPresentationData: self.updatedPresentationData, presentation: .single(.natural(options: [], includeChatList: false, topPeers: false)))
+                    let contactListNode = ContactListNode(context: self.context, updatedPresentationData: self.updatedPresentationData, presentation: .single(.natural(options: [], includeChatList: false, topPeers: .none)), onlyWriteable: self.filter.contains(.onlyWriteable), isGroupInvitation: false)
                     self.contactListNode = contactListNode
                     contactListNode.enableUpdates = true
                     contactListNode.selectionStateUpdated = { [weak self] selectionState in
@@ -1356,11 +1519,17 @@ final class PeerSelectionControllerNode: ASDisplayNode {
                     contactListNode.activateSearch = { [weak self] in
                         self?.requestActivateSearch?()
                     }
-                    contactListNode.openPeer = { [weak self] peer, _ in
+                    contactListNode.openPeer = { [weak self] peer, _, _, _ in
                         if case let .peer(peer, _, _) = peer {
                             self?.contactListNode?.listNode.clearHighlightAnimated(true)
                             self?.requestOpenPeer?(EnginePeer(peer), nil)
                         }
+                    }
+                    contactListNode.openDisabledPeer = { [weak self] peer, reason in
+                        guard let self else {
+                            return
+                        }
+                        self.requestOpenDisabledPeer?(peer, nil, reason)
                     }
                     contactListNode.suppressPermissionWarning = { [weak self] in
                         if let strongSelf = self {
@@ -1685,5 +1854,66 @@ private final class ContextControllerContentSourceImpl: ContextControllerContent
     }
     
     func animatedIn() {
+    }
+}
+
+private final class PeersCountPanelNode: ASDisplayNode {
+    private let theme: PresentationTheme
+    private let strings: PresentationStrings
+
+    private let separatorNode: ASDisplayNode
+    private let button: SolidRoundedButtonNode
+
+    private var validLayout: (CGFloat, CGFloat, CGFloat)?
+
+    var buttonTitle: String = ""
+    var count: Int = 0 {
+        didSet {
+            if self.count != oldValue && self.count > 0 {
+                self.button.title = self.buttonTitle
+                self.button.badge = "\(self.count)"
+
+                if let (width, sideInset, bottomInset) = self.validLayout {
+                    let _ = self.updateLayout(width: width, sideInset: sideInset, bottomInset: bottomInset, transition: .immediate)
+                }
+            }
+        }
+    }
+
+    init(theme: PresentationTheme, strings: PresentationStrings, action: @escaping () -> Void) {
+        self.theme = theme
+        self.strings = strings
+
+        self.separatorNode = ASDisplayNode()
+        self.separatorNode.backgroundColor = theme.rootController.navigationBar.separatorColor
+
+        self.button = SolidRoundedButtonNode(theme: SolidRoundedButtonTheme(theme: theme), height: 48.0, cornerRadius: 10.0)
+
+        super.init()
+
+        self.backgroundColor = theme.rootController.navigationBar.opaqueBackgroundColor
+
+        self.addSubnode(self.button)
+        self.addSubnode(self.separatorNode)
+
+        self.button.pressed = {
+            action()
+        }
+    }
+
+    func updateLayout(width: CGFloat, sideInset: CGFloat, bottomInset: CGFloat, transition: ContainedViewLayoutTransition) -> CGFloat {
+        self.validLayout = (width, sideInset, bottomInset)
+        let topInset: CGFloat = 9.0
+        var bottomInset = bottomInset
+        bottomInset += topInset - (bottomInset.isZero ? 0.0 : 4.0)
+
+        let buttonInset: CGFloat = 16.0 + sideInset
+        let buttonWidth = width - buttonInset * 2.0
+        let buttonHeight = self.button.updateLayout(width: buttonWidth, transition: transition)
+        transition.updateFrame(node: self.button, frame: CGRect(x: buttonInset, y: topInset, width: buttonWidth, height: buttonHeight))
+
+        transition.updateFrame(node: self.separatorNode, frame: CGRect(origin: CGPoint(x: 0.0, y: 0.0), size: CGSize(width: width, height: UIScreenPixel)))
+
+        return topInset + buttonHeight + bottomInset
     }
 }

@@ -505,7 +505,7 @@ class ThemeGridThemeItemNode: ListViewItemNode, ItemListItemNode {
                     for theme in item.themes {
                         let selected = item.currentTheme.index == theme.index
                         
-                        let iconItem = ThemeCarouselThemeIconItem(context: item.context, emojiFile: theme.emoticon.flatMap { item.animatedEmojiStickers[$0]?.first?.file }, themeReference: theme, nightMode: item.nightMode, channelMode: false, themeSpecificAccentColors: item.themeSpecificAccentColors, themeSpecificChatWallpapers: item.themeSpecificChatWallpapers, selected: selected, theme: item.theme, strings: item.strings, wallpaper: nil, action: { theme in
+                        let iconItem = ThemeCarouselThemeIconItem(context: item.context, emojiFile: theme.emoticon.flatMap { item.animatedEmojiStickers[$0]?.first?.file._parse() }, themeReference: theme, nightMode: item.nightMode, channelMode: false, themeSpecificAccentColors: item.themeSpecificAccentColors, themeSpecificChatWallpapers: item.themeSpecificChatWallpapers, selected: selected, theme: item.theme, strings: item.strings, wallpaper: nil, action: { theme in
                             if let theme {
                                 item.updatedTheme(theme)
                             }
@@ -536,7 +536,7 @@ class ThemeGridThemeItemNode: ListViewItemNode, ItemListItemNode {
         }
     }
     
-    override func animateInsertion(_ currentTimestamp: Double, duration: Double, short: Bool) {
+    override func animateInsertion(_ currentTimestamp: Double, duration: Double, options: ListViewItemAnimationOptions) {
         self.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.4)
     }
 

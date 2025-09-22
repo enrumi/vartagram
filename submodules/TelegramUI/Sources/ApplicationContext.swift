@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import Intents
 import TelegramPresentationData
 import TelegramUIPreferences
@@ -17,7 +18,8 @@ import TelegramNotices
 import LegacyUI
 import TelegramPermissionsUI
 import PasscodeUI
-import WatchBridge
+import ImageBlur
+import FastBlur
 import SettingsUI
 import AppLock
 import AccountUtils
@@ -27,6 +29,10 @@ import AuthorizationUI
 import ChatListUI
 import StoryContainerScreen
 import ChatMessageNotificationItem
+import PhoneNumberFormat
+import AttachmentUI
+import MinimizedContainer
+import BrowserUI
 
 final class UnauthorizedApplicationContext {
     let sharedContext: SharedAccountContextImpl
@@ -37,7 +43,7 @@ final class UnauthorizedApplicationContext {
     let isReady = Promise<Bool>()
     
     let isReadyAndPresented = Promise<Bool>()
-    
+
     var authorizationCompleted: Bool = false
 
     private var serviceNotificationEventsDisposable: Disposable?
@@ -133,7 +139,7 @@ final class AuthorizedApplicationContext {
     
     var applicationBadge: Signal<Int32, NoError> {
         // app badge should reflect unread count only for accounts that do not hide because this value will be out of app control when app is not running and thus it could reveal hidden account existence
-        
+
         return self.context.sharedContext.allHidableAccountIds
         |> mapToSignal { [weak self] allHidableAccountIds in
             guard let strongSelf = self else {
@@ -153,12 +159,12 @@ final class AuthorizedApplicationContext {
             }
         }
     }
-    
+
     private static func totalUnreadCount(context: AccountContext) -> Signal<Int32, NoError> {
         // badge on app icon should not include unread messages from secret chats from secret passcodes
         // regardless whether they are active or not
         // inactive are already excluded, here we subtract unread messages of active secret chats
-        
+
         let accountId = context.account.id
         let activeSecretChatData = context.sharedContext.ptgSecretPasscodes
         |> map { ptgSecretPasscodes in
@@ -175,14 +181,14 @@ final class AuthorizedApplicationContext {
                 activeSecretChatPeerIds.map(TelegramEngine.EngineData.Item.Peer.NotificationSettings.init)
             ))
         }
-        
+
         let totalUnreadCountDisplayCategory = context.sharedContext.accountManager.sharedData(keys: [ApplicationSpecificSharedDataKeys.inAppNotificationSettings])
         |> map { sharedData in
             let inAppSettings = sharedData.entries[ApplicationSpecificSharedDataKeys.inAppNotificationSettings]?.get(InAppNotificationSettings.self) ?? .defaultSettings
             return inAppSettings.totalUnreadCountDisplayCategory
         }
         |> distinctUntilChanged
-        
+
         let activeSecretChatUnreadCount = combineLatest(activeSecretChatData, totalUnreadCountDisplayCategory)
         |> map { activeSecretChatData, totalUnreadCountDisplayCategory -> Int32 in
             let (peerUnreadCount, peerNotificationSettings) = activeSecretChatData
@@ -200,7 +206,7 @@ final class AuthorizedApplicationContext {
             return Int32(activeUnreadCount)
         }
         |> distinctUntilChanged
-        
+
         return combineLatest(renderedTotalUnreadCount(accountManager: context.sharedContext.accountManager, engine: context.engine), activeSecretChatUnreadCount)
         |> map {
             max($0.0 - $1, 0)
@@ -210,7 +216,7 @@ final class AuthorizedApplicationContext {
     let isReady = Promise<Bool>()
     
     let isReadyAndPresented = Promise<Bool>()
-    
+
     private var presentationDataDisposable: Disposable?
     private var displayAlertsDisposable: Disposable?
     private var removeNotificationsDisposable: Disposable?
@@ -221,7 +227,7 @@ final class AuthorizedApplicationContext {
     private var showCallsTabDisposable: Disposable?
     private var enablePostboxTransactionsDiposable: Disposable?
     
-    init(sharedApplicationContext: SharedApplicationContext, mainWindow: Window1, watchManagerArguments: Signal<WatchManagerArguments?, NoError>, context: AccountContextImpl, accountManager: AccountManager<TelegramAccountManagerTypes>, showCallsTab: Bool, reinitializedNotificationSettings: @escaping () -> Void) {
+    init(sharedApplicationContext: SharedApplicationContext, mainWindow: Window1, context: AccountContextImpl, accountManager: AccountManager<TelegramAccountManagerTypes>, showCallsTab: Bool, reinitializedNotificationSettings: @escaping () -> Void) {
         self.sharedApplicationContext = sharedApplicationContext
         
         setupLegacyComponents(context: context)
@@ -235,7 +241,14 @@ final class AuthorizedApplicationContext {
         self.notificationController = NotificationContainerController(context: context)
         
         self.rootController = TelegramRootController(context: context)
-        
+        self.rootController.minimizedContainer = self.sharedApplicationContext.minimizedContainer[context.account.id]
+        self.rootController.minimizedContainerUpdated = { [weak self] minimizedContainer in
+            guard let self else {
+                return
+            }
+            self.sharedApplicationContext.minimizedContainer[self.context.account.id] = minimizedContainer
+        }
+
         self.rootController.globalOverlayControllersUpdated = { [weak self] in
             guard let strongSelf = self else {
                 return
@@ -383,7 +396,7 @@ final class AuthorizedApplicationContext {
                     let chatLocation: NavigateToChatControllerParams.Location
                     if let _ = threadData, let threadId = firstMessage.threadId {
                         chatLocation = .replyThread(ChatReplyThreadMessage(
-                            peerId: firstMessage.id.peerId, threadId: threadId, channelMessageId: nil, isChannelPost: false, isForumPost: true, maxMessage: nil, maxReadIncomingMessageId: nil, maxReadOutgoingMessageId: nil, unreadCount: 0, initialFilledHoles: IndexSet(), initialAnchor: .automatic, isNotAvailable: false
+                            peerId: firstMessage.id.peerId, threadId: threadId, channelMessageId: nil, isChannelPost: false, isForumPost: true, isMonoforumPost: false, maxMessage: nil, maxReadIncomingMessageId: nil, maxReadOutgoingMessageId: nil, unreadCount: 0, initialFilledHoles: IndexSet(), initialAnchor: .automatic, isNotAvailable: false
                         ).normalized)
                     } else {
                         guard let peer = firstMessage.peers[firstMessage.id.peerId] else {
@@ -431,20 +444,20 @@ final class AuthorizedApplicationContext {
                             guard !locked else {
                                 return
                             }
-                            
+
                             // suppress in-app notifications for inactive secret chats
                             let inactiveSecretChatPeerIds = ptgSecretPasscodes.inactiveSecretChatPeerIds(accountId: strongSelf.context.account.id)
                             if inactiveSecretChatPeerIds.contains(firstMessage.id.peerId) {
                                 return
                             }
-                            
+
                             let inactiveAccountIds = ptgSecretPasscodes.inactiveAccountIds()
                             if inactiveAccountIds.contains(strongSelf.context.account.id) {
                                 return
                             }
-                            
+
                             let allHidableSecretChatPeerIds = ptgSecretPasscodes.allSecretChatPeerIds(accountId: strongSelf.context.account.id)
-                            
+
                             let isMuted = firstMessage.attributes.contains(where: { attribute in
                                 if let attribute = attribute as? NotificationInfoMessageAttribute {
                                     return attribute.flags.contains(.muted)
@@ -470,6 +483,8 @@ final class AuthorizedApplicationContext {
                                 if let action = media as? TelegramMediaAction {
                                     if case .messageAutoremoveTimeoutUpdated = action.action {
                                         return
+                                    } else if case .conferenceCall = action.action {
+                                        return
                                     }
                                 }
                             }
@@ -478,6 +493,15 @@ final class AuthorizedApplicationContext {
                                 return
                             }
                             
+                            if firstMessage.restrictionReason(platform: "ios", contentSettings: strongSelf.context.currentContentSettings.with { $0 }) != nil {
+                                return
+                            }
+                            if let chatPeer = firstMessage.peers[firstMessage.id.peerId] {
+                                if EnginePeer(chatPeer).restrictionText(platform: "ios", contentSettings: strongSelf.context.currentContentSettings.with { $0 }) != nil {
+                                    return
+                                }
+                            }
+
                             if inAppNotificationSettings.displayPreviews {
                                 let presentationData = strongSelf.context.sharedContext.currentPresentationData.with { $0 }
                                 strongSelf.notificationController.enqueue(ChatMessageNotificationItem(context: strongSelf.context, strings: presentationData.strings, dateTimeFormat: presentationData.dateTimeFormat, nameDisplayOrder: presentationData.nameDisplayOrder, messages: messages, threadData: threadData, tapAction: {
@@ -505,6 +529,14 @@ final class AuthorizedApplicationContext {
                                             return false
                                         }
                                         
+                                        if let minimizedContainer = strongSelf.rootController.minimizedContainer, minimizedContainer.isExpanded {
+                                            minimizedContainer.collapse()
+                                        } else if let topContoller = strongSelf.rootController.topViewController as? AttachmentController {
+                                            topContoller.minimizeIfNeeded()
+                                        }  else if let topContoller = strongSelf.rootController.topViewController as? BrowserScreen {
+                                            topContoller.requestMinimize(topEdgeOffset: nil, initialVelocity: nil)
+                                        }
+
                                         for controller in strongSelf.rootController.viewControllers {
                                             if let controller = controller as? ChatControllerImpl, controller.chatLocation.peerId == chatLocation.peerId, (controller.chatLocation.threadId == nil || controller.chatLocation.threadId == chatLocation.threadId) {
                                                 return true
@@ -571,7 +603,7 @@ final class AuthorizedApplicationContext {
                     |> deliverOnMainQueue).start(completed: {
                         controller?.dismiss()
                         if let strongSelf = self, let botName = botName {
-                            strongSelf.termsOfServiceProceedToBotDisposable.set((strongSelf.context.engine.peers.resolvePeerByName(name: botName, ageLimit: 10)
+                            strongSelf.termsOfServiceProceedToBotDisposable.set((strongSelf.context.engine.peers.resolvePeerByName(name: botName, referrer: nil, ageLimit: 10)
                             |> mapToSignal { result -> Signal<EnginePeer?, NoError> in
                                 guard case let .result(result) = result else {
                                     return .complete()
@@ -808,7 +840,7 @@ final class AuthorizedApplicationContext {
         })
        
         let importableContacts = self.context.sharedContext.contactDataManager?.importable() ?? .single([:])
-        self.context.account.importableContacts.set(combineLatest(self.context.account.postbox.preferencesView(keys: [PreferencesKeys.contactsSettings]), self.context.isHidable)
+        let optionalImportableContacts = combineLatest(self.context.account.postbox.preferencesView(keys: [PreferencesKeys.contactsSettings]), self.context.isHidable)
         |> mapToSignal { preferences, isHidableAccount -> Signal<[DeviceContactNormalizedPhoneNumber: ImportableDeviceContactData], NoError> in
             let settings: ContactsSettings = preferences.values[PreferencesKeys.contactsSettings]?.get(ContactsSettings.self) ?? .defaultSettings
             if settings.synchronizeContacts && !isHidableAccount {
@@ -816,6 +848,11 @@ final class AuthorizedApplicationContext {
             } else {
                 return .single([:])
             }
+        }
+        self.context.account.importableContacts.set(optionalImportableContacts)
+        self.context.sharedContext.deviceContactPhoneNumbers.set(optionalImportableContacts
+        |> map { contacts in
+            return Set(contacts.keys.map { cleanPhoneNumber($0.rawValue) })
         })
         
         let previousTheme = Atomic<PresentationTheme?>(value: nil)
@@ -844,55 +881,7 @@ final class AuthorizedApplicationContext {
                 }
             }
         })
-        
-        let _ = (watchManagerArguments
-        |> deliverOnMainQueue).start(next: { [weak self] arguments in
-            guard let strongSelf = self else {
-                return
-            }
-            
-            let watchManager = WatchManagerImpl(arguments: arguments)
-            strongSelf.context.watchManager = watchManager
-            
-            strongSelf.watchNavigateToMessageDisposable.set((strongSelf.context.sharedContext.applicationBindings.applicationInForeground |> mapToSignal({ applicationInForeground -> Signal<(Bool, MessageId), NoError> in
-                return watchManager.navigateToMessageRequested
-                |> map { messageId in
-                    return (applicationInForeground, messageId)
-                }
-                |> deliverOnMainQueue
-            })).start(next: { [weak self] applicationInForeground, messageId in
-                if let strongSelf = self {
-                    if applicationInForeground {
-                        var chatIsVisible = false
-                        if let controller = strongSelf.rootController.viewControllers.last as? ChatControllerImpl, case .peer(messageId.peerId) = controller.chatLocation  {
-                            chatIsVisible = true
-                        }
-                        
-                        let navigateToMessage = {
-                            let _ = (strongSelf.context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: messageId.peerId))
-                            |> deliverOnMainQueue).start(next: { peer in
-                                guard let peer = peer else {
-                                    return
-                                }
-                                
-                                strongSelf.context.sharedContext.navigateToChatController(NavigateToChatControllerParams(navigationController: strongSelf.rootController, context: strongSelf.context, chatLocation: .peer(peer), subject: .message(id: .id(messageId), highlight: ChatControllerSubject.MessageHighlight(quote: nil), timecode: nil)))
-                            })
-                        }
-                        
-                        if chatIsVisible {
-                            navigateToMessage()
-                        } else {
-                            let presentationData = strongSelf.context.sharedContext.currentPresentationData.with { $0 }
-                            let controller = textAlertController(context: strongSelf.context, title: presentationData.strings.WatchRemote_AlertTitle, text: presentationData.strings.WatchRemote_AlertText, actions: [TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_Cancel, action: {}), TextAlertAction(type: .genericAction, title: presentationData.strings.WatchRemote_AlertOpen, action:navigateToMessage)])
-                            (strongSelf.rootController.viewControllers.last as? ViewController)?.present(controller, in: .window(.root))
-                        }
-                    } else {
-                        //strongSelf.notificationManager.presentWatchContinuityNotification(context: strongSelf.context, messageId: messageId)
-                    }
-                }
-            }))
-        })
-        
+
         self.rootController.setForceInCallStatusBar((self.context.sharedContext as! SharedAccountContextImpl).currentCallStatusBarNode)
         if let groupCallController = self.context.sharedContext.currentGroupCallController as? VoiceChatController {
             if let overlayController = groupCallController.currentOverlayController {
@@ -945,7 +934,7 @@ final class AuthorizedApplicationContext {
         }))
     }
     
-    func openChatWithPeerId(peerId: PeerId, threadId: Int64?, messageId: MessageId? = nil, activateInput: Bool = false, storyId: StoryId?) {
+    func openChatWithPeerId(peerId: PeerId, threadId: Int64?, messageId: MessageId? = nil, activateInput: Bool = false, storyId: StoryId?, openAppIfAny: Bool = false, alwaysKeepMessageId: Bool = false) {
         if let storyId {
             var controllers = self.rootController.viewControllers
             controllers = controllers.filter { c in
@@ -990,13 +979,31 @@ final class AuthorizedApplicationContext {
                     let chatLocation: NavigateToChatControllerParams.Location
                     if let threadId = threadId {
                         chatLocation = .replyThread(ChatReplyThreadMessage(
-                            peerId: peerId, threadId: threadId, channelMessageId: nil, isChannelPost: false, isForumPost: true, maxMessage: nil, maxReadIncomingMessageId: nil, maxReadOutgoingMessageId: nil, unreadCount: 0, initialFilledHoles: IndexSet(), initialAnchor: .automatic, isNotAvailable: false
+                            peerId: peerId, threadId: threadId, channelMessageId: nil, isChannelPost: false, isForumPost: true, isMonoforumPost: false, maxMessage: nil, maxReadIncomingMessageId: nil, maxReadOutgoingMessageId: nil, unreadCount: 0, initialFilledHoles: IndexSet(), initialAnchor: .automatic, isNotAvailable: false
                         ))
                     } else {
                         chatLocation = .peer(peer)
                     }
                     
-                    self.context.sharedContext.navigateToChatController(NavigateToChatControllerParams(navigationController: self.rootController, context: self.context, chatLocation: chatLocation, subject: isOutgoingMessage ? messageId.flatMap { .message(id: .id($0), highlight: ChatControllerSubject.MessageHighlight(quote: nil), timecode: nil) } : nil, activateInput: activateInput ? .text : nil))
+                    if openAppIfAny, case let .user(user) = peer, let botInfo = user.botInfo, botInfo.flags.contains(.hasWebApp), let parentController = self.rootController.viewControllers.last as? ViewController {
+                        self.context.sharedContext.openWebApp(
+                            context: self.context,
+                            parentController: parentController,
+                            updatedPresentationData: nil,
+                            botPeer: peer,
+                            chatPeer: nil,
+                            threadId: nil,
+                            buttonText: "",
+                            url: "",
+                            simple: true,
+                            source: .generic,
+                            skipTermsOfService: true,
+                            payload: nil,
+                            verifyAgeCompletion: nil
+                        )
+                    } else {
+                        self.context.sharedContext.navigateToChatController(NavigateToChatControllerParams(navigationController: self.rootController, context: self.context, chatLocation: chatLocation, subject: alwaysKeepMessageId || isOutgoingMessage ? messageId.flatMap { .message(id: .id($0), highlight: ChatControllerSubject.MessageHighlight(quote: nil), timecode: nil, setupReply: false) } : nil, activateInput: activateInput ? .text : nil))
+                    }
                 })
             }
         }
@@ -1025,6 +1032,10 @@ final class AuthorizedApplicationContext {
         self.rootController.openRootCamera()
     }
     
+    func openAppIcon() {
+        self.rootController.openAppIcon()
+    }
+
     func switchAccount() {
         let _ = (combineLatest(activeAccountsAndPeers(context: self.context), self.context.sharedContext.allHidableAccountIds)
         |> take(1)

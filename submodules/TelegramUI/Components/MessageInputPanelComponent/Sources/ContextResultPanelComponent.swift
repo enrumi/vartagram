@@ -11,14 +11,18 @@ import PeerListItemComponent
 final class ContextResultPanelComponent: Component {
     enum Results: Equatable {
         case mentions([EnginePeer])
-        case hashtags([String])
+        case hashtags(EnginePeer?, [String], String)
        
         var count: Int {
             switch self {
-            case let .hashtags(hashtags):
-                return hashtags.count
             case let .mentions(peers):
                 return peers.count
+            case let .hashtags(peer, hashtags, query):
+                var count = hashtags.count
+                if let _ = peer, query.count >= 4 {
+                    count += 2
+                }
+                return count
             }
         }
     }
@@ -159,13 +163,13 @@ final class ContextResultPanelComponent: Component {
             fatalError("init(coder:) has not been implemented")
         }
         
-        func animateIn(transition: Transition) {
+        func animateIn(transition: ComponentTransition) {
             let offset = self.scrollView.contentOffset.y * -1.0 + 10.0
-            Transition.immediate.setBoundsOrigin(view: self, origin: CGPoint(x: 0.0, y: -offset))
+            ComponentTransition.immediate.setBoundsOrigin(view: self, origin: CGPoint(x: 0.0, y: -offset))
             transition.setBoundsOrigin(view: self, origin: CGPoint(x: 0.0, y: 0.0))
         }
         
-        func animateOut(transition: Transition, completion: @escaping () -> Void) {
+        func animateOut(transition: ComponentTransition, completion: @escaping () -> Void) {
             let offset = self.scrollView.contentOffset.y * -1.0 + 10.0
             self.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.3, removeOnCompletion: false)
             transition.setBoundsOrigin(view: self, origin: CGPoint(x: 0.0, y: -offset), completion: { _ in
@@ -179,45 +183,30 @@ final class ContextResultPanelComponent: Component {
             }
         }
         
-        private func updateScrolling(transition: Transition) {
+        private func updateScrolling(transition: ComponentTransition) {
             guard let component = self.component, let itemLayout = self.itemLayout else {
                 return
             }
             
             let visibleBounds = self.scrollView.bounds.insetBy(dx: 0.0, dy: -200.0)
             
-//            var synchronousLoad = false
-//            if let hint = transition.userData(PeerListItemComponent.TransitionHint.self) {
-//                synchronousLoad = hint.synchronousLoad
-//            }
-            
             var validIds: [AnyHashable] = []
-            if let range = itemLayout.visibleItems(for: visibleBounds), case let .mentions(peers) = component.results {
+            if let range = itemLayout.visibleItems(for: visibleBounds) {
                 for index in range.lowerBound ..< range.upperBound {
-                    guard index < peers.count else {
+                    guard index < component.results.count else {
                         continue
                     }
                     
                     let itemFrame = itemLayout.itemFrame(for: index)
-                                        
                     var itemTransition = transition
-                    let peer = peers[index]
-                    validIds.append(peer.id)
+                    let id: AnyHashable
                     
-                    let visibleItem: ComponentView<Empty>
-                    if let current = self.visibleItems[peer.id] {
-                        visibleItem = current
-                    } else {
-                        if !transition.animation.isImmediate {
-                            itemTransition = .immediate
-                        }
-                        visibleItem = ComponentView()
-                        self.visibleItems[peer.id] = visibleItem
-                    }
-                                       
-                    let _ = visibleItem.update(
-                        transition: itemTransition,
-                        component: AnyComponent(PeerListItemComponent(
+                    let itemComponent: AnyComponent<Empty>
+                    switch component.results {
+                    case let .mentions(peers):
+                        let peer = peers[index]
+                        id = peer.id
+                        itemComponent = AnyComponent(PeerListItemComponent(
                             context: component.context,
                             theme: component.theme,
                             strings: component.strings,
@@ -225,7 +214,7 @@ final class ContextResultPanelComponent: Component {
                             sideInset: itemLayout.sideInset,
                             title: peer.displayTitle(strings: component.strings, displayOrder: .firstLast),
                             peer: peer,
-                            subtitle: peer.addressName.flatMap { "@\($0)" },
+                            subtitle: peer.addressName.flatMap { PeerListItemComponent.Subtitle(text: "@\($0)", color: .neutral) },
                             subtitleAccessory: .none,
                             presence: nil,
                             selectionState: .none,
@@ -236,21 +225,99 @@ final class ContextResultPanelComponent: Component {
                                 }
                                 component.action(.mention(peer))
                             }
-                        )),
+                        ))
+                    case let .hashtags(peer, hashtags, query):
+                        var hashtagIndex = index
+                        if let _ = peer, query.count >= 4 {
+                            hashtagIndex -= 2
+                        }
+                        
+                        if let peer, let addressName = peer.addressName, hashtagIndex < 0 {
+                            var isGroup = false
+                            if case let .channel(channel) = peer, case .group = channel.info {
+                                isGroup = true
+                            }
+                            id = hashtagIndex
+                            if hashtagIndex == -2 {
+                                itemComponent = AnyComponent(HashtagListItemComponent(
+                                    context: component.context,
+                                    theme: component.theme,
+                                    strings: component.strings,
+                                    peer: nil,
+                                    title: component.strings.Chat_HashtagSuggestion_UseGeneric_Title("#\(query)").string,
+                                    subtitle: component.strings.Chat_HashtagSuggestion_UseGeneric_Text,
+                                    hashtag: query,
+                                    hasNext: index != hashtags.count - 1,
+                                    action: { [weak self] hashtag, _ in
+                                        guard let self, let component = self.component else {
+                                            return
+                                        }
+                                        component.action(.hashtag(query))
+                                    }
+                                ))
+                            } else {
+                                itemComponent = AnyComponent(HashtagListItemComponent(
+                                    context: component.context,
+                                    theme: component.theme,
+                                    strings: component.strings,
+                                    peer: peer,
+                                    title: component.strings.Chat_HashtagSuggestion_UseLocal_Title("#\(query)@\(addressName)").string,
+                                    subtitle: isGroup ? component.strings.Chat_HashtagSuggestion_UseLocal_Group_Text : component.strings.Chat_HashtagSuggestion_UseLocal_Channel_Text,
+                                    hashtag: "\(query)@\(addressName)",
+                                    hasNext: index != hashtags.count - 1,
+                                    action: { [weak self] hashtag, _ in
+                                        guard let self, let component = self.component else {
+                                            return
+                                        }
+                                        component.action(.hashtag("\(query)@\(addressName)"))
+                                    }
+                                ))
+                            }
+                        } else {
+                            let hashtag = hashtags[hashtagIndex]
+                            id = hashtag
+                            itemComponent = AnyComponent(HashtagListItemComponent(
+                                context: component.context,
+                                theme: component.theme,
+                                strings: component.strings,
+                                peer: nil,
+                                title: "#\(hashtag)",
+                                subtitle: nil,
+                                hashtag: hashtag,
+                                hasNext: index != hashtags.count - 1,
+                                action: { [weak self] hashtag, _ in
+                                    guard let self, let component = self.component else {
+                                        return
+                                    }
+                                    component.action(.hashtag(hashtag))
+                                }
+                            ))
+                        }
+                    }
+                    validIds.append(id)
+                    
+                    let visibleItem: ComponentView<Empty>
+                    if let current = self.visibleItems[id] {
+                        visibleItem = current
+                    } else {
+                        if !transition.animation.isImmediate {
+                            itemTransition = .immediate
+                        }
+                        visibleItem = ComponentView()
+                        self.visibleItems[id] = visibleItem
+                    }
+                                                           
+                    let _ = visibleItem.update(
+                        transition: itemTransition,
+                        component: itemComponent,
                         environment: {},
                         containerSize: itemFrame.size
                     )
                     if let itemView = visibleItem.view {
-//                        var animateIn = false
                         if itemView.superview == nil {
-//                            animateIn = true
                             self.scrollView.addSubview(itemView)
                         }
                         itemTransition.setFrame(view: itemView, frame: itemFrame)
-                        
-//                        if animateIn {
-//                            itemView.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.2)
-//                        }
                     }
                 }
             }
@@ -273,7 +340,7 @@ final class ContextResultPanelComponent: Component {
             self.backgroundView.update(size: backgroundSize, cornerRadius: 11.0, transition: transition.containedViewLayoutTransition)
         }
         
-        func update(component: ContextResultPanelComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+        func update(component: ContextResultPanelComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
             var transition = transition
             let previousComponent = self.component
             self.component = component
@@ -284,9 +351,10 @@ final class ContextResultPanelComponent: Component {
             let sideInset: CGFloat = 3.0
             self.backgroundView.updateColor(color: UIColor(white: 0.0, alpha: 0.7), transition: transition.containedViewLayoutTransition)
             
-            let measureItemSize = self.measureItem.update(
-                transition: .immediate,
-                component: AnyComponent(PeerListItemComponent(
+            let itemComponent: AnyComponent<Empty>
+            switch component.results {
+            case .mentions:
+                itemComponent = AnyComponent(PeerListItemComponent(
                     context: component.context,
                     theme: component.theme,
                     strings: component.strings,
@@ -294,14 +362,32 @@ final class ContextResultPanelComponent: Component {
                     sideInset: sideInset,
                     title: "AAAAAAAAAAAA",
                     peer: nil,
-                    subtitle: "BBBBBBB",
+                    subtitle: PeerListItemComponent.Subtitle(text: "BBBBBBB", color: .neutral),
                     subtitleAccessory: .none,
                     presence: nil,
                     selectionState: .none,
                     hasNext: true,
                     action: { _, _, _ in
                     }
-                )),
+                ))
+            case .hashtags:
+                itemComponent = AnyComponent(HashtagListItemComponent(
+                    context: component.context,
+                    theme: component.theme,
+                    strings: component.strings,
+                    peer: nil,
+                    title: "AAAAAAAAAAAA",
+                    subtitle: nil,
+                    hashtag: "",
+                    hasNext: true,
+                    action: { _, _ in
+                    }
+                ))
+            }
+            
+            let measureItemSize = self.measureItem.update(
+                transition: .immediate,
+                component: itemComponent,
                 environment: {},
                 containerSize: CGSize(width: availableSize.width, height: 1000.0)
             )
@@ -334,8 +420,8 @@ final class ContextResultPanelComponent: Component {
             if self.scrollView.contentInset != scrollContentInsets {
                 self.scrollView.contentInset = scrollContentInsets
             }
-            if self.scrollView.scrollIndicatorInsets != scrollIndicatorInsets {
-                self.scrollView.scrollIndicatorInsets = scrollIndicatorInsets
+            if self.scrollView.verticalScrollIndicatorInsets != scrollIndicatorInsets {
+                self.scrollView.verticalScrollIndicatorInsets = scrollIndicatorInsets
             }
             if self.scrollView.contentSize != scrollContentSize {
                 self.scrollView.contentSize = scrollContentSize
@@ -352,7 +438,7 @@ final class ContextResultPanelComponent: Component {
         return View(frame: CGRect())
     }
     
-    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
 }

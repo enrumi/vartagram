@@ -7,6 +7,7 @@ import TelegramPresentationData
 import ItemListUI
 import MergeLists
 import Photos
+import MediaAssetsContext
 
 private struct MediaGroupsGridAlbumEntry: Comparable, Identifiable {
     let theme: PresentationTheme
@@ -184,8 +185,8 @@ private final class MediaGroupsGridAlbumItemNode : ListViewItemNode {
         }
     }
     
-    override func animateInsertion(_ currentTimestamp: Double, duration: Double, short: Bool) {
-        super.animateInsertion(currentTimestamp, duration: duration, short: short)
+    override func animateInsertion(_ currentTimestamp: Double, duration: Double, options: ListViewItemAnimationOptions) {
+        super.animateInsertion(currentTimestamp, duration: duration, options: options)
         
         self.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.2)
     }
@@ -366,7 +367,7 @@ private class MediaGroupsAlbumGridItemNode: ListViewItemNode {
         }
     }
     
-    override func animateInsertion(_ currentTimestamp: Double, duration: Double, short: Bool) {
+    override func animateInsertion(_ currentTimestamp: Double, duration: Double, options: ListViewItemAnimationOptions) {
         self.layer.animateAlpha(from: 0.0, to: 1.0, duration: duration * 0.5)
     }
     

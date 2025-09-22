@@ -100,7 +100,7 @@ public final class ArchiveInfoContentComponent: Component {
             }
         }
         
-        func update(component: ArchiveInfoContentComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+        func update(component: ArchiveInfoContentComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
             self.component = component
             
             let sideInset: CGFloat = 16.0
@@ -192,6 +192,7 @@ public final class ArchiveInfoContentComponent: Component {
                     maximumNumberOfLines: 0,
                     lineSpacing: 0.2,
                     highlightColor: component.theme.list.itemAccentColor.withMultipliedAlpha(0.1),
+                    highlightInset: UIEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: -8.0),
                     highlightAction: { attributes in
                         if let _ = attributes[NSAttributedString.Key(rawValue: "URL")] {
                             return NSAttributedString.Key(rawValue: "URL")
@@ -326,7 +327,7 @@ public final class ArchiveInfoContentComponent: Component {
         return View(frame: CGRect())
     }
     
-    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
 }

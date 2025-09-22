@@ -49,19 +49,38 @@ public func chatInputStateStringWithAppliedEntities(_ text: String, entities: [M
         case let .CustomEmoji(_, fileId):
             string.addAttribute(ChatTextInputAttributes.customEmoji, value: ChatTextInputTextCustomEmojiAttribute(interactivelySelectedFromPackId: nil, fileId: fileId, file: nil), range: range)
         case let .Pre(language):
-            string.addAttribute(ChatTextInputAttributes.block, value: ChatTextInputTextQuoteAttribute(kind: .code(language: language)), range: range)
-        case .BlockQuote:
-            string.addAttribute(ChatTextInputAttributes.block, value: ChatTextInputTextQuoteAttribute(kind: .quote), range: range)
+            string.addAttribute(ChatTextInputAttributes.block, value: ChatTextInputTextQuoteAttribute(kind: .code(language: language), isCollapsed: false), range: range)
+        case let .BlockQuote(isCollapsed):
+            string.addAttribute(ChatTextInputAttributes.block, value: ChatTextInputTextQuoteAttribute(kind: .quote, isCollapsed: isCollapsed), range: range)
             default:
                 break
         }
     }
+    
+    while true {
+        var found = false
+        string.enumerateAttribute(ChatTextInputAttributes.block, in: NSRange(location: 0, length: string.length), using: { value, range, stop in
+            if let value = value as? ChatTextInputTextQuoteAttribute, value.isCollapsed {
+                found = true
+                let blockString = string.attributedSubstring(from: range)
+                string.replaceCharacters(in: range, with: "")
+                string.insert(NSAttributedString(string: " ", attributes: [
+                    ChatTextInputAttributes.collapsedBlock: blockString
+                ]), at: range.lowerBound)
+                stop.pointee = true
+            }
+        })
+        if !found {
+            break
+        }
+    }
+    
     return string
 }
 
 private let syntaxHighlighter = Syntaxer()
 
-public func stringWithAppliedEntities(_ text: String, entities: [MessageTextEntity], baseColor: UIColor, linkColor: UIColor, baseQuoteTintColor: UIColor? = nil, baseQuoteSecondaryTintColor: UIColor? = nil, baseQuoteTertiaryTintColor: UIColor? = nil, codeBlockTitleColor: UIColor? = nil, codeBlockAccentColor: UIColor? = nil, codeBlockBackgroundColor: UIColor? = nil, baseFont: UIFont, linkFont: UIFont, boldFont: UIFont, italicFont: UIFont, boldItalicFont: UIFont, fixedFont: UIFont, blockQuoteFont: UIFont, underlineLinks: Bool = true, external: Bool = false, message: Message?, entityFiles: [MediaId: TelegramMediaFile] = [:], adjustQuoteFontSize: Bool = false, cachedMessageSyntaxHighlight: CachedMessageSyntaxHighlight? = nil) -> NSAttributedString {
+public func stringWithAppliedEntities(_ text: String, entities: [MessageTextEntity], baseColor: UIColor, linkColor: UIColor, baseQuoteTintColor: UIColor? = nil, baseQuoteSecondaryTintColor: UIColor? = nil, baseQuoteTertiaryTintColor: UIColor? = nil, codeBlockTitleColor: UIColor? = nil, codeBlockAccentColor: UIColor? = nil, codeBlockBackgroundColor: UIColor? = nil, baseFont: UIFont, linkFont: UIFont, boldFont: UIFont, italicFont: UIFont, boldItalicFont: UIFont, fixedFont: UIFont, blockQuoteFont: UIFont, underlineLinks: Bool = true, external: Bool = false, message: Message?, entityFiles: [MediaId: TelegramMediaFile] = [:], adjustQuoteFontSize: Bool = false, cachedMessageSyntaxHighlight: CachedMessageSyntaxHighlight? = nil, paragraphAlignment: NSTextAlignment? = nil) -> NSAttributedString {
     let baseQuoteTintColor = baseQuoteTintColor ?? baseColor
     
     var nsString: NSString?
@@ -190,11 +209,21 @@ public func stringWithAppliedEntities(_ text: String, entities: [MessageTextEnti
                     }
                 }
                 if !skipEntity {
+                    var hashtagValue = hashtag
+                    var peerNameValue: String?
+                    if hashtagValue.contains("@") {
+                        let components = hashtagValue.components(separatedBy: "@")
+                        if components.count == 2, let firstComponent = components.first, let lastComponent = components.last, !firstComponent.isEmpty && !lastComponent.isEmpty {
+                            hashtagValue = firstComponent
+                            peerNameValue = lastComponent
+                        }
+                    }
+                    
                     string.addAttribute(NSAttributedString.Key.foregroundColor, value: linkColor, range: range)
                     if underlineLinks && underlineAllLinks {
                         string.addAttribute(NSAttributedString.Key.underlineStyle, value: NSUnderlineStyle.single.rawValue as NSNumber, range: range)
                     }
-                    string.addAttribute(NSAttributedString.Key(rawValue: TelegramTextAttributes.Hashtag), value: TelegramHashtag(peerName: nil, hashtag: hashtag), range: range)
+                    string.addAttribute(NSAttributedString.Key(rawValue: TelegramTextAttributes.Hashtag), value: TelegramHashtag(peerName: peerNameValue, hashtag: hashtagValue), range: range)
                 }
             case .BotCommand:
                 string.addAttribute(NSAttributedString.Key.foregroundColor, value: linkColor, range: range)
@@ -219,12 +248,12 @@ public func stringWithAppliedEntities(_ text: String, entities: [MessageTextEnti
                     if let language, !language.isEmpty {
                         title = NSAttributedString(string: language.capitalized, font: boldFont.withSize(round(boldFont.pointSize * 0.8235294117647058)), textColor: codeBlockTitleColor)
                     }
-                    string.addAttribute(NSAttributedString.Key(rawValue: "Attribute__Blockquote"), value: TextNodeBlockQuoteData(kind: .code(language: language), title: title, color: codeBlockAccentColor, secondaryColor: nil, tertiaryColor: nil, backgroundColor: codeBlockBackgroundColor), range: range)
+                    string.addAttribute(NSAttributedString.Key(rawValue: "Attribute__Blockquote"), value: TextNodeBlockQuoteData(kind: .code(language: language), title: title, color: codeBlockAccentColor, secondaryColor: nil, tertiaryColor: nil, backgroundColor: codeBlockBackgroundColor, isCollapsible: false), range: range)
                 }
-            case .BlockQuote:
+            case let .BlockQuote(isCollapsed):
                 addFontAttributes(range, .blockQuote)
                 
-                string.addAttribute(NSAttributedString.Key(rawValue: "Attribute__Blockquote"), value: TextNodeBlockQuoteData(kind: .quote, title: nil, color: baseQuoteTintColor, secondaryColor: baseQuoteSecondaryTintColor, tertiaryColor: baseQuoteTertiaryTintColor, backgroundColor: baseQuoteTintColor.withMultipliedAlpha(0.1)), range: range)
+                string.addAttribute(NSAttributedString.Key(rawValue: "Attribute__Blockquote"), value: TextNodeBlockQuoteData(kind: .quote, title: nil, color: baseQuoteTintColor, secondaryColor: baseQuoteSecondaryTintColor, tertiaryColor: baseQuoteTertiaryTintColor, backgroundColor: baseQuoteTintColor.withMultipliedAlpha(0.1), isCollapsible: isCollapsed), range: range)
             case .BankCard:
                 string.addAttribute(NSAttributedString.Key.foregroundColor, value: linkColor, range: range)
                 if underlineLinks && underlineAllLinks {
@@ -253,6 +282,9 @@ public func stringWithAppliedEntities(_ text: String, entities: [MessageTextEnti
                     if let time = parseTimecodeString(text) {
                         string.addAttribute(NSAttributedString.Key(rawValue: TelegramTextAttributes.Timecode), value: TelegramTimecode(time: time, text: text), range: range)
                     }
+                } else if type == ApplicationSpecificEntityType.Button {
+                    string.addAttribute(NSAttributedString.Key(rawValue: TelegramTextAttributes.Button), value: true as NSNumber, range: range)
+                    addFontAttributes(range, .smaller)
                 }
             case let .CustomEmoji(_, fileId):
                 let mediaId = MediaId(namespace: Namespaces.Media.CloudFile, id: fileId)
@@ -284,6 +316,8 @@ public func stringWithAppliedEntities(_ text: String, entities: [MessageTextEnti
                 font = italicFont
             } else if fontAttributes == [.monospace] {
                 font = fixedFont
+            } else if fontAttributes == [.smaller] {
+                font = baseFont.withSize(floor(baseFont.pointSize * 0.9))
             } else {
                 font = baseFont
             }
@@ -321,6 +355,12 @@ public func stringWithAppliedEntities(_ text: String, entities: [MessageTextEnti
             }
         }
     })
+    
+    if let paragraphAlignment = paragraphAlignment {
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = paragraphAlignment
+        string.addAttribute(.paragraphStyle, value: paragraphStyle, range: NSMakeRange(0, string.length))
+    }
     
     return string
 }

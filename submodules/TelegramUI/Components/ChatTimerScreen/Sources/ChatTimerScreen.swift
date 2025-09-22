@@ -186,6 +186,9 @@ private class TimerDatePickerView: UIDatePicker, TimerPickerView {
     }
 }
 
+private let digitsCharacterSet = CharacterSet(charactersIn: "0123456789")
+private let nondigitsCharacterSet = CharacterSet(charactersIn: "0123456789").inverted
+
 private class TimerPickerItemView: UIView {
     let valueLabel = UILabel()
     let unitLabel = UILabel()
@@ -207,6 +210,9 @@ private class TimerPickerItemView: UIView {
                 } else if components.count > 1 {
                     self.valueLabel.text = components[0]
                     self.unitLabel.text = components[1]
+                } else {
+                    self.valueLabel.text = string.trimmingCharacters(in: nondigitsCharacterSet)
+                    self.unitLabel.text = string.trimmingCharacters(in: digitsCharacterSet)
                 }
             }
             
@@ -259,7 +265,7 @@ private var timerValues: [Int32] = {
     return values
 }()
 
-class ChatTimerScreenNode: ViewControllerTracingNode, UIScrollViewDelegate, UIPickerViewDataSource, UIPickerViewDelegate {
+class ChatTimerScreenNode: ViewControllerTracingNode, ASScrollViewDelegate, UIPickerViewDataSource, UIPickerViewDelegate {
     private let context: AccountContext
     private let controllerStyle: ChatTimerScreenStyle
     private var presentationData: PresentationData
@@ -400,7 +406,7 @@ class ChatTimerScreenNode: ViewControllerTracingNode, UIScrollViewDelegate, UIPi
         self.dimNode.view.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(self.dimTapGesture(_:))))
         self.addSubnode(self.dimNode)
         
-        self.wrappingScrollNode.view.delegate = self
+        self.wrappingScrollNode.view.delegate = self.wrappedScrollViewDelegate
         self.addSubnode(self.wrappingScrollNode)
         
         self.wrappingScrollNode.addSubnode(self.backgroundNode)

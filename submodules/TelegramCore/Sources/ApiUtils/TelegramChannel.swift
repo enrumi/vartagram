@@ -1,7 +1,6 @@
 import Foundation
 import Postbox
 
-
 public enum TelegramChannelPermission {
     case sendText
     case sendPhoto
@@ -21,10 +20,11 @@ public enum TelegramChannelPermission {
     case postStories
     case editStories
     case deleteStories
+    case manageDirect
 }
 
 public extension TelegramChannel {
-    func hasPermission(_ permission: TelegramChannelPermission) -> Bool {
+    func hasPermission(_ permission: TelegramChannelPermission, ignoreDefault: Bool = false) -> Bool {
         if self.flags.contains(.isCreator) {
             if case .canBeAnonymous = permission {
                 if let adminRights = self.adminRights {
@@ -50,7 +50,7 @@ public extension TelegramChannel {
                     if let bannedRights = self.bannedRights, bannedRights.flags.contains(.banSendText) {
                         return false
                     }
-                    if let defaultBannedRights = self.defaultBannedRights, defaultBannedRights.flags.contains(.banSendText) {
+                    if let defaultBannedRights = self.defaultBannedRights, defaultBannedRights.flags.contains(.banSendText) && !ignoreDefault {
                         return false
                     }
                     return true
@@ -69,7 +69,7 @@ public extension TelegramChannel {
                     if let bannedRights = self.bannedRights, bannedRights.flags.contains(.banSendPhotos) {
                         return false
                     }
-                    if let defaultBannedRights = self.defaultBannedRights, defaultBannedRights.flags.contains(.banSendPhotos) {
+                    if let defaultBannedRights = self.defaultBannedRights, defaultBannedRights.flags.contains(.banSendPhotos) && !ignoreDefault {
                         return false
                     }
                     return true
@@ -88,7 +88,7 @@ public extension TelegramChannel {
                     if let bannedRights = self.bannedRights, bannedRights.flags.contains(.banSendVideos) {
                         return false
                     }
-                    if let defaultBannedRights = self.defaultBannedRights, defaultBannedRights.flags.contains(.banSendVideos) {
+                    if let defaultBannedRights = self.defaultBannedRights, defaultBannedRights.flags.contains(.banSendVideos) && !ignoreDefault {
                         return false
                     }
                     return true
@@ -121,7 +121,7 @@ public extension TelegramChannel {
                     if let bannedRights = self.bannedRights, bannedRights.flags.intersection(flags) == flags {
                         return false
                     }
-                    if let defaultBannedRights = self.defaultBannedRights, defaultBannedRights.flags.intersection(flags) == flags {
+                    if let defaultBannedRights = self.defaultBannedRights, defaultBannedRights.flags.intersection(flags) == flags && !ignoreDefault {
                         return false
                     }
                     return true
@@ -228,6 +228,11 @@ public extension TelegramChannel {
                     return true
                 }
                 return false
+            case .manageDirect:
+                if let adminRights = self.adminRights, adminRights.rights.contains(.canManageDirect) {
+                    return true
+                }
+                return false
             case .manageCalls:
                 if let adminRights = self.adminRights, adminRights.rights.contains(.canManageCalls) {
                     return true
@@ -259,14 +264,14 @@ public extension TelegramChannel {
         }
     }
     
-    func hasBannedPermission(_ rights: TelegramChatBannedRightsFlags) -> (Int32, Bool)? {
+    func hasBannedPermission(_ rights: TelegramChatBannedRightsFlags, ignoreDefault: Bool = false) -> (Int32, Bool)? {
         if self.flags.contains(.isCreator) {
             return nil
         }
         if let _ = self.adminRights {
             return nil
         }
-        if let defaultBannedRights = self.defaultBannedRights, defaultBannedRights.flags.contains(rights) {
+        if let defaultBannedRights = self.defaultBannedRights, defaultBannedRights.flags.contains(rights) && !ignoreDefault {
             return (Int32.max, false)
         }
         if let bannedRights = self.bannedRights, bannedRights.flags.contains(rights) {

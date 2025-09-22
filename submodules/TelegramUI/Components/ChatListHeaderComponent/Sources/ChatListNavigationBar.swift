@@ -27,6 +27,7 @@ public final class ChatListNavigationBar: Component {
     public let statusBarHeight: CGFloat
     public let sideInset: CGFloat
     public let isSearchActive: Bool
+    public let isSearchEnabled: Bool
     public let primaryContent: ChatListHeaderComponent.Content?
     public let secondaryContent: ChatListHeaderComponent.Content?
     public let secondaryTransition: CGFloat
@@ -48,6 +49,7 @@ public final class ChatListNavigationBar: Component {
         statusBarHeight: CGFloat,
         sideInset: CGFloat,
         isSearchActive: Bool,
+        isSearchEnabled: Bool,
         primaryContent: ChatListHeaderComponent.Content?,
         secondaryContent: ChatListHeaderComponent.Content?,
         secondaryTransition: CGFloat,
@@ -68,6 +70,7 @@ public final class ChatListNavigationBar: Component {
         self.statusBarHeight = statusBarHeight
         self.sideInset = sideInset
         self.isSearchActive = isSearchActive
+        self.isSearchEnabled = isSearchEnabled
         self.primaryContent = primaryContent
         self.secondaryContent = secondaryContent
         self.secondaryTransition = secondaryTransition
@@ -100,6 +103,9 @@ public final class ChatListNavigationBar: Component {
             return false
         }
         if lhs.isSearchActive != rhs.isSearchActive {
+            return false
+        }
+        if lhs.isSearchEnabled != rhs.isSearchEnabled {
             return false
         }
         if lhs.primaryContent != rhs.primaryContent {
@@ -213,13 +219,13 @@ public final class ChatListNavigationBar: Component {
             return result
         }
         
-        public func applyCurrentScroll(transition: Transition) {
+        public func applyCurrentScroll(transition: ComponentTransition) {
             if let rawScrollOffset = self.rawScrollOffset, self.hasDeferredScrollOffset {
                 self.applyScroll(offset: rawScrollOffset, allowAvatarsExpansion: self.currentAllowAvatarsExpansion, transition: transition)
             }
         }
         
-        public func applyScroll(offset: CGFloat, allowAvatarsExpansion: Bool, forceUpdate: Bool = false, transition: Transition) {
+        public func applyScroll(offset: CGFloat, allowAvatarsExpansion: Bool, forceUpdate: Bool = false, transition: ComponentTransition) {
             let transition = transition
             
             self.rawScrollOffset = offset
@@ -315,6 +321,9 @@ public final class ChatListNavigationBar: Component {
             transition.setFrameWithAdditivePosition(view: searchContentNode.view, frame: searchFrame)
             
             searchContentNode.updateLayout(size: searchSize, leftInset: component.sideInset, rightInset: component.sideInset, transition: transition.containedViewLayoutTransition)
+            
+            transition.setAlpha(view: searchContentNode.view, alpha: component.isSearchEnabled ? 1.0 : 0.5)
+            searchContentNode.isUserInteractionEnabled = component.isSearchEnabled
             
             let headerTransition = transition
             
@@ -520,6 +529,7 @@ public final class ChatListNavigationBar: Component {
                     statusBarHeight: component.statusBarHeight,
                     sideInset: component.sideInset,
                     isSearchActive: component.isSearchActive,
+                    isSearchEnabled: component.isSearchEnabled,
                     primaryContent: component.primaryContent,
                     secondaryContent: component.secondaryContent,
                     secondaryTransition: component.secondaryTransition,
@@ -564,7 +574,7 @@ public final class ChatListNavigationBar: Component {
             }
         }
         
-        func update(component: ChatListNavigationBar, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+        func update(component: ChatListNavigationBar, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
             let themeUpdated = self.component?.theme !== component.theme
             
             var uploadProgressUpdated = false
@@ -628,7 +638,7 @@ public final class ChatListNavigationBar: Component {
         return View(frame: CGRect())
     }
 
-    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
 }

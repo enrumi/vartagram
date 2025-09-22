@@ -7,6 +7,7 @@ swift_library(
         "Sources/**/*.swift",
     ]),
     copts = [
+        "-Onone",
         "-warnings-as-errors",
     ],
     deps = [

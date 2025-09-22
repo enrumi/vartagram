@@ -29,6 +29,11 @@ swift_library(
         "//submodules/ComponentFlow:ComponentFlow",
         "//submodules/AnimatedAvatarSetNode:AnimatedAvatarSetNode",
         "//submodules/TelegramUI/Components/EmojiStatusComponent",
+        "//submodules/TelegramUI/Components/TextNodeWithEntities",
+        "//submodules/Components/BundleIconComponent",
+        "//submodules/TelegramUI/Components/AnimatedTextComponent",
+        "//submodules/Components/ComponentDisplayAdapters",
+        "//submodules/PhotoResources",
     ],
     visibility = [
         "//visibility:public",

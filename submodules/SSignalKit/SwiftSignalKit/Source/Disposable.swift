@@ -192,6 +192,12 @@ public final class DisposableSet : Disposable {
         self.lock.unlock()
     }
     
+    public func removeLast() {
+        self.lock.lock()
+        self.disposables.removeLast()
+        self.lock.unlock()
+    }
+    
     public func dispose() {
         var disposables: [Disposable] = []
         self.lock.lock()

@@ -82,10 +82,12 @@ public struct EngineMessageReplyQuote: Codable, Equatable {
 public struct EngineMessageReplySubject: Codable, Equatable {
     public var messageId: EngineMessage.Id
     public var quote: EngineMessageReplyQuote?
+    public var todoItemId: Int32?
     
-    public init(messageId: EngineMessage.Id, quote: EngineMessageReplyQuote?) {
+    public init(messageId: EngineMessage.Id, quote: EngineMessageReplyQuote?, todoItemId: Int32?) {
         self.messageId = messageId
         self.quote = quote
+        self.todoItemId = todoItemId
     }
 }
 
@@ -135,6 +137,15 @@ public enum EnqueueMessage {
             return .message(text: text, attributes: attributes, inlineStickers: inlineStickers, mediaReference: mediaReference, threadId: threadId, replyToMessageId: replyToMessageId, replyToStoryId: replyToStoryId, localGroupingKey: localGroupingKey, correlationId: value, bubbleUpEmojiOrStickersets: bubbleUpEmojiOrStickersets)
         case let .forward(source, threadId, grouping, attributes, _):
             return .forward(source: source, threadId: threadId, grouping: grouping, attributes: attributes, correlationId: value)
+        }
+    }
+    
+    public func withUpdatedThreadId(_ threadId: Int64?) -> EnqueueMessage {
+        switch self {
+        case let .message(text, attributes, inlineStickers, mediaReference, _, replyToMessageId, replyToStoryId, localGroupingKey, correlationId, bubbleUpEmojiOrStickersets):
+            return .message(text: text, attributes: attributes, inlineStickers: inlineStickers, mediaReference: mediaReference, threadId: threadId, replyToMessageId: replyToMessageId, replyToStoryId: replyToStoryId, localGroupingKey: localGroupingKey, correlationId: correlationId, bubbleUpEmojiOrStickersets: bubbleUpEmojiOrStickersets)
+        case let .forward(source, _, grouping, attributes, correlationId):
+            return .forward(source: source, threadId: threadId, grouping: grouping, attributes: attributes, correlationId: correlationId)
         }
     }
     
@@ -196,7 +207,7 @@ func augmentMediaWithReference(_ mediaReference: AnyMediaReference) -> Media {
 
 private func convertForwardedMediaForSecretChat(_ media: Media) -> Media {
     if let file = media as? TelegramMediaFile {
-        return TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: Int64.random(in: Int64.min ... Int64.max)), partialReference: file.partialReference, resource: file.resource, previewRepresentations: file.previewRepresentations, videoThumbnails: file.videoThumbnails, immediateThumbnailData: file.immediateThumbnailData, mimeType: file.mimeType, size: file.size, attributes: file.attributes)
+        return TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: Int64.random(in: Int64.min ... Int64.max)), partialReference: file.partialReference, resource: file.resource, previewRepresentations: file.previewRepresentations, videoThumbnails: file.videoThumbnails, immediateThumbnailData: file.immediateThumbnailData, mimeType: file.mimeType, size: file.size, attributes: file.attributes, alternativeRepresentations: [])
     } else if let image = media as? TelegramMediaImage {
         return TelegramMediaImage(imageId: MediaId(namespace: Namespaces.Media.LocalImage, id: Int64.random(in: Int64.min ... Int64.max)), representations: image.representations, immediateThumbnailData: image.immediateThumbnailData, reference: image.reference, partialReference: image.partialReference, flags: [])
     } else {
@@ -225,6 +236,8 @@ private func filterMessageAttributesForOutgoingMessage(_ attributes: [MessageAtt
             return true
         case _ as OutgoingScheduleInfoMessageAttribute:
             return true
+        case _ as OutgoingQuickReplyMessageAttribute:
+            return true
         case _ as EmbeddedMediaStickersMessageAttribute:
             return true
         case _ as EmojiSearchQueryMessageAttribute:
@@ -236,6 +249,16 @@ private func filterMessageAttributesForOutgoingMessage(_ attributes: [MessageAtt
         case _ as MediaSpoilerMessageAttribute:
             return true
         case _ as WebpagePreviewMessageAttribute:
+            return true
+        case _ as InvertMediaMessageAttribute:
+            return true
+        case _ as EffectMessageAttribute:
+            return true
+        case _ as ForwardVideoTimestampAttribute:
+            return true
+        case _ as PaidStarsMessageAttribute:
+            return true
+        case _ as SuggestedPostMessageAttribute:
             return true
         default:
             return false
@@ -254,11 +277,17 @@ private func filterMessageAttributesForForwardedMessage(_ attributes: [MessageAt
                 return true
             case _ as OutgoingScheduleInfoMessageAttribute:
                 return true
+            case _ as OutgoingQuickReplyMessageAttribute:
+                return true
             case _ as ForwardOptionsMessageAttribute:
                 return true
             case _ as SendAsMessageAttribute:
                 return true
             case _ as MediaSpoilerMessageAttribute:
+                return true
+            case _ as InvertMediaMessageAttribute:
+                return true
+            case _ as PaidStarsMessageAttribute:
                 return true
             case let attribute as ReplyMessageAttribute:
                 if attribute.quote != nil {
@@ -317,11 +346,7 @@ private func opportunisticallyTransformOutgoingMedia(network: Network, postbox: 
                 if let mediaReference = mediaReference {
                     signals.append(opportunisticallyTransformMessageWithMedia(network: network, postbox: postbox, transformOutgoingMessageMedia: transformOutgoingMessageMedia, mediaReference: mediaReference, userInteractive: userInteractive)
                     |> map { result -> (Bool, EnqueueMessage) in
-                        if let result = result {
-                            return (true, .message(text: text, attributes: attributes, inlineStickers: inlineStickers, mediaReference: .standalone(media: result.media), threadId: threadId, replyToMessageId: replyToMessageId, replyToStoryId: replyToStoryId, localGroupingKey: localGroupingKey, correlationId: correlationId, bubbleUpEmojiOrStickersets: bubbleUpEmojiOrStickersets))
-                        } else {
-                            return (false, .message(text: text, attributes: attributes, inlineStickers: inlineStickers, mediaReference: mediaReference, threadId: threadId, replyToMessageId: replyToMessageId, replyToStoryId: replyToStoryId, localGroupingKey: localGroupingKey, correlationId: correlationId, bubbleUpEmojiOrStickersets: bubbleUpEmojiOrStickersets))
-                        }
+                        return (result != nil, .message(text: text, attributes: attributes, inlineStickers: inlineStickers, mediaReference: result ?? mediaReference, threadId: threadId, replyToMessageId: replyToMessageId, replyToStoryId: replyToStoryId, localGroupingKey: localGroupingKey, correlationId: correlationId, bubbleUpEmojiOrStickersets: bubbleUpEmojiOrStickersets))
                     })
                 } else {
                     signals.append(.single((false, message)))
@@ -362,7 +387,7 @@ public func enqueueMessagesToMultiplePeers(account: Account, peerIds: [PeerId], 
             for peerId in peerIds {
                 var replyToMessageId: EngineMessageReplySubject?
                 if let threadIds = threadIds[peerId] {
-                    replyToMessageId = EngineMessageReplySubject(messageId: MessageId(peerId: peerId, namespace: Namespaces.Message.Cloud, id: Int32(clamping: threadIds)), quote: nil)
+                    replyToMessageId = EngineMessageReplySubject(messageId: MessageId(peerId: peerId, namespace: Namespaces.Message.Cloud, id: Int32(clamping: threadIds)), quote: nil, todoItemId: nil)
                 }
                 var messages = messages
                 if let replyToMessageId = replyToMessageId {
@@ -383,6 +408,19 @@ public func resendMessages(account: Account, messageIds: [MessageId]) -> Signal<
     return account.postbox.transaction { transaction -> Void in
         var removeMessageIds: [MessageId] = []
         for (peerId, ids) in messagesIdsGroupedByPeerId(messageIds) {
+            var sendPaidMessageStars: StarsAmount?
+            let peer = transaction.getPeer(peerId)
+            if let user = peer as? TelegramUser, user.flags.contains(.requireStars) {
+                if let cachedUserData = transaction.getPeerCachedData(peerId: user.id) as? CachedUserData {
+                    sendPaidMessageStars = cachedUserData.sendPaidMessageStars
+                }
+            } else if let channel = peer as? TelegramChannel {
+                if channel.flags.contains(.isCreator) || channel.adminRights != nil {
+                } else {
+                    sendPaidMessageStars = channel.sendPaidMessageStars
+                }
+            }
+            
             var messages: [EnqueueMessage] = []
             for id in ids {
                 if let message = transaction.getMessage(id), !message.flags.contains(.Incoming) {
@@ -395,7 +433,7 @@ public func resendMessages(account: Account, messageIds: [MessageId]) -> Signal<
                     var forwardSource: MessageId?
                     inner: for attribute in message.attributes {
                         if let attribute = attribute as? ReplyMessageAttribute {
-                            replyToMessageId = EngineMessageReplySubject(messageId: attribute.messageId, quote: attribute.quote)
+                            replyToMessageId = EngineMessageReplySubject(messageId: attribute.messageId, quote: attribute.quote, todoItemId: attribute.todoItemId)
                         } else if let attribute = attribute as? ReplyStoryAttribute {
                             replyToStoryId = attribute.storyId
                         } else if let attribute = attribute as? OutgoingMessageInfoAttribute {
@@ -404,8 +442,15 @@ public func resendMessages(account: Account, messageIds: [MessageId]) -> Signal<
                         } else if let attribute = attribute as? ForwardSourceInfoAttribute {
                             forwardSource = attribute.messageId
                         } else {
-                            filteredAttributes.append(attribute)
+                            if attribute is PaidStarsMessageAttribute {
+                            } else {
+                                filteredAttributes.append(attribute)
+                            }
                         }
+                    }
+                    
+                    if let sendPaidMessageStars {
+                        filteredAttributes.append(PaidStarsMessageAttribute(stars: sendPaidMessageStars, postponeSending: false))
                     }
 
                     if let forwardSource = forwardSource {
@@ -422,6 +467,22 @@ public func resendMessages(account: Account, messageIds: [MessageId]) -> Signal<
 }
 
 func enqueueMessages(transaction: Transaction, account: Account, peerId: PeerId, messages: [(Bool, EnqueueMessage)], disableAutoremove: Bool = false, transformGroupingKeysWithPeerId: Bool = false) -> [MessageId?] {
+    /**
+     * If it is a support account, mark messages as read here as they are
+     * not marked as read when chat is opened.
+     **/
+    if account.isSupportUser {
+        let namespace: MessageId.Namespace
+        if peerId.namespace == Namespaces.Peer.SecretChat {
+            namespace = Namespaces.Message.SecretIncoming
+        } else {
+            namespace = Namespaces.Message.Cloud
+        }
+        if let index = transaction.getTopPeerMessageIndex(peerId: peerId, namespace: namespace) {
+            let _ = transaction.applyInteractiveReadMaxIndex(index)
+        }
+    }
+    
     var forwardedMessageIds = Set<MessageId>()
     for (_, message) in messages {
         if case let .forward(sourceId, _, _, _, _) = message {
@@ -441,6 +502,7 @@ func enqueueMessages(transaction: Transaction, account: Account, peerId: PeerId,
                 }
             }
         }
+        
         switch message {
             case let .message(_, attributes, _, _, threadId, replyToMessageId, _, _, _, _):
                 if let replyToMessageId = replyToMessageId, (replyToMessageId.messageId.peerId != peerId && peerId.namespace == Namespaces.Peer.SecretChat), let replyMessage = transaction.getMessage(replyToMessageId.messageId) {
@@ -466,7 +528,7 @@ func enqueueMessages(transaction: Transaction, account: Account, peerId: PeerId,
                             mediaReference = .standalone(media: media)
                         }
                     }
-                    updatedMessages.append((transformedMedia, .message(text: sourceMessage.text, attributes: sourceMessage.attributes, inlineStickers: [:], mediaReference: mediaReference, threadId: threadId, replyToMessageId: threadId.flatMap { EngineMessageReplySubject(messageId: MessageId(peerId: peerId, namespace: Namespaces.Message.Cloud, id: Int32(clamping: $0)), quote: nil) }, replyToStoryId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])))
+                    updatedMessages.append((transformedMedia, .message(text: sourceMessage.text, attributes: sourceMessage.attributes, inlineStickers: [:], mediaReference: mediaReference, threadId: threadId, replyToMessageId: threadId.flatMap { EngineMessageReplySubject(messageId: MessageId(peerId: peerId, namespace: Namespaces.Message.Cloud, id: Int32(clamping: $0)), quote: nil, todoItemId: nil) }, replyToStoryId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])))
                     continue outer
                 }
         }
@@ -504,7 +566,12 @@ func enqueueMessages(transaction: Transaction, account: Account, peerId: PeerId,
             if transformedMedia {
                 infoFlags.insert(.transformedMedia)
             }
-            attributes.append(OutgoingMessageInfoAttribute(uniqueId: randomId, flags: infoFlags, acknowledged: false, correlationId: message.correlationId, bubbleUpEmojiOrStickersets: message.bubbleUpEmojiOrStickersets))
+            
+            var partialReference: PartialMediaReference?
+            if case let .message(_, _, _, mediaReference, _, _, _, _, _, _) = message {
+                partialReference = mediaReference?.partial
+            }
+            attributes.append(OutgoingMessageInfoAttribute(uniqueId: randomId, flags: infoFlags, acknowledged: false, correlationId: message.correlationId, bubbleUpEmojiOrStickersets: message.bubbleUpEmojiOrStickersets, partialReference: partialReference))
             globallyUniqueIds.append(randomId)
             
             switch message {
@@ -599,7 +666,7 @@ func enqueueMessages(transaction: Transaction, account: Account, peerId: PeerId,
                                 quote = EngineMessageReplyQuote(text: replyMessage.text, offset: nil, entities: messageTextEntitiesInRange(entities: replyMessage.textEntitiesAttribute?.entities ?? [], range: NSRange(location: 0, length: nsText.length), onlyQuoteable: true), media: replyMedia)
                             }
                         }
-                        attributes.append(ReplyMessageAttribute(messageId: replyToMessageId.messageId, threadMessageId: threadMessageId, quote: quote, isQuote: isQuote))
+                        attributes.append(ReplyMessageAttribute(messageId: replyToMessageId.messageId, threadMessageId: threadMessageId, quote: quote, isQuote: isQuote, todoItemId: replyToMessageId.todoItemId))
                     }
                     if let replyToStoryId = replyToStoryId {
                         attributes.append(ReplyStoryAttribute(storyId: replyToStoryId))
@@ -673,6 +740,9 @@ func enqueueMessages(transaction: Transaction, account: Account, peerId: PeerId,
                                 messageNamespace = Namespaces.Message.ScheduledLocal
                                 effectiveTimestamp = attribute.scheduleTime
                             }
+                        } else if attribute is OutgoingQuickReplyMessageAttribute {
+                            messageNamespace = Namespaces.Message.QuickReplyLocal
+                            effectiveTimestamp = 0
                         } else if let attribute = attribute as? SendAsMessageAttribute {
                             if let peer = transaction.getPeer(attribute.peerId) {
                                 sendAsPeer = peer
@@ -680,9 +750,17 @@ func enqueueMessages(transaction: Transaction, account: Account, peerId: PeerId,
                         }
                     }
                 
-                    let authorId: PeerId?
+                    var authorId: PeerId?
                     if let sendAsPeer = sendAsPeer {
-                        authorId = sendAsPeer.id
+                        if let peer = peer as? TelegramChannel, case let .broadcast(info) = peer.info {
+                            if info.flags.contains(.messagesShouldHaveProfiles) {
+                                authorId = sendAsPeer.id
+                            } else {
+                                authorId = peer.id
+                            }
+                        } else {
+                            authorId = sendAsPeer.id
+                        }
                     } else if let peer = peer as? TelegramChannel {
                         if case .broadcast = peer.info {
                             authorId = peer.id
@@ -698,15 +776,30 @@ func enqueueMessages(transaction: Transaction, account: Account, peerId: PeerId,
                     if messageNamespace != Namespaces.Message.ScheduledLocal {
                         attributes.removeAll(where: { $0 is OutgoingScheduleInfoMessageAttribute })
                     }
+                    if messageNamespace != Namespaces.Message.QuickReplyLocal {
+                        attributes.removeAll(where: { $0 is OutgoingQuickReplyMessageAttribute })
+                    }
                                         
                     if let peer = peer as? TelegramChannel {
                         switch peer.info {
                             case let .broadcast(info):
-                                if messageNamespace != Namespaces.Message.ScheduledLocal {
+                                if messageNamespace != Namespaces.Message.ScheduledLocal && messageNamespace != Namespaces.Message.QuickReplyLocal {
                                     attributes.append(ViewCountMessageAttribute(count: 1))
                                 }
+                                if info.flags.contains(.messagesShouldHaveProfiles) {
+                                    if sendAsPeer == nil {
+                                        authorId = account.peerId
+                                    }
+                                }
                                 if info.flags.contains(.messagesShouldHaveSignatures) {
-                                    attributes.append(AuthorSignatureMessageAttribute(signature: accountPeer.debugDisplayTitle))
+                                    if let sendAsPeer {
+                                        if sendAsPeer.id == peerId {
+                                        } else {
+                                            attributes.append(AuthorSignatureMessageAttribute(signature: sendAsPeer.debugDisplayTitle))
+                                        }
+                                    } else {
+                                        attributes.append(AuthorSignatureMessageAttribute(signature: accountPeer.debugDisplayTitle))
+                                    }
                                 }
                             case .group:
                                 break
@@ -740,7 +833,7 @@ func enqueueMessages(transaction: Transaction, account: Account, peerId: PeerId,
                         threadId = 1
                     }
                     
-                    storeMessages.append(StoreMessage(peerId: peerId, namespace: messageNamespace, globallyUniqueId: randomId, groupingKey: localGroupingKey, threadId: threadId, timestamp: effectiveTimestamp, flags: flags, tags: tags, globalTags: globalTags, localTags: localTags, forwardInfo: nil, authorId: authorId, text: text, attributes: attributes, media: mediaList))
+                    storeMessages.append(StoreMessage(peerId: peerId, namespace: messageNamespace, customStableId: nil, globallyUniqueId: randomId, groupingKey: localGroupingKey, threadId: threadId, timestamp: effectiveTimestamp, flags: flags, tags: tags, globalTags: globalTags, localTags: localTags, forwardInfo: nil, authorId: authorId, text: text, attributes: attributes, media: mediaList))
                 case let .forward(source, threadId, grouping, requestedAttributes, _):
                     let sourceMessage = transaction.getMessage(source)
                     if let sourceMessage = sourceMessage, let author = sourceMessage.author ?? sourceMessage.peers[sourceMessage.id.peerId] {
@@ -893,6 +986,12 @@ func enqueueMessages(transaction: Transaction, account: Account, peerId: PeerId,
                                     forwardInfo = nil
                                 }
                             }
+                            
+                            for attribute in requestedAttributes {
+                                if attribute is ForwardVideoTimestampAttribute {
+                                    attributes.append(attribute)
+                                }
+                            }
                         } else {
                             attributes.append(contentsOf: filterMessageAttributesForOutgoingMessage(sourceMessage.attributes))
                         }
@@ -911,6 +1010,9 @@ func enqueueMessages(transaction: Transaction, account: Account, peerId: PeerId,
                                     messageNamespace = Namespaces.Message.ScheduledLocal
                                     effectiveTimestamp = attribute.scheduleTime
                                 }
+                            } else if attribute is OutgoingQuickReplyMessageAttribute {
+                                messageNamespace = Namespaces.Message.QuickReplyLocal
+                                effectiveTimestamp = 0
                             } else if let attribute = attribute as? ReplyMessageAttribute {
                                 if let threadMessageId = attribute.threadMessageId {
                                     threadId = Int64(threadMessageId.id)
@@ -939,6 +1041,9 @@ func enqueueMessages(transaction: Transaction, account: Account, peerId: PeerId,
                         
                         if messageNamespace != Namespaces.Message.ScheduledLocal {
                             attributes.removeAll(where: { $0 is OutgoingScheduleInfoMessageAttribute })
+                        }
+                        if messageNamespace != Namespaces.Message.QuickReplyLocal {
+                            attributes.removeAll(where: { $0 is OutgoingQuickReplyMessageAttribute })
                         }
                         
                         let (tags, globalTags) = tagsForStoreMessage(incoming: false, attributes: attributes, media: sourceMessage.media, textEntities: entitiesAttribute?.entities, isPinned: false)
@@ -973,7 +1078,7 @@ func enqueueMessages(transaction: Transaction, account: Account, peerId: PeerId,
                             threadId = 1
                         }
                                                 
-                        storeMessages.append(StoreMessage(peerId: peerId, namespace: messageNamespace, globallyUniqueId: randomId, groupingKey: localGroupingKey, threadId: threadId, timestamp: effectiveTimestamp, flags: flags, tags: tags, globalTags: globalTags, localTags: [], forwardInfo: forwardInfo, authorId: authorId, text: messageText, attributes: attributes, media: augmentedMediaList))
+                        storeMessages.append(StoreMessage(peerId: peerId, namespace: messageNamespace, customStableId: nil, globallyUniqueId: randomId, groupingKey: localGroupingKey, threadId: threadId, timestamp: effectiveTimestamp, flags: flags, tags: tags, globalTags: globalTags, localTags: [], forwardInfo: forwardInfo, authorId: authorId, text: messageText, attributes: attributes, media: augmentedMediaList))
                     }
             }
         }

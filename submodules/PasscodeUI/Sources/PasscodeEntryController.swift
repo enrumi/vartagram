@@ -59,11 +59,8 @@ public final class PasscodeEntryController: ViewController {
     private var inBackground: Bool = false
     private var inBackgroundDisposable: Disposable?
     
-    private var statusBarHost: StatusBarHost?
-    private var previousStatusBarStyle: UIStatusBarStyle?
-    
     private weak var sharedContext: SharedAccountContext?
-    
+
     public init(applicationBindings: TelegramApplicationBindings, accountManager: AccountManager<TelegramAccountManagerTypes>, appLockContext: AppLockContext, presentationData: PresentationData, presentationDataSignal: Signal<PresentationData, NoError>, statusBarHost: StatusBarHost?, challengeData: PostboxAccessChallengeData, biometrics: PasscodeEntryControllerBiometricsMode, arguments: PasscodeEntryControllerPresentationArguments, sharedContext: SharedAccountContext?) {
         self.applicationBindings = applicationBindings
         self.accountManager = accountManager
@@ -74,20 +71,11 @@ public final class PasscodeEntryController: ViewController {
         self.biometrics = biometrics
         self.arguments = arguments
         self.sharedContext = sharedContext
-        
-        self.statusBarHost = statusBarHost
-        self.previousStatusBarStyle = statusBarHost?.statusBarStyle
+
         super.init(navigationBarPresentationData: nil)
         
         self.supportedOrientations = ViewControllerSupportedOrientations(regularSize: .all, compactSize: .portrait)
-        self.statusBarHost?.setStatusBarStyle(.lightContent, animated: true)
-        self.statusBarHost?.shouldChangeStatusBarStyle = { [weak self] style in
-            if let strongSelf = self {
-                strongSelf.previousStatusBarStyle = style
-                return false
-            }
-            return true
-        }
+        self.statusBar.updateStatusBarStyle(.White, animated: false)
         
         self.presentationDataDisposable = (presentationDataSignal
         |> deliverOnMainQueue).start(next: { [weak self] presentationData in
@@ -151,24 +139,24 @@ public final class PasscodeEntryController: ViewController {
             guard let sharedContext = self?.sharedContext else {
                 return
             }
-            
+
             let _ = (sharedContext.ptgSecretPasscodes
             |> take(1)
             |> deliverOnMainQueue).start(next: { ptgSecretPasscodes in
                 guard let strongSelf = self else {
                     return
                 }
-                
+
                 guard let passcodeAttemptAccounter = strongSelf.sharedContext?.passcodeAttemptAccounter else {
                     return
                 }
-                
+
                 if let _ = passcodeAttemptAccounter.preAttempt() {
                     strongSelf.controllerNode.animateError()
                     strongSelf.controllerNode.updateAttemptWaitText(passcodeAttemptAccounter)
                     return
                 }
-                
+
                 var succeed = false
                 switch strongSelf.challengeData {
                 case .none:
@@ -178,7 +166,7 @@ public final class PasscodeEntryController: ViewController {
                 case let .plaintextPassword(code):
                     succeed = passcode == code
                 }
-                
+
                 if !succeed {
                     // check secret codes only if passcode is not matched
                     // otherwise it may be used to brute-force secret codes by endlessly changing passcode and entering it on lock screen
@@ -194,14 +182,14 @@ public final class PasscodeEntryController: ViewController {
                         }
                     }
                 }
-                
+
                 if succeed {
                     if let completed = strongSelf.completed {
                         completed()
                     } else {
                         strongSelf.appLockContext.unlock()
                     }
-                    
+
                     let isMainApp = strongSelf.applicationBindings.isMainApp
                     let _ = updatePresentationPasscodeSettingsInteractively(accountManager: strongSelf.accountManager, { settings in
                         if isMainApp {
@@ -221,7 +209,7 @@ public final class PasscodeEntryController: ViewController {
                 strongSelf.requestBiometrics(force: true)
             }
         }
-        
+
         #if TEST_BUILD
         self.controllerNode.debugAction = { [weak self] in
             if let strongSelf = self, let passcodeAttemptAccounter = strongSelf.sharedContext?.passcodeAttemptAccounter {
@@ -322,15 +310,7 @@ public final class PasscodeEntryController: ViewController {
         self.controllerNode.containerLayoutUpdated(layout, navigationBarHeight: self.navigationLayout(layout: layout).navigationFrame.maxY, transition: transition)
     }
     
-    public override func dismiss(completion: (() -> Void)? = nil) {
-        self.dismiss(animated: true, completion: completion)
-    }
-    
     public override func dismiss(animated flag: Bool, completion: (() -> Void)? = nil) {
-        self.statusBarHost?.shouldChangeStatusBarStyle = nil
-        if let statusBarHost = self.statusBarHost, let previousStatusBarStyle = self.previousStatusBarStyle {
-            statusBarHost.setStatusBarStyle(previousStatusBarStyle, animated: flag)
-        }
         self.view.endEditing(true)
         if flag {
             self.controllerNode.animateOut { [weak self] in

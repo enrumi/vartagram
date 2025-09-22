@@ -30,6 +30,8 @@ extension StickerPackReference {
             return .inputStickerSetEmojiChannelDefaultStatuses
         case .iconTopicEmoji:
             return .inputStickerSetEmojiDefaultTopicIcons
+        case .tonGifts:
+            return .inputStickerSetTonGifts
         }
     }
 }
@@ -37,7 +39,7 @@ extension StickerPackReference {
 public enum LoadedStickerPack {
     case fetching
     case none
-    case result(info: StickerPackCollectionInfo, items: [StickerPackItem], installed: Bool)
+    case result(info: StickerPackCollectionInfo.Accessor, items: [StickerPackItem], installed: Bool)
 }
 
 func updatedRemoteStickerPack(postbox: Postbox, network: Network, reference: StickerPackReference) -> Signal<(StickerPackCollectionInfo, [StickerPackItem])?, NoError> {
@@ -100,7 +102,7 @@ func updatedRemoteStickerPack(postbox: Postbox, network: Network, reference: Sti
                 }
                 
                 for apiDocument in documents {
-                    if let file = telegramMediaFileFromApiDocument(apiDocument), let id = file.id {
+                    if let file = telegramMediaFileFromApiDocument(apiDocument, altDocuments: []), let id = file.id {
                         let fileIndexKeys: [MemoryBuffer]
                         if let indexKeys = indexKeysByFile[id] {
                             fileIndexKeys = indexKeys
@@ -123,7 +125,7 @@ func updatedRemoteStickerPack(postbox: Postbox, network: Network, reference: Sti
         }
 }
 
-func _internal_loadedStickerPack(postbox: Postbox, network: Network, reference: StickerPackReference, forceActualized: Bool) -> Signal<LoadedStickerPack, NoError> {
+func _internal_loadedStickerPack(postbox: Postbox, network: Network, reference: StickerPackReference, forceActualized: Bool, ignoreCache: Bool = false) -> Signal<LoadedStickerPack, NoError> {
     return _internal_cachedStickerPack(postbox: postbox, network: network, reference: reference, forceRemote: forceActualized)
     |> map { result -> LoadedStickerPack in
         switch result {

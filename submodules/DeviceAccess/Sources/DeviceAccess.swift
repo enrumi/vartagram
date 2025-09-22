@@ -7,7 +7,6 @@ import SwiftSignalKit
 import Photos
 import CoreLocation
 import Contacts
-import AddressBook
 import UserNotifications
 import CoreTelephony
 import TelegramPresentationData
@@ -17,6 +16,7 @@ public enum DeviceAccessCameraSubject {
     case video
     case videoCall
     case qrCode
+    case ageVerification
 }
 
 public enum DeviceAccessMicrophoneSubject {
@@ -36,6 +36,7 @@ public enum DeviceAccessLocationSubject {
     case send
     case live
     case tracking
+    case weather
 }
 
 public enum DeviceAccessSubject {
@@ -99,7 +100,7 @@ public final class DeviceAccess {
     public static func isCameraAccessAuthorized() -> Bool {
         return AVCaptureDevice.authorizationStatus(for: .video) == .authorized
     }
-    
+        
     public static func authorizationStatus(applicationInForeground: Signal<Bool, NoError>? = nil, siriAuthorization: (() -> AccessType)? = nil, subject: DeviceAccessSubject) -> Signal<AccessType, NoError> {
         switch subject {
             case .notifications:
@@ -155,33 +156,23 @@ public final class DeviceAccess {
                 }
             case .contacts:
                 let status = Signal<AccessType, NoError> { subscriber in
-                    if #available(iOSApplicationExtension 9.0, iOS 9.0, *) {
-                        switch CNContactStore.authorizationStatus(for: .contacts) {
-                            case .notDetermined:
-                                subscriber.putNext(.notDetermined)
-                            case .authorized:
-                                subscriber.putNext(.allowed)
-                            default:
-                                subscriber.putNext(.denied)
-                        }
-                        subscriber.putCompletion()
-                    } else {
-                        switch ABAddressBookGetAuthorizationStatus() {
-                            case .notDetermined:
-                                subscriber.putNext(.notDetermined)
-                            case .authorized:
-                                subscriber.putNext(.allowed)
-                            default:
-                                subscriber.putNext(.denied)
-                        }
-                        subscriber.putCompletion()
+                    switch CNContactStore.authorizationStatus(for: .contacts) {
+                        case .notDetermined:
+                            subscriber.putNext(.notDetermined)
+                        case .authorized:
+                            subscriber.putNext(.allowed)
+                        case .limited:
+                            subscriber.putNext(.limited)
+                        default:
+                            subscriber.putNext(.denied)
                     }
+                    subscriber.putCompletion()
                     return EmptyDisposable
                 }
                 return status
                 |> then(self.contacts
                     |> mapToSignal { authorized -> Signal<AccessType, NoError> in
-                        if let authorized = authorized {
+                        if let authorized {
                             return .single(authorized ? .allowed : .denied)
                         } else {
                             return .complete()
@@ -343,6 +334,8 @@ public final class DeviceAccess {
                                                 text = presentationData.strings.AccessDenied_VideoCallCamera
                                             case .qrCode:
                                                 text = presentationData.strings.AccessDenied_QrCamera
+                                            case .ageVerification:
+                                                text = presentationData.strings.AccessDenied_AgeVerificationCamera
                                         }
                                         present(standardTextAlertController(theme: AlertControllerTheme(presentationData: presentationData), title: presentationData.strings.AccessDenied_Title, text: text, actions: [TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_NotNow, action: {}), TextAlertAction(type: .genericAction, title: presentationData.strings.AccessDenied_Settings, action: {
                                             openSettings()
@@ -353,24 +346,28 @@ public final class DeviceAccess {
                         } else {
                             completion(true)
                         }
-                    } else if [.restricted, .denied].contains(status), let presentationData = presentationData {
-                        let text: String
-                        if case .restricted = status {
-                            text = presentationData.strings.AccessDenied_CameraRestricted
-                        } else {
-                            switch cameraSubject {
-                                case .video:
-                                    text = presentationData.strings.AccessDenied_Camera
-                                case .videoCall:
-                                    text = presentationData.strings.AccessDenied_VideoCallCamera
-                                case .qrCode:
-                                    text = presentationData.strings.AccessDenied_QrCamera
-                            }
-                        }
+                    } else if [.restricted, .denied].contains(status) {
                         completion(false)
-                        present(standardTextAlertController(theme: AlertControllerTheme(presentationData: presentationData), title: presentationData.strings.AccessDenied_Title, text: text, actions: [TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_NotNow, action: {}), TextAlertAction(type: .genericAction, title: presentationData.strings.AccessDenied_Settings, action: {
-                            openSettings()
-                        })]), nil)
+                        if let presentationData = presentationData {
+                            let text: String
+                            if case .restricted = status {
+                                text = presentationData.strings.AccessDenied_CameraRestricted
+                            } else {
+                                switch cameraSubject {
+                                    case .video:
+                                        text = presentationData.strings.AccessDenied_Camera
+                                    case .videoCall:
+                                        text = presentationData.strings.AccessDenied_VideoCallCamera
+                                    case .qrCode:
+                                        text = presentationData.strings.AccessDenied_QrCamera
+                                    case .ageVerification:
+                                        text = presentationData.strings.AccessDenied_AgeVerificationCamera
+                                }
+                            }
+                            present(standardTextAlertController(theme: AlertControllerTheme(presentationData: presentationData), title: presentationData.strings.AccessDenied_Title, text: text, actions: [TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_NotNow, action: {}), TextAlertAction(type: .genericAction, title: presentationData.strings.AccessDenied_Settings, action: {
+                                openSettings()
+                            })]), nil)
+                        }
                     } else if case .authorized = status {
                         completion(true)
                     } else {
@@ -475,7 +472,7 @@ public final class DeviceAccess {
                             }
                         case .authorizedWhenInUse:
                             switch locationSubject {
-                                case .send, .tracking:
+                                case .send, .tracking, .weather:
                                     completion(true)
                                 case .live:
                                     completion(false)
@@ -496,6 +493,8 @@ public final class DeviceAccess {
                                             text = presentationData.strings.AccessDenied_LocationDenied
                                         case .tracking:
                                             text = presentationData.strings.AccessDenied_LocationTracking
+                                        case .weather:
+                                            text = presentationData.strings.AccessDenied_LocationWeather
                                     }
                                 } else {
                                     text = presentationData.strings.AccessDenied_LocationDisabled
@@ -506,7 +505,7 @@ public final class DeviceAccess {
                             }
                         case .notDetermined:
                             switch locationSubject {
-                                case .send, .tracking:
+                                case .send, .tracking, .weather:
                                     locationManager?.requestWhenInUseAuthorization(completion: { status in
                                         completion(status == .authorizedWhenInUse || status == .authorizedAlways)
                                     })
@@ -525,44 +524,22 @@ public final class DeviceAccess {
                         if let value = value {
                             completion(value)
                         } else {
-                            if #available(iOSApplicationExtension 9.0, iOS 9.0, *) {
-                                switch CNContactStore.authorizationStatus(for: .contacts) {
-                                    case .notDetermined:
-                                        let store = CNContactStore()
-                                        store.requestAccess(for: .contacts, completionHandler: { authorized, _ in
-                                            self.contactsPromise.set(.single(authorized))
-                                            completion(authorized)
-                                        })
-                                    case .authorized:
-                                        self.contactsPromise.set(.single(true))
-                                        completion(true)
-                                    default:
-                                        self.contactsPromise.set(.single(false))
-                                        completion(false)
-                                }
-                            } else {
-                                switch ABAddressBookGetAuthorizationStatus() {
-                                    case .notDetermined:
-                                        var error: Unmanaged<CFError>?
-                                        let addressBook = ABAddressBookCreateWithOptions(nil, &error)
-                                        if let addressBook = addressBook?.takeUnretainedValue() {
-                                            ABAddressBookRequestAccessWithCompletion(addressBook, { authorized, _ in
-                                                Queue.mainQueue().async {
-                                                    self.contactsPromise.set(.single(authorized))
-                                                    completion(authorized)
-                                                }
-                                            })
-                                        } else {
-                                            self.contactsPromise.set(.single(false))
-                                            completion(false)
-                                        }
-                                    case .authorized:
-                                        self.contactsPromise.set(.single(true))
-                                        completion(true)
-                                    default:
-                                        self.contactsPromise.set(.single(false))
-                                        completion(false)
-                                }
+                            switch CNContactStore.authorizationStatus(for: .contacts) {
+                                case .notDetermined:
+                                    let store = CNContactStore()
+                                    store.requestAccess(for: .contacts, completionHandler: { authorized, _ in
+                                        self.contactsPromise.set(.single(authorized))
+                                        completion(authorized)
+                                    })
+                                case .authorized:
+                                    self.contactsPromise.set(.single(true))
+                                    completion(true)
+                                case .limited:
+                                    self.contactsPromise.set(.single(true))
+                                    completion(true)
+                                default:
+                                    self.contactsPromise.set(.single(false))
+                                    completion(false)
                             }
                         }
                     })

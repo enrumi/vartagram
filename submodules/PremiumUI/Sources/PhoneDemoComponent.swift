@@ -233,7 +233,7 @@ private final class PhoneView: UIView {
             hintDimensions: CGSize(width: 1170, height: 1754),
             storeAfterDownload: nil
         )
-        let videoNode = UniversalVideoNode(postbox: context.account.postbox, audioSession: context.sharedContext.mediaManager.audioSession, manager: context.sharedContext.mediaManager.universalVideoManager, decoration: VideoDecoration(), content: videoContent, priority: .embedded, sourceAccountId: context.account.id)
+        let videoNode = UniversalVideoNode(context: context, postbox: context.account.postbox, audioSession: context.sharedContext.mediaManager.audioSession, manager: context.sharedContext.mediaManager.universalVideoManager, decoration: VideoDecoration(), content: videoContent, priority: .embedded, sourceAccountId: context.account.id)
         videoNode.canAttachContent = true
         self.videoNode = videoNode
         
@@ -370,6 +370,9 @@ final class PhoneDemoComponent: Component {
         case badgeStars
         case emoji
         case hello
+        case tag
+        case business
+        case todo
     }
     
     enum Model {
@@ -473,7 +476,7 @@ final class PhoneDemoComponent: Component {
             self.playbackStatusDisposable?.dispose()
         }
         
-        public func update(component: PhoneDemoComponent, availableSize: CGSize, environment: Environment<DemoPageEnvironment>, transition: Transition) -> CGSize {
+        public func update(component: PhoneDemoComponent, availableSize: CGSize, environment: Environment<DemoPageEnvironment>, transition: ComponentTransition) -> CGSize {
             self.component = component
             
             self.containerView.frame = CGRect(origin: .zero, size: availableSize)
@@ -487,29 +490,29 @@ final class PhoneDemoComponent: Component {
                 case .dataRain:
                     if #available(iOS 10.0, *) {
                         if let _ = self.decorationView as? MatrixView {
-                        } else if let rainView = MatrixView(test: true) {
-                            rainView.frame = self.decorationContainerView.bounds.insetBy(dx: availableSize.width * 0.5, dy: 0.0)
-                            self.decorationView = rainView
-                            self.decorationContainerView.addSubview(rainView)
+                        } else if let decorationView = MatrixView(test: true) {
+                            decorationView.frame = self.decorationContainerView.bounds.insetBy(dx: availableSize.width * 0.5, dy: 0.0)
+                            self.decorationView = decorationView
+                            self.decorationContainerView.addSubview(decorationView)
                         }
                     }
                 case .swirlStars:
                     if let _ = self.decorationView as? SwirlStarsView {
                     } else {
-                        let starsView = SwirlStarsView(frame: self.decorationContainerView.bounds)
-                        self.decorationView = starsView
-                        self.decorationContainerView.addSubview(starsView)
+                        let decorationView = SwirlStarsView(frame: self.decorationContainerView.bounds)
+                        self.decorationView = decorationView
+                        self.decorationContainerView.addSubview(decorationView)
                     }
                 case .fasterStars:
                     if let _ = self.decorationView as? FasterStarsView {
                     } else {
-                        let starsView = FasterStarsView(frame: self.decorationContainerView.bounds)
-                        self.decorationView = starsView
-                        self.decorationContainerView.addSubview(starsView)
+                        let decorationView = FasterStarsView(frame: self.decorationContainerView.bounds)
+                        self.decorationView = decorationView
+                        self.decorationContainerView.addSubview(decorationView)
                         
                         self.playbackStatusDisposable = (self.phoneView.playbackStatus
-                        |> deliverOnMainQueue).start(next: { [weak starsView] status in
-                            if let starsView = starsView, let status = status {
+                        |> deliverOnMainQueue).start(next: { [weak decorationView] status in
+                            if let starsView = decorationView, let status = status {
                                 if status.timestamp > 8.0 {
                                     starsView.resetAnimation()
                                 } else if status.timestamp > 0.85 {
@@ -521,23 +524,44 @@ final class PhoneDemoComponent: Component {
                 case .badgeStars:
                     if let _ = self.decorationView as? BadgeStarsView {
                     } else {
-                        let starsView = BadgeStarsView(frame: self.decorationContainerView.bounds)
-                        self.decorationView = starsView
-                        self.decorationContainerView.addSubview(starsView)
+                        let decorationView = BadgeStarsView(frame: self.decorationContainerView.bounds)
+                        self.decorationView = decorationView
+                        self.decorationContainerView.addSubview(decorationView)
                     }
                 case .emoji:
                     if let _ = self.decorationView as? EmojiStarsView {
                     } else {
-                        let starsView = EmojiStarsView(frame: self.decorationContainerView.bounds)
-                        self.decorationView = starsView
-                        self.decorationContainerView.addSubview(starsView)
+                        let decorationView = EmojiStarsView(frame: self.decorationContainerView.bounds)
+                        self.decorationView = decorationView
+                        self.decorationContainerView.addSubview(decorationView)
                     }
                 case .hello:
                     if let _ = self.decorationView as? HelloView {
                     } else {
-                        let starsView = HelloView(frame: self.decorationContainerView.bounds)
-                        self.decorationView = starsView
-                        self.decorationContainerView.addSubview(starsView)
+                        let decorationView = HelloView(frame: self.decorationContainerView.bounds)
+                        self.decorationView = decorationView
+                        self.decorationContainerView.addSubview(decorationView)
+                    }
+                case .tag:
+                    if let _ = self.decorationView as? TagStarsView {
+                    } else {
+                        let decorationView = TagStarsView(frame: self.decorationContainerView.bounds)
+                        self.decorationView = decorationView
+                        self.decorationContainerView.addSubview(decorationView)
+                    }
+                case .business:
+                    if let _ = self.decorationView as? BadgeBusinessView {
+                    } else {
+                        let decorationView = BadgeBusinessView(frame: self.decorationContainerView.bounds)
+                        self.decorationView = decorationView
+                        self.decorationContainerView.addSubview(decorationView)
+                    }
+                case .todo:
+                    if let _ = self.decorationView as? TodoChecksView {
+                    } else {
+                        let decorationView = TodoChecksView(frame: self.decorationContainerView.bounds)
+                        self.decorationView = decorationView
+                        self.decorationContainerView.addSubview(decorationView)
                     }
             }
         
@@ -598,7 +622,7 @@ final class PhoneDemoComponent: Component {
         return View()
     }
     
-    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<DemoPageEnvironment>, transition: Transition) -> CGSize {
+    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<DemoPageEnvironment>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, environment: environment, transition: transition)
     }
 }
@@ -610,7 +634,7 @@ private final class VideoDecoration: UniversalVideoDecoration {
     
     private var contentNode: (ASDisplayNode & UniversalVideoContentNode)?
     
-    private var validLayoutSize: CGSize?
+    private var validLayout: (size: CGSize, actualSize: CGSize)?
     
     public init() {
         self.contentContainerNode = ASDisplayNode()
@@ -630,9 +654,9 @@ private final class VideoDecoration: UniversalVideoDecoration {
             if let contentNode = contentNode {
                 if contentNode.supernode !== self.contentContainerNode {
                     self.contentContainerNode.addSubnode(contentNode)
-                    if let validLayoutSize = self.validLayoutSize {
-                        contentNode.frame = CGRect(origin: CGPoint(), size: validLayoutSize)
-                        contentNode.updateLayout(size: validLayoutSize, transition: .immediate)
+                    if let validLayout = self.validLayout {
+                        contentNode.frame = CGRect(origin: CGPoint(), size: validLayout.size)
+                        contentNode.updateLayout(size: validLayout.size, actualSize: validLayout.actualSize, transition: .immediate)
                     }
                 }
             }
@@ -690,8 +714,8 @@ private final class VideoDecoration: UniversalVideoDecoration {
     public func updateContentNodeSnapshot(_ snapshot: UIView?) {
     }
     
-    public func updateLayout(size: CGSize, transition: ContainedViewLayoutTransition) {
-        self.validLayoutSize = size
+    public func updateLayout(size: CGSize, actualSize: CGSize, transition: ContainedViewLayoutTransition) {
+        self.validLayout = (size, actualSize)
         
         let bounds = CGRect(origin: CGPoint(), size: size)
         if let backgroundNode = self.backgroundNode {
@@ -706,7 +730,7 @@ private final class VideoDecoration: UniversalVideoDecoration {
         }
         if let contentNode = self.contentNode {
             transition.updateFrame(node: contentNode, frame: CGRect(origin: CGPoint(), size: size))
-            contentNode.updateLayout(size: size, transition: transition)
+            contentNode.updateLayout(size: size, actualSize: actualSize, transition: transition)
         }
     }
     

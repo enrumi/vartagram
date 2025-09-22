@@ -73,7 +73,7 @@ public class UnauthorizedAccount {
     public let testingEnvironment: Bool
     public let postbox: Postbox
     public let network: Network
-    private let stateManager: UnauthorizedAccountStateManager
+    let stateManager: UnauthorizedAccountStateManager
     
     private let updateLoginTokenPipe = ValuePipe<Void>()
     public var updateLoginTokenEvents: Signal<Void, NoError> {
@@ -91,7 +91,7 @@ public class UnauthorizedAccount {
     
     public let shouldBeServiceTaskMaster = Promise<AccountServiceTaskMasterMode>()
     
-    init(networkArguments: NetworkInitializationArguments, id: AccountRecordId, rootPath: String, basePath: String, testingEnvironment: Bool, postbox: Postbox, network: Network, shouldKeepAutoConnection: Bool = true) {
+    init(accountManager: AccountManager<TelegramAccountManagerTypes>, networkArguments: NetworkInitializationArguments, id: AccountRecordId, rootPath: String, basePath: String, testingEnvironment: Bool, postbox: Postbox, network: Network, shouldKeepAutoConnection: Bool = true) {
         self.networkArguments = networkArguments
         self.id = id
         self.rootPath = rootPath
@@ -101,11 +101,84 @@ public class UnauthorizedAccount {
         self.network = network
         let updateLoginTokenPipe = self.updateLoginTokenPipe
         let serviceNotificationPipe = self.serviceNotificationPipe
-        self.stateManager = UnauthorizedAccountStateManager(network: network, updateLoginToken: {
-            updateLoginTokenPipe.putNext(Void())
-        }, displayServiceNotification: { text in
-            serviceNotificationPipe.putNext(text)
-        })
+        let masterDatacenterId = Int32(network.mtProto.datacenterId)
+
+        var updateSentCodeImpl: ((Api.auth.SentCode) -> Void)?
+        self.stateManager = UnauthorizedAccountStateManager(
+            network: network,
+            updateLoginToken: {
+                updateLoginTokenPipe.putNext(Void())
+            },
+            updateSentCode: { sentCode in
+                updateSentCodeImpl?(sentCode)
+            },
+            displayServiceNotification: { text in
+                serviceNotificationPipe.putNext(text)
+            }
+        )
+
+        updateSentCodeImpl = { [weak self] sentCode in
+            switch sentCode {
+            case .sentCodePaymentRequired:
+                break
+            case let .sentCode(_, type, phoneCodeHash, nextType, codeTimeout):
+                let _ = postbox.transaction({ transaction in
+                    var parsedNextType: AuthorizationCodeNextType?
+                    if let nextType = nextType {
+                        parsedNextType = AuthorizationCodeNextType(apiType: nextType)
+                    }
+                    if let state = transaction.getState() as? UnauthorizedAccountState, case let .payment(phoneNumber, _, _, _, _, syncContacts) = state.contents {
+                        transaction.setState(UnauthorizedAccountState(isTestingEnvironment: testingEnvironment, masterDatacenterId: masterDatacenterId, contents: .confirmationCodeEntry(number: phoneNumber, type: SentAuthorizationCodeType(apiType: type), hash: phoneCodeHash, timeout: codeTimeout, nextType: parsedNextType, syncContacts: syncContacts, previousCodeEntry: nil, usePrevious: false)))
+                    }
+                }).start()
+            case let .sentCodeSuccess(authorization):
+                switch authorization {
+                case let .authorization(_, _, _, futureAuthToken, user):
+                    let _ = postbox.transaction({ [weak self] transaction in
+                        var syncContacts = true
+                        if let state = transaction.getState() as? UnauthorizedAccountState, case let .payment(_, _, _, _, _, syncContactsValue) = state.contents {
+                            syncContacts = syncContactsValue
+                        }
+
+                        if let futureAuthToken = futureAuthToken {
+                            storeFutureLoginToken(accountManager: accountManager, token: futureAuthToken.makeData())
+                        }
+
+                        let user = TelegramUser(user: user)
+                        var isSupportUser = false
+                        if let phone = user.phone, phone.hasPrefix("42"), phone.count <= 5 {
+                            isSupportUser = true
+                        }
+                        let state = AuthorizedAccountState(isTestingEnvironment: testingEnvironment, masterDatacenterId: masterDatacenterId, peerId: user.id, state: nil, invalidatedChannels: [])
+                        initializedAppSettingsAfterLogin(transaction: transaction, appVersion: networkArguments.appVersion, syncContacts: syncContacts)
+                        transaction.setState(state)
+                        return accountManager.transaction { [weak self] transaction -> SendAuthorizationCodeResult in
+                            if let self {
+                                switchToAuthorizedAccount(transaction: transaction, account: self, isSupportUser: isSupportUser)
+                            }
+                            return .loggedIn
+                        }
+                    }).start()
+                case let .authorizationSignUpRequired(_, termsOfService):
+                    let _ = postbox.transaction({ [weak self] transaction in
+                        if let self {
+                            if let state = transaction.getState() as? UnauthorizedAccountState, case let .payment(number, codeHash, _, _, _, syncContacts) = state.contents {
+                                let _ = beginSignUp(
+                                    account: self,
+                                    data: AuthorizationSignUpData(
+                                        number: number,
+                                        codeHash: codeHash,
+                                        code: .phoneCode(""),
+                                        termsOfService: termsOfService.flatMap(UnauthorizedAccountTermsOfService.init(apiTermsOfService:)),
+                                        syncContacts: syncContacts
+                                    )
+                                ).start()
+                            }
+                        }
+                    }).start()
+                }
+            }
+        }
         
         network.shouldKeepConnection.set(self.shouldBeServiceTaskMaster.get()
         |> map { mode -> Bool in
@@ -144,15 +217,15 @@ public class UnauthorizedAccount {
             return accountManager.transaction { transaction -> (LocalizationSettings?, ProxySettings?) in
                 return (transaction.getSharedData(SharedDataKeys.localizationSettings)?.get(LocalizationSettings.self), transaction.getSharedData(SharedDataKeys.proxySettings)?.get(ProxySettings.self))
             }
-            |> mapToSignal { localizationSettings, proxySettings -> Signal<(LocalizationSettings?, ProxySettings?, NetworkSettings?), NoError> in
-                return self.postbox.transaction { transaction -> (LocalizationSettings?, ProxySettings?, NetworkSettings?) in
-                    return (localizationSettings, proxySettings, transaction.getPreferencesEntry(key: PreferencesKeys.networkSettings)?.get(NetworkSettings.self))
+            |> mapToSignal { localizationSettings, proxySettings -> Signal<(LocalizationSettings?, ProxySettings?, NetworkSettings?, AppConfiguration), NoError> in
+                return self.postbox.transaction { transaction -> (LocalizationSettings?, ProxySettings?, NetworkSettings?, AppConfiguration) in
+                    return (localizationSettings, proxySettings, transaction.getPreferencesEntry(key: PreferencesKeys.networkSettings)?.get(NetworkSettings.self), transaction.getPreferencesEntry(key: PreferencesKeys.appConfiguration)?.get(AppConfiguration.self) ?? .defaultValue)
                 }
             }
-            |> mapToSignal { (localizationSettings, proxySettings, networkSettings) -> Signal<UnauthorizedAccount, NoError> in
-                return initializedNetwork(accountId: self.id, arguments: self.networkArguments, supplementary: false, datacenterId: Int(masterDatacenterId), keychain: keychain, basePath: self.basePath, testingEnvironment: self.testingEnvironment, languageCode: localizationSettings?.primaryComponent.languageCode, proxySettings: proxySettings, networkSettings: networkSettings, phoneNumber: nil, useRequestTimeoutTimers: false)
+            |> mapToSignal { localizationSettings, proxySettings, networkSettings, appConfiguration -> Signal<UnauthorizedAccount, NoError> in
+                return initializedNetwork(accountId: self.id, arguments: self.networkArguments, supplementary: false, datacenterId: Int(masterDatacenterId), keychain: keychain, basePath: self.basePath, testingEnvironment: self.testingEnvironment, languageCode: localizationSettings?.primaryComponent.languageCode, proxySettings: proxySettings, networkSettings: networkSettings, phoneNumber: nil, useRequestTimeoutTimers: false, appConfiguration: appConfiguration)
                 |> map { network in
-                    let updated = UnauthorizedAccount(networkArguments: self.networkArguments, id: self.id, rootPath: self.rootPath, basePath: self.basePath, testingEnvironment: self.testingEnvironment, postbox: self.postbox, network: network)
+                    let updated = UnauthorizedAccount(accountManager: accountManager, networkArguments: self.networkArguments, id: self.id, rootPath: self.rootPath, basePath: self.basePath, testingEnvironment: self.testingEnvironment, postbox: self.postbox, network: network)
                     updated.shouldBeServiceTaskMaster.set(self.shouldBeServiceTaskMaster.get())
                     return updated
                 }
@@ -175,7 +248,7 @@ public enum AccountResult {
     case authorized(Account)
 }
 
-public func accountWithId(accountManager: AccountManager<TelegramAccountManagerTypes>, networkArguments: NetworkInitializationArguments, id: AccountRecordId, encryptionParameters: ValueBoxEncryptionParameters, supplementary: Bool, rootPath: String, beginWithTestingEnvironment: Bool, backupData: AccountBackupData?, auxiliaryMethods: AccountAuxiliaryMethods, shouldKeepAutoConnection: Bool = true, initialPeerIdsExcludedFromUnreadCounters: Set<PeerId>) -> Signal<AccountResult, NoError> {
+public func accountWithId(accountManager: AccountManager<TelegramAccountManagerTypes>, networkArguments: NetworkInitializationArguments, id: AccountRecordId, encryptionParameters: ValueBoxEncryptionParameters, supplementary: Bool, isSupportUser: Bool, rootPath: String, beginWithTestingEnvironment: Bool, backupData: AccountBackupData?, auxiliaryMethods: AccountAuxiliaryMethods, shouldKeepAutoConnection: Bool = true, initialPeerIdsExcludedFromUnreadCounters: Set<PeerId>) -> Signal<AccountResult, NoError> {
     let path = "\(rootPath)/\(accountRecordIdPathName(id))"
     
     let postbox = openPostbox(
@@ -249,18 +322,18 @@ public func accountWithId(accountManager: AccountManager<TelegramAccountManagerT
                         if let accountState = accountState {
                             switch accountState {
                                 case let unauthorizedState as UnauthorizedAccountState:
-                                    return initializedNetwork(accountId: id, arguments: networkArguments, supplementary: supplementary, datacenterId: Int(unauthorizedState.masterDatacenterId), keychain: keychain, basePath: path, testingEnvironment: unauthorizedState.isTestingEnvironment, languageCode: localizationSettings?.primaryComponent.languageCode, proxySettings: proxySettings, networkSettings: networkSettings, phoneNumber: nil, useRequestTimeoutTimers: useRequestTimeoutTimers)
+                                    return initializedNetwork(accountId: id, arguments: networkArguments, supplementary: supplementary, datacenterId: Int(unauthorizedState.masterDatacenterId), keychain: keychain, basePath: path, testingEnvironment: unauthorizedState.isTestingEnvironment, languageCode: localizationSettings?.primaryComponent.languageCode, proxySettings: proxySettings, networkSettings: networkSettings, phoneNumber: nil, useRequestTimeoutTimers: useRequestTimeoutTimers, appConfiguration: appConfig)
                                         |> map { network -> AccountResult in
-                                            return .unauthorized(UnauthorizedAccount(networkArguments: networkArguments, id: id, rootPath: rootPath, basePath: path, testingEnvironment: unauthorizedState.isTestingEnvironment, postbox: postbox, network: network, shouldKeepAutoConnection: shouldKeepAutoConnection))
+                                            return .unauthorized(UnauthorizedAccount(accountManager: accountManager, networkArguments: networkArguments, id: id, rootPath: rootPath, basePath: path, testingEnvironment: unauthorizedState.isTestingEnvironment, postbox: postbox, network: network, shouldKeepAutoConnection: shouldKeepAutoConnection))
                                         }
                                 case let authorizedState as AuthorizedAccountState:
                                     return postbox.transaction { transaction -> String? in
                                         return (transaction.getPeer(authorizedState.peerId) as? TelegramUser)?.phone
                                     }
                                     |> mapToSignal { phoneNumber in
-                                        return initializedNetwork(accountId: id, arguments: networkArguments, supplementary: supplementary, datacenterId: Int(authorizedState.masterDatacenterId), keychain: keychain, basePath: path, testingEnvironment: authorizedState.isTestingEnvironment, languageCode: localizationSettings?.primaryComponent.languageCode, proxySettings: proxySettings, networkSettings: networkSettings, phoneNumber: phoneNumber, useRequestTimeoutTimers: useRequestTimeoutTimers)
+                                        return initializedNetwork(accountId: id, arguments: networkArguments, supplementary: supplementary, datacenterId: Int(authorizedState.masterDatacenterId), keychain: keychain, basePath: path, testingEnvironment: authorizedState.isTestingEnvironment, languageCode: localizationSettings?.primaryComponent.languageCode, proxySettings: proxySettings, networkSettings: networkSettings, phoneNumber: phoneNumber, useRequestTimeoutTimers: useRequestTimeoutTimers, appConfiguration: appConfig)
                                         |> map { network -> AccountResult in
-                                            return .authorized(Account(accountManager: accountManager, id: id, basePath: path, testingEnvironment: authorizedState.isTestingEnvironment, postbox: postbox, network: network, networkArguments: networkArguments, peerId: authorizedState.peerId, auxiliaryMethods: auxiliaryMethods, supplementary: supplementary))
+                                            return .authorized(Account(accountManager: accountManager, id: id, basePath: path, testingEnvironment: authorizedState.isTestingEnvironment, postbox: postbox, network: network, networkArguments: networkArguments, peerId: authorizedState.peerId, auxiliaryMethods: auxiliaryMethods, supplementary: supplementary, isSupportUser: isSupportUser))
                                         }
                                     }
                                 case _:
@@ -268,9 +341,9 @@ public func accountWithId(accountManager: AccountManager<TelegramAccountManagerT
                             }
                         }
                         
-                        return initializedNetwork(accountId: id, arguments: networkArguments, supplementary: supplementary, datacenterId: 2, keychain: keychain, basePath: path, testingEnvironment: beginWithTestingEnvironment, languageCode: localizationSettings?.primaryComponent.languageCode, proxySettings: proxySettings, networkSettings: networkSettings, phoneNumber: nil, useRequestTimeoutTimers: useRequestTimeoutTimers)
+                        return initializedNetwork(accountId: id, arguments: networkArguments, supplementary: supplementary, datacenterId: 2, keychain: keychain, basePath: path, testingEnvironment: beginWithTestingEnvironment, languageCode: localizationSettings?.primaryComponent.languageCode, proxySettings: proxySettings, networkSettings: networkSettings, phoneNumber: nil, useRequestTimeoutTimers: useRequestTimeoutTimers, appConfiguration: appConfig)
                         |> map { network -> AccountResult in
-                            return .unauthorized(UnauthorizedAccount(networkArguments: networkArguments, id: id, rootPath: rootPath, basePath: path, testingEnvironment: beginWithTestingEnvironment, postbox: postbox, network: network, shouldKeepAutoConnection: shouldKeepAutoConnection))
+                            return .unauthorized(UnauthorizedAccount(accountManager: accountManager, networkArguments: networkArguments, id: id, rootPath: rootPath, basePath: path, testingEnvironment: beginWithTestingEnvironment, postbox: postbox, network: network, shouldKeepAutoConnection: shouldKeepAutoConnection))
                         }
                     }
                 }
@@ -403,12 +476,11 @@ public func dataWithHexString(_ string: String) -> Data {
         let subIndex = hex.index(hex.startIndex, offsetBy: 2)
         let c = String(hex[..<subIndex])
         hex = String(hex[subIndex...])
-        var ch: UInt32 = 0
-        if !Scanner(string: c).scanHexInt32(&ch) {
+
+        guard let byte = UInt8(c, radix: 16) else {
             return Data()
         }
-        var char = UInt8(ch)
-        data.append(&char, count: 1)
+        data.append(byte)
     }
     return data
 }
@@ -890,6 +962,15 @@ public func accountBackupData(postbox: Postbox) -> Signal<AccountBackupData?, No
     }
 }
 
+public enum NetworkSpeedLimitedEvent {
+    public enum DownloadSubject {
+        case message(MessageId)
+    }
+
+    case upload
+    case download(DownloadSubject)
+}
+
 public class Account {
     static let sharedQueue = Queue(name: "Account-Shared")
     
@@ -897,6 +978,7 @@ public class Account {
     public let basePath: String
     public let testingEnvironment: Bool
     public let supplementary: Bool
+    public let isSupportUser: Bool
     public let postbox: Postbox
     public let network: Network
     public let networkArguments: NetworkInitializationArguments
@@ -982,7 +1064,7 @@ public class Account {
     public let filteredStorySubscriptionsContext: StorySubscriptionsContext?
     public let hiddenStorySubscriptionsContext: StorySubscriptionsContext?
     
-    public init(accountManager: AccountManager<TelegramAccountManagerTypes>, id: AccountRecordId, basePath: String, testingEnvironment: Bool, postbox: Postbox, network: Network, networkArguments: NetworkInitializationArguments, peerId: PeerId, auxiliaryMethods: AccountAuxiliaryMethods, supplementary: Bool) {
+    public init(accountManager: AccountManager<TelegramAccountManagerTypes>, id: AccountRecordId, basePath: String, testingEnvironment: Bool, postbox: Postbox, network: Network, networkArguments: NetworkInitializationArguments, peerId: PeerId, auxiliaryMethods: AccountAuxiliaryMethods, supplementary: Bool, isSupportUser: Bool) {
         self.accountManager = accountManager
         self.id = id
         self.basePath = basePath
@@ -994,7 +1076,8 @@ public class Account {
         
         self.auxiliaryMethods = auxiliaryMethods
         self.supplementary = supplementary
-        
+        self.isSupportUser = isSupportUser
+
         self.networkStatsContext = NetworkStatsContext(postbox: postbox)
         
         self.peerInputActivityManager = PeerInputActivityManager()
@@ -1258,7 +1341,7 @@ public class Account {
                 }
             }
         }))
-        
+
         let _ = masterNotificationsKey(masterNotificationKeyValue: self.masterNotificationKey, postbox: self.postbox, ignoreDisabled: false, createIfNotExists: true).start(next: { key in
             let encoder = JSONEncoder()
             if let data = try? encoder.encode(key) {
@@ -1268,13 +1351,14 @@ public class Account {
         
         self.stateManager.updateConfigRequested = { [weak self] in
             self?.restartConfigurationUpdates()
+            self?.taskManager?.reloadAppConfiguration()
         }
         self.restartConfigurationUpdates()
         
         if !supplementary {
             self.automaticCacheEvictionContext = AutomaticCacheEvictionContext(postbox: postbox, accountManager: accountManager)
         }
-        
+
         /*#if DEBUG
         self.managedOperationsDisposable.add(debugFetchAllStickers(account: self).start(completed: {
             print("debugFetchAllStickers done")
@@ -1355,7 +1439,7 @@ public class Account {
         |> then(self.postbox.mediaBox.storageBox.optimizeStorage(minFreePagesFraction: minFreePagesFraction))
         |> then(self.postbox.mediaBox.cacheStorageBox.optimizeStorage(minFreePagesFraction: minFreePagesFraction))
     }
-    
+
     #if TEST_BUILD
     public func debugDumpAllDbStats() -> Signal<String, NoError> {
         return self.postbox.debugDumpDbStat()
@@ -1363,7 +1447,7 @@ public class Account {
         |> then (self.postbox.mediaBox.cacheStorageBox.debugDumpDbStat())
     }
     #endif
-    
+
     // to better hide accounts, we try to keep their database size smaller
     // oldest messages are removed from database, keeping only 1000 latest messages (250 for channels)
     // it is safe because messages can be redownloaded from cloud if needed (except secret chats)
@@ -1371,7 +1455,7 @@ public class Account {
         let postbox = self.postbox
         return combineLatest(self.postbox.transaction { transaction -> ([PeerId], [PeerId: PeerId]) in
             let allPeerIds = transaction.chatListGetAllPeerIds()
-            
+
             // sometimes group's cachedData.linkedDiscussionPeerId also contains its parent channel but for some reason this is not always the case
             var discussionGroupChannels: [PeerId: PeerId] = [:]
             for peerId in allPeerIds {
@@ -1390,15 +1474,15 @@ public class Account {
         }, self.postbox.getPeerIdsOfMessageHistoryViews())
         |> mapToSignal { tuple, currentlyViewedPeerIds in
             let (allPeerIds, discussionGroupChannels) = tuple
-            
+
             var signals: Signal<Never, NoError> = .complete()
-            
+
             for peerId in allPeerIds {
                 if peerId.namespace != Namespaces.Peer.SecretChat && !currentlyViewedPeerIds.contains(peerId) {
                     signals = signals |> then (
                         postbox.transaction { transaction in
                             var limit = 1000
-                            
+
                             if peerId.namespace == Namespaces.Peer.CloudChannel, let peer = transaction.getPeer(peerId) as? TelegramChannel {
                                 switch peer.info {
                                 case .broadcast:
@@ -1411,41 +1495,41 @@ public class Account {
                                     }
                                 }
                             }
-                            
+
                             let topIndices = transaction.topMessageIndices(peerId: peerId, namespace: Namespaces.Message.Cloud, limit: limit + 1)
-                            
+
                             assert(zip(topIndices, topIndices.dropFirst()).allSatisfy({ $0.id.id > $1.id.id }))
-                            
+
                             if topIndices.count > 0 {
                                 if transaction.getPeerChatListIndex(peerId) != nil || discussionGroupChannels[peerId].flatMap({ transaction.getPeerChatListIndex($0) }) != nil {
                                     if topIndices.count > limit {
                                         let allEarlierIndices = transaction.allEarlierMessageIndices(index: topIndices[limit - 1])
                                         // do not remove channel message with id == 1, because it is used to get its creation date
                                         var indicesToRemove = Set(peerId.namespace == Namespaces.Peer.CloudChannel && allEarlierIndices.last?.id.id == 1 ? allEarlierIndices.dropLast() : allEarlierIndices)
-                                        
+
                                         let everywhereHoleUpperId = topIndices[limit].id.id
-                                        
+
                                         let neverRemoveMessagesWithTags: [MessageTags] = [.unseenPersonalMessage, .unseenReaction]
-                                        
+
                                         var tagHoleRangesToRemove: [MessageTags: ClosedRange<MessageId.Id>] = [:]
-                                        
+
                                         for tag in MessageTags.all {
                                             // keep at least 100 messages for each tag, otherwise they are re-downloaded anyway
-                                            
+
                                             let perTagMessageQuota = 100
                                             let leaveAllMessages = neverRemoveMessagesWithTags.contains(tag)
-                                            
+
                                             let tagIndices = transaction.getMessageIndicesWithTag(peerId: peerId, threadId: nil, namespace: Namespaces.Message.Cloud, tag: tag, limit: leaveAllMessages ? 0 : perTagMessageQuota + 1)
-                                            
+
                                             indicesToRemove.subtract(leaveAllMessages || tagIndices.count <= perTagMessageQuota ? tagIndices : tagIndices.dropLast())
-                                            
+
                                             let tagRemoveHoleLowerId: MessageId.Id
                                             if leaveAllMessages || tagIndices.count <= perTagMessageQuota {
                                                 tagRemoveHoleLowerId = 1
                                             } else {
                                                 tagRemoveHoleLowerId = tagIndices.last!.id.id + 1
                                             }
-                                            
+
                                             if tagRemoveHoleLowerId <= everywhereHoleUpperId {
                                                 var range = tagRemoveHoleLowerId ... everywhereHoleUpperId
                                                 let holes = transaction.getHoles(peerId: peerId, namespace: Namespaces.Message.Cloud, space: .tag(tag))
@@ -1461,12 +1545,12 @@ public class Account {
                                                 }
                                             }
                                         }
-                                        
+
                                         if !indicesToRemove.isEmpty {
                                             transaction.deleteMessages(indicesToRemove.map { $0.id }, forEachMedia: nil)
-                                            
+
                                             transaction.addHole(peerId: peerId, threadId: nil, namespace: Namespaces.Message.Cloud, space: .everywhere, range: 1 ... everywhereHoleUpperId)
-                                            
+
                                             for (tag, range) in tagHoleRangesToRemove {
                                                 transaction.removeHole(peerId: peerId, threadId: nil, namespace: Namespaces.Message.Cloud, space: .tag(tag), range: range)
                                             }
@@ -1474,17 +1558,17 @@ public class Account {
                                     }
                                 } else {
                                     // chat is not in the chat list, including channels from which ads are shown
-                                    
+
                                     let minTimestamp = Int32(Date().timeIntervalSince1970) - 7 * 24 * 60 * 60
-                                    
+
                                     let index = topIndices.filter({ $0.timestamp >= minTimestamp }).last ?? topIndices.first!.peerLocalSuccessor()
                                     let indicesToRemove = transaction.allEarlierMessageIndices(index: index)
-                                    
+
                                     if !indicesToRemove.isEmpty {
                                         transaction.deleteMessages(indicesToRemove.map { $0.id }, forEachMedia: nil)
-                                        
+
                                         let holeUpperId = indicesToRemove.first!.id.id
-                                        
+
                                         transaction.addHole(peerId: peerId, threadId: nil, namespace: Namespaces.Message.Cloud, space: .everywhere, range: 1 ... holeUpperId)
                                     }
                                 }
@@ -1494,11 +1578,11 @@ public class Account {
                     )
                 }
             }
-            
+
             return signals
         }
     }
-    
+
     public func cleanAllCloudMessages() -> Signal<Never, NoError> {
         let postbox = self.postbox
         return self.postbox.transaction { transaction in
@@ -1506,66 +1590,66 @@ public class Account {
         }
         |> mapToSignal { allPeerIds in
             var signals: Signal<Never, NoError> = .complete()
-            
+
             for peerId in allPeerIds {
                 if peerId.namespace != Namespaces.Peer.SecretChat {
                     signals = signals |> then (
                         postbox.transaction { transaction in
                             transaction.deleteMessagesInRange(peerId: peerId, namespace: Namespaces.Message.Cloud, minId: 1, maxId: Int32.max - 1, forEachMedia: nil)
-                            
+
                             transaction.addHole(peerId: peerId, threadId: nil, namespace: Namespaces.Message.Cloud, space: .everywhere, range: 1 ... Int32.max - 1)
                         }
                         |> ignoreValues
                     )
                 }
             }
-            
+
             return signals
         }
     }
-    
+
     #if TEST_BUILD
     public func debugChatMessagesStat() -> Signal<String, NoError> {
         return self.postbox.transaction { transaction in
             let peerIds = transaction.chatListGetAllPeerIds()
-            
+
             var counts: [PeerId: Int] = [:]
             for peerId in peerIds {
                 if let cnt = transaction.getMessageCount(peerId: peerId, namespace: Namespaces.Message.Cloud, tag: nil, fromId: 1, toId: Int32.max - 1) {
                     counts[peerId] = cnt
                 }
             }
-            
+
             var result = ""
-            
+
             for (peerId, cnt) in counts.sorted(by: { $0.value > $1.value }) {
                 let peerName = transaction.getPeer(peerId)?.debugDisplayTitle ?? "?"
-                
+
                 result += "\(peerName): \(cnt) messages\n"
-                
+
                 let holes = transaction.getHoles(peerId: peerId, namespace: Namespaces.Message.Cloud)
                 for hole in holes.rangeView {
                     result += "    everywhere hole: \(hole)\n"
                 }
-                
+
                 for tag in MessageTags.all {
                     if let cnt = transaction.getMessageCount(peerId: peerId, namespace: Namespaces.Message.Cloud, tag: tag, fromId: 1, toId: Int32.max - 1), cnt != 0 {
                         result += "    tag\(tag.rawValue): \(cnt) messages\n"
                     }
-                    
+
                     let holes = transaction.getHoles(peerId: peerId, namespace: Namespaces.Message.Cloud, space: .tag(tag))
-                    
+
                     for hole in holes.rangeView {
                         result += "    tag\(tag.rawValue) hole: \(hole)\n"
                     }
                 }
             }
-            
+
             return result
         }
     }
     #endif
-    
+
     public func restartContactManagement() {
         self.contactSyncManager.beginSync(importableContacts: self.importableContacts.get())
     }
@@ -1744,7 +1828,8 @@ public func standaloneStateManager(
                                     proxySettings: proxySettings,
                                     networkSettings: networkSettings,
                                     phoneNumber: phoneNumber,
-                                    useRequestTimeoutTimers: false
+                                    useRequestTimeoutTimers: false,
+                                    appConfiguration: .defaultValue
                                 )
                                 |> map { network -> AccountStateManager? in
                                     Logger.shared.log("StandaloneStateManager", "received network")

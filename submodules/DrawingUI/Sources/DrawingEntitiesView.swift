@@ -28,6 +28,10 @@ private func makeEntityView(context: AccountContext, entity: DrawingEntity) -> D
         return DrawingMediaEntityView(context: context, entity: entity)
     } else if let entity = entity as? DrawingLocationEntity {
         return DrawingLocationEntityView(context: context, entity: entity)
+    } else if let entity = entity as? DrawingLinkEntity {
+        return DrawingLinkEntityView(context: context, entity: entity)
+    } else if let entity = entity as? DrawingWeatherEntity {
+        return DrawingWeatherEntityView(context: context, entity: entity)
     } else {
         return nil
     }
@@ -54,12 +58,19 @@ private func prepareForRendering(entityView: DrawingEntityView) {
     if let entityView = entityView as? DrawingLocationEntityView {
         entityView.entity.renderImage = entityView.getRenderImage()
     }
+    if let entityView = entityView as? DrawingLinkEntityView {
+        entityView.entity.renderImage = entityView.getRenderImage()
+    }
+    if let entityView = entityView as? DrawingWeatherEntityView {
+        entityView.entity.renderImage = entityView.getRenderImage()
+    }
 }
 
 public final class DrawingEntitiesView: UIView, TGPhotoDrawingEntitiesView {
     private let context: AccountContext
     private let size: CGSize
     private let hasBin: Bool
+    public let isStickerEditor: Bool
     
     weak var drawingView: DrawingView?
     public weak var selectionContainerView: DrawingSelectionContainerView?
@@ -95,16 +106,18 @@ public final class DrawingEntitiesView: UIView, TGPhotoDrawingEntitiesView {
     private let yAxisView = UIView()
     private let angleLayer = SimpleShapeLayer()
     private let bin = ComponentView<Empty>()
-    
+
     public var onInteractionUpdated: (Bool) -> Void = { _ in }
     public var edgePreviewUpdated: (Bool) -> Void = { _ in }
+    public var onTextEditingEnded: (Bool) -> Void = { _ in }
     
     private let hapticFeedback = HapticFeedback()
     
-    public init(context: AccountContext, size: CGSize, hasBin: Bool = false) {
+    public init(context: AccountContext, size: CGSize, hasBin: Bool = false, isStickerEditor: Bool = false) {
         self.context = context
         self.size = size
         self.hasBin = hasBin
+        self.isStickerEditor = isStickerEditor
                 
         super.init(frame: CGRect(origin: .zero, size: size))
                 
@@ -152,6 +165,12 @@ public final class DrawingEntitiesView: UIView, TGPhotoDrawingEntitiesView {
     
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+    
+    deinit {
+        self.eachView { entityView in
+            entityView.reset()
+        }
     }
     
     public override func layoutSubviews() {
@@ -376,6 +395,22 @@ public final class DrawingEntitiesView: UIView, TGPhotoDrawingEntitiesView {
                 location.width = floor(self.size.width * 0.85)
                 location.scale = zoomScale
             }
+        } else if let location = entity as? DrawingLinkEntity {
+            location.position = center
+            if setup {
+                location.rotation = rotation
+                location.referenceDrawingSize = self.size
+                location.width = floor(self.size.width * 0.85)
+                location.scale = zoomScale
+            }
+        } else if let weather = entity as? DrawingWeatherEntity {
+            weather.position = center
+            if setup {
+                weather.rotation = rotation
+                weather.referenceDrawingSize = self.size
+                weather.width = floor(self.size.width * 0.85)
+                weather.scale = zoomScale
+            }
         }
     }
     
@@ -499,6 +534,7 @@ public final class DrawingEntitiesView: UIView, TGPhotoDrawingEntitiesView {
                 self.hasSelectionChanged(false)
                 view.selectionView?.removeFromSuperview()
             }
+            view.reset()
             if animated {
                 view.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.2, removeOnCompletion: false, completion: { [weak view] _ in
                     view?.removeFromSuperview()
@@ -531,12 +567,21 @@ public final class DrawingEntitiesView: UIView, TGPhotoDrawingEntitiesView {
         self.hasSelectionChanged(false)
     }
     
+    public func clearAll() {
+        for case let view as DrawingEntityView in self.subviews {
+            view.reset()
+            view.selectionView?.removeFromSuperview()
+            view.removeFromSuperview()
+        }
+    }
+    
     private func clear(animated: Bool = false) {
         if animated {
             for case let view as DrawingEntityView in self.subviews {
                 if view.entity.isMedia {
                     continue
                 }
+                view.reset()
                 if let selectionView = view.selectionView {
                     selectionView.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.1, removeOnCompletion: false, completion: { [weak selectionView] _ in
                         selectionView?.removeFromSuperview()
@@ -555,6 +600,7 @@ public final class DrawingEntitiesView: UIView, TGPhotoDrawingEntitiesView {
                 if view.entity.isMedia {
                     continue
                 }
+                view.reset()
                 view.selectionView?.removeFromSuperview()
                 view.removeFromSuperview()
             }
@@ -773,6 +819,8 @@ public final class DrawingEntitiesView: UIView, TGPhotoDrawingEntitiesView {
                 selectionView.handlePan(gestureRecognizer)
             } else if let stickerEntity = selectedEntityView.entity as? DrawingStickerEntity, case .message = stickerEntity.content {
                 selectionView.handlePan(gestureRecognizer)
+            } else if let stickerEntity = selectedEntityView.entity as? DrawingStickerEntity, case .gift = stickerEntity.content {
+                selectionView.handlePan(gestureRecognizer)
             } else {
                 var isTrappedInBin = false
                 let scale = 100.0 / selectedEntityView.bounds.size.width
@@ -800,7 +848,7 @@ public final class DrawingEntitiesView: UIView, TGPhotoDrawingEntitiesView {
                     break
                 }
                 
-                let transition = Transition.easeInOut(duration: 0.2)
+                let transition = ComponentTransition.easeInOut(duration: 0.2)
                 if isTrappedInBin, let binView = self.bin.view {
                     if !selectedEntityView.isTrappedInBin {
                         let refs = [
@@ -841,7 +889,7 @@ public final class DrawingEntitiesView: UIView, TGPhotoDrawingEntitiesView {
         } else if self.autoSelectEntities, gestureRecognizer.numberOfTouches == 1, let viewToSelect = self.entity(at: location) {
             self.selectEntity(viewToSelect.entity, animate: false)
             self.onInteractionUpdated(true)
-        } else if gestureRecognizer.numberOfTouches == 2, let mediaEntityView = self.subviews.first(where: { $0 is DrawingEntityMediaView }) as? DrawingEntityMediaView {
+        } else if gestureRecognizer.numberOfTouches == 2 || (self.isStickerEditor && self.autoSelectEntities), let mediaEntityView = self.subviews.first(where: { $0 is DrawingEntityMediaView }) as? DrawingEntityMediaView {
             mediaEntityView.handlePan(gestureRecognizer)
         }
     }
@@ -897,7 +945,7 @@ public final class DrawingEntitiesView: UIView, TGPhotoDrawingEntitiesView {
                 self.bringSubviewToFront(binView)
             }
             binView.frame = binFrame
-            Transition.easeInOut(duration: 0.2).setAlpha(view: binView, alpha: location != nil ? 1.0 : 0.0, delay: location == nil && wasOpened ? 0.4 : 0.0)
+            ComponentTransition.easeInOut(duration: 0.2).setAlpha(view: binView, alpha: location != nil ? 1.0 : 0.0, delay: location == nil && wasOpened ? 0.4 : 0.0)
         }
         return isOpened
     }
@@ -942,6 +990,12 @@ public class DrawingEntityView: UIView {
     
     var selectionBounds: CGRect {
         return self.bounds
+    }
+    
+    func reset() {
+        self.onSnapUpdated = { _, _ in }
+        self.onPositionUpdated = { _ in }
+        self.onInteractionUpdated = { _ in }
     }
     
     func animateInsertion() {
@@ -1159,7 +1213,7 @@ private final class EntityBinComponent: Component {
         }
         
         private var wasOpened = false
-        func update(component: EntityBinComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+        func update(component: EntityBinComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
             self.component = component
             self.state = state
             
@@ -1204,7 +1258,7 @@ private final class EntityBinComponent: Component {
         return View()
     }
     
-    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
 }

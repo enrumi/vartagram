@@ -1,10 +1,13 @@
 import Foundation
+import AVFAudio
 import UIKit
 import SwiftSignalKit
 import Postbox
 import TelegramCore
 import TelegramCallsUI
 import AccountContext
+import UniversalMediaPlayer
+import TelegramAudio
 
 private struct AccountTasks {
     let stateSynchronization: Bool
@@ -68,12 +71,13 @@ public final class SharedWakeupManager {
     
     private var managedPausedInBackgroundPlayer: Disposable?
     private var keepIdleDisposable: Disposable?
-    
+    private var silenceAudioRenderer: MediaPlayerAudioRenderer?
+
     private var accountsAndTasks: [(Account, Bool, AccountTasks)] = []
     
     private var activeBGTaskSchedulerTasks: Set<String> = []
     private let accountManager: AccountManager<TelegramAccountManagerTypes>
-    
+
     public init(beginBackgroundTask: @escaping (String, @escaping () -> Void) -> UIBackgroundTaskIdentifier?, endBackgroundTask: @escaping (UIBackgroundTaskIdentifier) -> Void, backgroundTimeRemaining: @escaping () -> Double, acquireIdleExtension: @escaping () -> Disposable?, activeAccounts: Signal<(primary: Account?, accounts: [(AccountRecordId, Account)]), NoError>, liveLocationPolling: Signal<AccountRecordId?, NoError>, watchTasks: Signal<AccountRecordId?, NoError>, inForeground: Signal<Bool, NoError>, hasActiveAudioSession: Signal<Bool, NoError>, notificationManager: SharedNotificationManager?, mediaManager: MediaManager, callManager: PresentationCallManager?, accountUserInterfaceInUse: @escaping (AccountRecordId) -> Signal<Bool, NoError>, accountManager: AccountManager<TelegramAccountManagerTypes>) {
         assert(Queue.mainQueue().isCurrent())
         
@@ -83,7 +87,7 @@ public final class SharedWakeupManager {
         self.acquireIdleExtension = acquireIdleExtension
         
         self.accountManager = accountManager
-        
+
         self.inForegroundDisposable = (inForeground
         |> deliverOnMainQueue).startStrict(next: { [weak self] value in
             guard let strongSelf = self else {
@@ -147,8 +151,22 @@ public final class SharedWakeupManager {
                 |> distinctUntilChanged
                 
                 let hasActiveGroupCalls = (callManager?.currentGroupCallSignal ?? .single(nil))
-                |> map { call in
-                    return call?.accountContext.account.id == account.id
+                |> map { call -> Bool in
+                    guard let call else {
+                        return false
+                    }
+                    switch call {
+                    case let .conferenceSource(conferenceSource):
+                        return conferenceSource.context.account.id == account.id
+                    case let .group(groupCall):
+                        return groupCall.accountContext.account.id == account.id
+                    }
+                }
+                |> distinctUntilChanged
+
+                let keepUpdatesForCalls = combineLatest(queue: .mainQueue(), hasActiveCalls, hasActiveGroupCalls)
+                |> map { hasActiveCalls, hasActiveGroupCalls -> Bool in
+                    return hasActiveCalls || hasActiveGroupCalls
                 }
                 |> distinctUntilChanged
                 
@@ -178,9 +196,9 @@ public final class SharedWakeupManager {
                 
                 let userInterfaceInUse = accountUserInterfaceInUse(account.id)
                 
-                return combineLatest(queue: .mainQueue(), account.importantTasksRunning, notificationManager?.isPollingState(accountId: account.id) ?? .single(false), hasActiveAudio, hasActiveCalls, hasActiveLiveLocationPolling, hasWatchTasks, userInterfaceInUse)
-                |> map { importantTasksRunning, isPollingState, hasActiveAudio, hasActiveCalls, hasActiveLiveLocationPolling, hasWatchTasks, userInterfaceInUse -> (Account, Bool, AccountTasks) in
-                    return (account, primary?.id == account.id, AccountTasks(stateSynchronization: isPollingState, importantTasks: importantTasksRunning, backgroundLocation: hasActiveLiveLocationPolling, backgroundDownloads: false, backgroundAudio: hasActiveAudio, activeCalls: hasActiveCalls, watchTasks: hasWatchTasks, userInterfaceInUse: userInterfaceInUse))
+                return combineLatest(queue: .mainQueue(), account.importantTasksRunning, notificationManager?.isPollingState(accountId: account.id) ?? .single(false), hasActiveAudio, keepUpdatesForCalls, hasActiveLiveLocationPolling, hasWatchTasks, userInterfaceInUse)
+                |> map { importantTasksRunning, isPollingState, hasActiveAudio, keepUpdatesForCalls, hasActiveLiveLocationPolling, hasWatchTasks, userInterfaceInUse -> (Account, Bool, AccountTasks) in
+                    return (account, primary?.id == account.id, AccountTasks(stateSynchronization: isPollingState, importantTasks: importantTasksRunning, backgroundLocation: hasActiveLiveLocationPolling, backgroundDownloads: false, backgroundAudio: hasActiveAudio, activeCalls: keepUpdatesForCalls, watchTasks: hasWatchTasks, userInterfaceInUse: userInterfaceInUse))
                 }
             }
             return combineLatest(signals)
@@ -429,15 +447,47 @@ public final class SharedWakeupManager {
                 keepIdleDisposable.dispose()
             }
         }
+
+        if !self.inForeground && hasPendingMessages && !self.hasActiveAudioSession {
+            if self.silenceAudioRenderer == nil {
+                let audioSession = AVAudioSession()
+                let _ = try? audioSession.setCategory(.ambient)
+                let _ = try? audioSession.setMode(.default)
+                let silenceAudioRenderer = MediaPlayerAudioRenderer(
+                    audioSession: .custom({ control in
+                        let _ = try? audioSession.setActive(true)
+                        control.activate()
+
+                        return EmptyDisposable
+                    }),
+                    forAudioVideoMessage: false,
+                    playAndRecord: false,
+                    useVoiceProcessingMode: false,
+                    soundMuted: false,
+                    ambient: true,
+                    mixWithOthers: true,
+                    forceAudioToSpeaker: false,
+                    baseRate: 1.0,
+                    audioLevelPipe: ValuePipe(),
+                    updatedRate: {},
+                    audioPaused: {}
+                )
+                self.silenceAudioRenderer = silenceAudioRenderer
+                silenceAudioRenderer.start()
+            }
+        } else if let silenceAudioRenderer = self.silenceAudioRenderer {
+            self.silenceAudioRenderer = nil
+            silenceAudioRenderer.stop()
+        }
     }
     
     private func updateAccounts(hasTasks: Bool, endTaskAfterTransactionsComplete: UIBackgroundTaskIdentifier?) {
-        if self.inForeground || self.hasActiveAudioSession || self.isInBackgroundExtension || (hasTasks && self.currentExternalCompletion != nil) || self.activeExplicitExtensionTimer != nil || !self.activeBGTaskSchedulerTasks.isEmpty {
+        if self.inForeground || self.hasActiveAudioSession || self.isInBackgroundExtension || (hasTasks && self.currentExternalCompletion != nil) || self.activeExplicitExtensionTimer != nil || !self.activeBGTaskSchedulerTasks.isEmpty || self.silenceAudioRenderer != nil {
             Logger.shared.log("Wakeup", "enableBeginTransactions: true (active)")
 #if TEST_BUILD
             Logger.shared.log("Wakeup", "inForeground: \(self.inForeground), hasActiveAudioSession: \(self.hasActiveAudioSession), isInBackgroundExtension: \(self.isInBackgroundExtension), hasTasks: \(hasTasks), currentExternalCompletion != nil: \(self.currentExternalCompletion != nil), activeExplicitExtensionTimer != nil: \(self.activeExplicitExtensionTimer != nil), !activeBGTaskSchedulerTasks.isEmpty: \(!self.activeBGTaskSchedulerTasks.isEmpty)")
 #endif
-            
+
             self.accountManager.setCanBeginTransactions(true)
             for (account, primary, tasks) in self.accountsAndTasks {
                 account.postbox.setCanBeginTransactions(true)
@@ -466,7 +516,7 @@ public final class SharedWakeupManager {
                 var isCompleted: Bool = false
                 var remainingAccounts: [AccountRecordId]
                 var accountManagerCompleted: Bool = false
-                
+
                 init(remainingAccounts: [AccountRecordId]) {
                     self.remainingAccounts = remainingAccounts
                 }
@@ -505,18 +555,18 @@ public final class SharedWakeupManager {
             self.accountManager.setCanBeginTransactions(enableBeginTransactions, afterTransactionIfRunning: {
                 checkCompletionState(nil, true)
             })
-            
+
             checkCompletionState(nil, false)
         }
     }
-    
+
     func bgTaskSchedulerTaskBegan(_ taskId: String) {
         Queue.mainQueue().async {
             self.activeBGTaskSchedulerTasks.insert(taskId)
             self.checkTasks()
         }
     }
-    
+
     func bgTaskSchedulerTaskEnded(_ taskId: String) {
         Queue.mainQueue().async {
             self.activeBGTaskSchedulerTasks.remove(taskId)

@@ -9,6 +9,7 @@ import ProgressNavigationButtonNode
 import AccountContext
 import SearchUI
 import ChatListUI
+import CounterControllerTitleView
 
 public final class PeerSelectionControllerImpl: ViewController, PeerSelectionController {
     private let context: AccountContext
@@ -19,12 +20,12 @@ public final class PeerSelectionControllerImpl: ViewController, PeerSelectionCon
     private var customTitle: String?
     
     public var peerSelected: ((EnginePeer, Int64?) -> Void)?
-    public var multiplePeersSelected: (([EnginePeer], [EnginePeer.Id: EnginePeer], NSAttributedString, AttachmentTextInputPanelSendMode, ChatInterfaceForwardOptionsState?) -> Void)?
+    public var multiplePeersSelected: (([EnginePeer], [EnginePeer.Id: EnginePeer], NSAttributedString, AttachmentTextInputPanelSendMode, ChatInterfaceForwardOptionsState?, ChatSendMessageActionSheetController.SendParameters?) -> Void)?
     private let filter: ChatListNodePeersFilter
-    private let forumPeerId: EnginePeer.Id?
+    private let forumPeerId: (id: EnginePeer.Id, isMonoforum: Bool)?
     private let selectForumThreads: Bool
     
-    private let attemptSelection: ((EnginePeer, Int64?) -> Void)?
+    private let attemptSelection: ((EnginePeer, Int64?, ChatListDisabledPeerReason) -> Void)?
     private let createNewGroup: (() -> Void)?
     
     public var inProgress: Bool = false {
@@ -64,7 +65,9 @@ public final class PeerSelectionControllerImpl: ViewController, PeerSelectionCon
     private let forwardedMessageIds: [EngineMessage.Id]
     private let hasTypeHeaders: Bool
     private let requestPeerType: [ReplyMarkupButtonRequestPeerType]?
+    let multipleSelectionLimit: Int32?
     private let hasCreation: Bool
+    let immediatelyActivateMultipleSelection: Bool
     
     override public var _presentedInModal: Bool {
         get {
@@ -80,6 +83,7 @@ public final class PeerSelectionControllerImpl: ViewController, PeerSelectionCon
         }
     }
     
+    private(set) var titleView: CounterControllerTitleView?
     private var searchContentNode: NavigationBarSearchContentNode?
     var tabContainerNode: ChatListFilterTabContainerNode?
     private var tabContainerData: ([ChatListFilterTabEntry], Bool, Int32?)?
@@ -105,6 +109,8 @@ public final class PeerSelectionControllerImpl: ViewController, PeerSelectionCon
         self.selectForumThreads = params.selectForumThreads
         self.requestPeerType = params.requestPeerType
         self.hasCreation = params.hasCreation
+        self.immediatelyActivateMultipleSelection = params.immediatelyActivateMultipleSelection
+        self.multipleSelectionLimit = params.multipleSelectionLimit
         
         super.init(navigationBarPresentationData: NavigationBarPresentationData(presentationData: self.presentationData))
         
@@ -131,7 +137,13 @@ public final class PeerSelectionControllerImpl: ViewController, PeerSelectionCon
             }
         }
         
-        self.title = self.customTitle ?? self.presentationData.strings.Conversation_ForwardTitle
+        if let maxCount = params.multipleSelectionLimit {
+            self.titleView = CounterControllerTitleView(theme: self.presentationData.theme)
+            self.titleView?.title = CounterControllerTitle(title: self.customTitle ?? self.presentationData.strings.Conversation_ForwardTitle, counter: "0/\(maxCount)")
+            self.navigationItem.titleView = self.titleView
+        } else {
+            self.title = self.customTitle ?? self.presentationData.strings.Conversation_ForwardTitle
+        }
         
         if params.forumPeerId == nil {
             self.navigationPresentation = .modal
@@ -167,14 +179,18 @@ public final class PeerSelectionControllerImpl: ViewController, PeerSelectionCon
         })
         self.navigationBar?.setContentNode(self.searchContentNode, animated: false)
         
-        if params.multipleSelection {
+        if params.immediatelyActivateMultipleSelection {
+            Queue.mainQueue().after(0.1) {
+                self.beginSelection()
+            }
+        } else if params.multipleSelection {
             self.navigationItem.rightBarButtonItem = UIBarButtonItem(title: self.presentationData.strings.Common_Select, style: .plain, target: self, action: #selector(self.beginSelection))
         }
         
         if params.hasFilters {
             self._ready.set(.never())
             
-            self.tabContainerNode = ChatListFilterTabContainerNode()
+            self.tabContainerNode = ChatListFilterTabContainerNode(context: self.context)
             self.reloadFilters()
             
             self.peerSelectionNode.mainContainerNode?.currentItemFilterUpdated = { [weak self] filter, fraction, transition, force in
@@ -246,8 +262,8 @@ public final class PeerSelectionControllerImpl: ViewController, PeerSelectionCon
         
         self.peerSelectionNode.navigationBar = self.navigationBar
         
-        self.peerSelectionNode.requestSend = { [weak self] peers, peerMap, text, mode, forwardOptionsState in
-            self?.multiplePeersSelected?(peers, peerMap, text, mode, forwardOptionsState)
+        self.peerSelectionNode.requestSend = { [weak self] peers, peerMap, text, mode, forwardOptionsState, messageEffect in
+            self?.multiplePeersSelected?(peers, peerMap, text, mode, forwardOptionsState, messageEffect)
         }
         
         self.peerSelectionNode.requestDeactivateSearch = { [weak self] in
@@ -259,39 +275,68 @@ public final class PeerSelectionControllerImpl: ViewController, PeerSelectionCon
         }
         
         self.peerSelectionNode.requestOpenPeer = { [weak self] peer, threadId in
-            if let strongSelf = self, let peerSelected = strongSelf.peerSelected {
-                if case let .channel(peer) = peer, peer.flags.contains(.isForum), threadId == nil, strongSelf.selectForumThreads {
-                    let controller = PeerSelectionControllerImpl(
-                        PeerSelectionControllerParams(
-                            context: strongSelf.context,
-                            updatedPresentationData: nil,
-                            filter: strongSelf.filter,
-                            forumPeerId: peer.id,
-                            hasFilters: false,
-                            hasChatListSelector: false,
-                            hasContactSelector: false,
-                            hasGlobalSearch: false,
-                            title: EnginePeer(peer).compactDisplayTitle,
-                            attemptSelection: strongSelf.attemptSelection,
-                            createNewGroup: nil,
-                            pretendPresentedInModal: false,
-                            multipleSelection: false,
-                            forwardedMessageIds: [],
-                            hasTypeHeaders: false,
-                            selectForumThreads: false
-                        )
+            guard let self else {
+                return
+            }
+            guard let peerSelected = self.peerSelected else {
+                return
+            }
+            
+            if case let .channel(peer) = peer, peer.isForumOrMonoForum, threadId == nil, self.selectForumThreads {
+                let mainPeer: Signal<EnginePeer?, NoError>
+                if peer.isMonoForum, let linkedMonoforumId = peer.linkedMonoforumId {
+                    mainPeer = self.context.engine.data.get(
+                        TelegramEngine.EngineData.Item.Peer.Peer(id: linkedMonoforumId)
                     )
-                    controller.peerSelected = strongSelf.peerSelected
-                    strongSelf.push(controller)
                 } else {
-                    peerSelected(peer, threadId)
+                    mainPeer = .single(EnginePeer.channel(peer))
                 }
+                
+                let _ = (mainPeer |> deliverOnMainQueue).startStandalone(next: { [weak self] mainPeer in
+                    guard let self else {
+                        return
+                    }
+                    guard case let .channel(mainChannel) = mainPeer else {
+                        return
+                    }
+                    
+                    if mainChannel.hasPermission(.manageDirect) {
+                        let displayPeer = EnginePeer(mainChannel)
+                        
+                        let controller = PeerSelectionControllerImpl(
+                            PeerSelectionControllerParams(
+                                context: self.context,
+                                updatedPresentationData: nil,
+                                filter: self.filter,
+                                forumPeerId: (peer.id, peer.isMonoForum),
+                                hasFilters: false,
+                                hasChatListSelector: false,
+                                hasContactSelector: false,
+                                hasGlobalSearch: false,
+                                title: displayPeer.compactDisplayTitle,
+                                attemptSelection: self.attemptSelection,
+                                createNewGroup: nil,
+                                pretendPresentedInModal: false,
+                                multipleSelection: false,
+                                forwardedMessageIds: [],
+                                hasTypeHeaders: false,
+                                selectForumThreads: false
+                            )
+                        )
+                        controller.peerSelected = self.peerSelected
+                        self.push(controller)
+                    } else {
+                        peerSelected(.channel(peer), threadId)
+                    }
+                })
+            } else {
+                peerSelected(peer, threadId)
             }
         }
         
-        self.peerSelectionNode.requestOpenDisabledPeer = { [weak self] peer, threadId in
+        self.peerSelectionNode.requestOpenDisabledPeer = { [weak self] peer, threadId, reason in
             if let strongSelf = self {
-                strongSelf.attemptSelection?(peer, threadId)
+                strongSelf.attemptSelection?(peer, threadId, reason)
             }
         }
         
@@ -300,13 +345,13 @@ public final class PeerSelectionControllerImpl: ViewController, PeerSelectionCon
                 strongSelf.openMessageFromSearchDisposable.set((_internal_storedMessageFromSearchPeer(postbox: strongSelf.context.account.postbox, peer: peer._asPeer())
                 |> deliverOnMainQueue).start(completed: { [weak strongSelf] in
                     if let strongSelf = strongSelf, let peerSelected = strongSelf.peerSelected {
-                        if case let .channel(peer) = peer, peer.flags.contains(.isForum), threadId == nil, strongSelf.selectForumThreads {
+                        if case let .channel(peer) = peer, peer.isForumOrMonoForum, threadId == nil, strongSelf.selectForumThreads {
                             let controller = PeerSelectionControllerImpl(
                                 PeerSelectionControllerParams(
                                     context: strongSelf.context,
                                     updatedPresentationData: nil,
                                     filter: strongSelf.filter,
-                                    forumPeerId: peer.id,
+                                    forumPeerId: (peer.id, peer.isMonoForum),
                                     hasFilters: false,
                                     hasChatListSelector: false,
                                     hasContactSelector: false,

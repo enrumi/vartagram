@@ -13,7 +13,7 @@ import Photos
 import LegacyComponents
 import AttachmentUI
 import ItemListUI
-import CameraScreen
+import MediaAssetsContext
 
 private enum MediaGroupsEntry: Comparable, Identifiable {
     enum StableId: Hashable {
@@ -152,10 +152,15 @@ private func preparedTransition(from fromEntries: [MediaGroupsEntry], to toEntri
 public final class MediaGroupsScreen: ViewController, AttachmentContainable {
     public var requestAttachmentMenuExpansion: () -> Void = {}
     public var updateNavigationStack: (@escaping ([AttachmentContainable]) -> ([AttachmentContainable], AttachmentMediaPickerContext?)) -> Void = { _ in }
+    public var parentController: () -> ViewController? = {
+        return nil
+    }
     public var updateTabBarAlpha: (CGFloat, ContainedViewLayoutTransition) -> Void = { _, _ in }
+    public var updateTabBarVisibility: (Bool, ContainedViewLayoutTransition) -> Void = { _, _ in }
     public var cancelPanGesture: () -> Void = { }
     public var isContainerPanning: () -> Bool = { return false }
     public var isContainerExpanded: () -> Bool = { return false }
+    public var isMinimized: Bool = false
     
     public var mediaPickerContext: AttachmentMediaPickerContext? {
         return nil
@@ -465,7 +470,7 @@ public final class MediaGroupsScreen: ViewController, AttachmentContainable {
         } else {
             self.updateNavigationStack { current in
                 var mediaPickerContext: AttachmentMediaPickerContext?
-                if let first = current.first as? MediaPickerScreen {
+                if let first = current.first as? MediaPickerScreenImpl {
                     mediaPickerContext = first.webSearchController?.mediaPickerContext ?? first.mediaPickerContext
                 }
                 return (current.filter { $0 !== self }, mediaPickerContext)

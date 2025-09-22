@@ -10,6 +10,11 @@ import SolidRoundedButtonNode
 import AnimatedAvatarSetNode
 import ShimmerEffect
 import TelegramCore
+import Markdown
+import TextFormat
+import ComponentFlow
+import MultilineTextComponent
+import TextNodeWithEntities
 
 private func actionButtonImage(color: UIColor) -> UIImage? {
     return generateImage(CGSize(width: 24.0, height: 24.0), contextGenerator: { size, context in
@@ -32,7 +37,9 @@ public class ItemListPermanentInviteLinkItem: ListViewItem, ItemListItem {
     let count: Int32
     let peers: [EnginePeer]
     let displayButton: Bool
+    let separateButtons: Bool
     let displayImporters: Bool
+    let isCall: Bool
     let buttonColor: UIColor?
     public let sectionId: ItemListSectionId
     let style: ItemListStyle
@@ -40,6 +47,7 @@ public class ItemListPermanentInviteLinkItem: ListViewItem, ItemListItem {
     let shareAction: (() -> Void)?
     let contextAction: ((ASDisplayNode, ContextGesture?) -> Void)?
     let viewAction: (() -> Void)?
+    let openCallAction: (() -> Void)?
     public let tag: ItemListItemTag?
     
     public init(
@@ -49,7 +57,9 @@ public class ItemListPermanentInviteLinkItem: ListViewItem, ItemListItem {
         count: Int32,
         peers: [EnginePeer],
         displayButton: Bool,
+        separateButtons: Bool = false,
         displayImporters: Bool,
+        isCall: Bool = false,
         buttonColor: UIColor?,
         sectionId: ItemListSectionId,
         style: ItemListStyle,
@@ -57,6 +67,7 @@ public class ItemListPermanentInviteLinkItem: ListViewItem, ItemListItem {
         shareAction: (() -> Void)?,
         contextAction: ((ASDisplayNode, ContextGesture?) -> Void)?,
         viewAction: (() -> Void)?,
+        openCallAction: (() -> Void)?,
         tag: ItemListItemTag? = nil
     ) {
         self.context = context
@@ -65,7 +76,9 @@ public class ItemListPermanentInviteLinkItem: ListViewItem, ItemListItem {
         self.count = count
         self.peers = peers
         self.displayButton = displayButton
+        self.separateButtons = separateButtons
         self.displayImporters = displayImporters
+        self.isCall = isCall
         self.buttonColor = buttonColor
         self.sectionId = sectionId
         self.style = style
@@ -73,6 +86,7 @@ public class ItemListPermanentInviteLinkItem: ListViewItem, ItemListItem {
         self.shareAction = shareAction
         self.contextAction = contextAction
         self.viewAction = viewAction
+        self.openCallAction = openCallAction
         self.tag = tag
     }
     
@@ -126,6 +140,7 @@ public class ItemListPermanentInviteLinkItemNode: ListViewItemNode, ItemListItem
     private let addressButtonNode: HighlightTrackingButtonNode
     private let addressButtonIconNode: ASImageNode
     private var addressShimmerNode: ShimmerEffectNode?
+    private var copyButtonNode: SolidRoundedButtonNode?
     private var shareButtonNode: SolidRoundedButtonNode?
     
     private let avatarsButtonNode: HighlightTrackingButtonNode
@@ -135,6 +150,11 @@ public class ItemListPermanentInviteLinkItemNode: ListViewItemNode, ItemListItem
     private let invitedPeersNode: TextNode
     private var shimmerNode: ShimmerEffectNode?
     private var absoluteLocation: (CGRect, CGSize)?
+    
+    private var justCreatedCallTextNode: TextNodeWithEntities?
+    private var justCreatedCallLeftSeparatorLayer: SimpleLayer?
+    private var justCreatedCallRightSeparatorLayer: SimpleLayer?
+    private var justCreatedCallSeparatorText: ComponentView<Empty>?
     
     private let activateArea: AccessibilityAreaNode
     
@@ -234,6 +254,11 @@ public class ItemListPermanentInviteLinkItemNode: ListViewItemNode, ItemListItem
                 }
             }
         }
+        self.copyButtonNode?.pressed = { [weak self] in
+            if let strongSelf = self, let item = strongSelf.item {
+                item.copyAction?()
+            }
+        }
         self.shareButtonNode?.pressed = { [weak self] in
             if let strongSelf = self, let item = strongSelf.item {
                 item.shareAction?()
@@ -275,9 +300,16 @@ public class ItemListPermanentInviteLinkItemNode: ListViewItemNode, ItemListItem
         }
     }
     
+    @objc private func justCreatedCallTextTap(_ recognizer: UITapGestureRecognizer) {
+        if case .ended = recognizer.state {
+            self.item?.openCallAction?()
+        }
+    }
+    
     public func asyncLayout() -> (_ item: ItemListPermanentInviteLinkItem, _ params: ListViewItemLayoutParams, _ insets: ItemListNeighbors) -> (ListViewItemNodeLayout, () -> Void) {
         let makeAddressLayout = TextNode.asyncLayout(self.addressNode)
         let makeInvitedPeersLayout = TextNode.asyncLayout(self.invitedPeersNode)
+        let makeJustCreatedCallTextNodeLayout = TextNodeWithEntities.asyncLayout(self.justCreatedCallTextNode)
         
         let currentItem = self.item
         let avatarsContext = self.avatarsContext
@@ -321,14 +353,55 @@ public class ItemListPermanentInviteLinkItemNode: ListViewItemNode, ItemListItem
             
             let (invitedPeersLayout, invitedPeersApply) = makeInvitedPeersLayout(TextNodeLayoutArguments(attributedString: NSAttributedString(string: subtitle, font: titleFont, textColor: subtitleColor), backgroundColor: nil, maximumNumberOfLines: 1, truncationType: .end, constrainedSize: CGSize(width: params.width - params.rightInset - 20.0 - leftInset - rightInset, height: CGFloat.greatestFiniteMagnitude), alignment: .natural, cutout: nil, insets: UIEdgeInsets()))
             
+            var justCreatedCallTextNodeLayout: (TextNodeLayout, (TextNodeWithEntities.Arguments?) -> TextNodeWithEntities?)?
+            if item.isCall {
+                let chevronImage = generateTintedImage(image: UIImage(bundleImageName: "Contact List/SubtitleArrow"), color: item.presentationData.theme.list.itemAccentColor)
+
+                let textFont = Font.regular(15.0)
+                let boldTextFont = Font.semibold(15.0)
+                let textColor = item.presentationData.theme.list.itemPrimaryTextColor
+                let accentColor = item.presentationData.theme.list.itemAccentColor
+                let markdownAttributes = MarkdownAttributes(
+                    body: MarkdownAttributeSet(font: textFont, textColor: textColor),
+                    bold: MarkdownAttributeSet(font: boldTextFont, textColor: textColor),
+                    link: MarkdownAttributeSet(font: textFont, textColor: accentColor),
+                    linkAttribute: { contents in
+                        return (TelegramTextAttributes.URL, contents)
+                    }
+                )
+                let justCreatedCallTextAttributedString = parseMarkdownIntoAttributedString(item.presentationData.strings.InviteLink_CreatedGroupCallFooter, attributes: markdownAttributes).mutableCopy() as! NSMutableAttributedString
+                if let range = justCreatedCallTextAttributedString.string.range(of: ">"), let chevronImage {
+                    justCreatedCallTextAttributedString.addAttribute(.attachment, value: chevronImage, range: NSRange(range, in: justCreatedCallTextAttributedString.string))
+                }
+
+                justCreatedCallTextNodeLayout = makeJustCreatedCallTextNodeLayout(TextNodeLayoutArguments(
+                    attributedString: justCreatedCallTextAttributedString,
+                    backgroundColor: nil,
+                    maximumNumberOfLines: 0,
+                    truncationType: .end,
+                    constrainedSize: CGSize(width: params.width - params.rightInset - 20.0 - leftInset - rightInset, height: CGFloat.greatestFiniteMagnitude),
+                    alignment: .center,
+                    lineSpacing: 0.28,
+                    cutout: nil,
+                    insets: UIEdgeInsets()
+                ))
+            }
+            
             let avatarsContent = avatarsContext.update(peers: item.peers, animated: false)
             
             let verticalInset: CGFloat = 16.0
             let fieldHeight: CGFloat = 52.0
             let fieldSpacing: CGFloat = 16.0
             let buttonHeight: CGFloat = 50.0
+            let justCreatedCallSeparatorSpacing: CGFloat = 16.0
+            let justCreatedCallTextSpacing: CGFloat = 45.0
             
             var height = verticalInset * 2.0 + fieldHeight + fieldSpacing + buttonHeight + 54.0
+
+            if let justCreatedCallTextNodeLayout {
+                height += justCreatedCallTextSpacing - 2.0
+                height += justCreatedCallTextNodeLayout.0.size.height
+            }
             
             switch item.style {
             case .plain:
@@ -444,7 +517,31 @@ public class ItemListPermanentInviteLinkItemNode: ListViewItemNode, ItemListItem
                     
                     strongSelf.addressButtonNode.isHidden = item.contextAction == nil
                     strongSelf.addressButtonIconNode.isHidden = item.contextAction == nil
-                                        
+                      
+                    var effectiveSeparateButtons = item.separateButtons
+                    if let invite = item.invite, invitationAvailability(invite).isZero {
+                        effectiveSeparateButtons = false
+                    }
+                    
+                    let copyButtonNode: SolidRoundedButtonNode
+                    if let currentCopyButtonNode = strongSelf.copyButtonNode {
+                        copyButtonNode = currentCopyButtonNode
+                    } else {
+                        let buttonTheme: SolidRoundedButtonTheme
+                        if let buttonColor = item.buttonColor {
+                            buttonTheme = SolidRoundedButtonTheme(backgroundColor: buttonColor, foregroundColor: item.presentationData.theme.list.itemCheckColors.foregroundColor)
+                        } else {
+                            buttonTheme = SolidRoundedButtonTheme(theme: item.presentationData.theme)
+                        }
+                        copyButtonNode = SolidRoundedButtonNode(theme: buttonTheme, height: 50.0, cornerRadius: 11.0)
+                        copyButtonNode.title = item.presentationData.strings.InviteLink_CopyShort
+                        copyButtonNode.pressed = { [weak self] in
+                            self?.item?.copyAction?()
+                        }
+                        strongSelf.addSubnode(copyButtonNode)
+                        strongSelf.copyButtonNode = copyButtonNode
+                    }
+                    
                     let shareButtonNode: SolidRoundedButtonNode
                     if let currentShareButtonNode = strongSelf.shareButtonNode {
                         shareButtonNode = currentShareButtonNode
@@ -459,7 +556,7 @@ public class ItemListPermanentInviteLinkItemNode: ListViewItemNode, ItemListItem
                         if let invite = item.invite, invitationAvailability(invite).isZero {
                             shareButtonNode.title = item.presentationData.strings.InviteLink_ReactivateLink
                         } else {
-                            shareButtonNode.title = item.presentationData.strings.InviteLink_Share
+                            shareButtonNode.title = effectiveSeparateButtons ? item.presentationData.strings.InviteLink_ShareShort : item.presentationData.strings.InviteLink_Share
                         }
                         shareButtonNode.pressed = { [weak self] in
                             self?.item?.shareAction?()
@@ -468,9 +565,104 @@ public class ItemListPermanentInviteLinkItemNode: ListViewItemNode, ItemListItem
                         strongSelf.shareButtonNode = shareButtonNode
                     }
                     
-                    let buttonWidth = contentSize.width - leftInset - rightInset
+                    let buttonSpacing: CGFloat = 8.0
+                    var buttonWidth = contentSize.width - leftInset - rightInset
+                    var shareButtonOriginX = leftInset
+                    if effectiveSeparateButtons {
+                        buttonWidth = (buttonWidth - buttonSpacing) / 2.0
+                        shareButtonOriginX = leftInset + buttonWidth + buttonSpacing
+                    }
+                    
+                    let _ = copyButtonNode.updateLayout(width: buttonWidth, transition: .immediate)
+                    copyButtonNode.frame = CGRect(x: leftInset, y: verticalInset + fieldHeight + fieldSpacing, width: buttonWidth, height: buttonHeight)
+                    
                     let _ = shareButtonNode.updateLayout(width: buttonWidth, transition: .immediate)
-                    shareButtonNode.frame = CGRect(x: leftInset, y: verticalInset + fieldHeight + fieldSpacing, width: buttonWidth, height: buttonHeight)
+                    shareButtonNode.frame = CGRect(x: shareButtonOriginX, y: verticalInset + fieldHeight + fieldSpacing, width: buttonWidth, height: buttonHeight)
+
+                    if let justCreatedCallTextNodeLayout {
+                        if let justCreatedCallTextNode = justCreatedCallTextNodeLayout.1(TextNodeWithEntities.Arguments(
+                            context: item.context,
+                            cache: item.context.animationCache,
+                            renderer: item.context.animationRenderer,
+                            placeholderColor: .gray,
+                            attemptSynchronous: true
+                        )) {
+                            if strongSelf.justCreatedCallTextNode !== justCreatedCallTextNode {
+                                strongSelf.justCreatedCallTextNode?.textNode.removeFromSupernode()
+                                strongSelf.justCreatedCallTextNode = justCreatedCallTextNode
+                                
+                                strongSelf.addSubnode(justCreatedCallTextNode.textNode)
+                                
+                                justCreatedCallTextNode.textNode.view.addGestureRecognizer(UITapGestureRecognizer(target: strongSelf, action: #selector(strongSelf.justCreatedCallTextTap(_:))))
+                            }
+                            
+                            let justCreatedCallTextNodeFrame = CGRect(origin: CGPoint(x: floorToScreenPixels((params.width - justCreatedCallTextNodeLayout.0.size.width) / 2.0), y: shareButtonNode.frame.maxY + justCreatedCallTextSpacing), size: CGSize(width: justCreatedCallTextNodeLayout.0.size.width, height: justCreatedCallTextNodeLayout.0.size.height))
+                            justCreatedCallTextNode.textNode.frame = justCreatedCallTextNodeFrame
+
+                            let justCreatedCallSeparatorText: ComponentView<Empty>
+                            if let current = strongSelf.justCreatedCallSeparatorText {
+                                justCreatedCallSeparatorText = current
+                            } else {
+                                justCreatedCallSeparatorText = ComponentView()
+                                strongSelf.justCreatedCallSeparatorText = justCreatedCallSeparatorText
+                            }
+                            
+                            let justCreatedCallLeftSeparatorLayer: SimpleLayer
+                            if let current = strongSelf.justCreatedCallLeftSeparatorLayer {
+                                justCreatedCallLeftSeparatorLayer = current
+                            } else {
+                                justCreatedCallLeftSeparatorLayer = SimpleLayer()
+                                strongSelf.justCreatedCallLeftSeparatorLayer = justCreatedCallLeftSeparatorLayer
+                                strongSelf.layer.addSublayer(justCreatedCallLeftSeparatorLayer)
+                            }
+                            
+                            let justCreatedCallRightSeparatorLayer: SimpleLayer
+                            if let current = strongSelf.justCreatedCallRightSeparatorLayer {
+                                justCreatedCallRightSeparatorLayer = current
+                            } else {
+                                justCreatedCallRightSeparatorLayer = SimpleLayer()
+                                strongSelf.justCreatedCallRightSeparatorLayer = justCreatedCallRightSeparatorLayer
+                                strongSelf.layer.addSublayer(justCreatedCallRightSeparatorLayer)
+                            }
+                            
+                            justCreatedCallLeftSeparatorLayer.backgroundColor = item.presentationData.theme.list.itemPlainSeparatorColor.cgColor
+                            justCreatedCallRightSeparatorLayer.backgroundColor = item.presentationData.theme.list.itemPlainSeparatorColor.cgColor
+                            
+                            let justCreatedCallSeparatorTextSize = justCreatedCallSeparatorText.update(
+                                transition: .immediate,
+                                component: AnyComponent(MultilineTextComponent(
+                                    text: .plain(NSAttributedString(string: item.presentationData.strings.SendInviteLink_PremiumOrSendSectionSeparator, font: Font.regular(15.0), textColor: item.presentationData.theme.list.itemSecondaryTextColor))
+                                )),
+                                environment: {},
+                                containerSize: CGSize(width: params.width - leftInset - rightInset, height: 100.0)
+                            )
+                            let justCreatedCallSeparatorTextFrame = CGRect(origin: CGPoint(x: floor((params.width - justCreatedCallSeparatorTextSize.width) * 0.5), y: shareButtonNode.frame.maxY + justCreatedCallSeparatorSpacing), size: justCreatedCallSeparatorTextSize)
+                            if let justCreatedCallSeparatorTextView = justCreatedCallSeparatorText.view {
+                                if justCreatedCallSeparatorTextView.superview == nil {
+                                    strongSelf.view.addSubview(justCreatedCallSeparatorTextView)
+                                }
+                                justCreatedCallSeparatorTextView.frame = justCreatedCallSeparatorTextFrame
+                            }
+                            
+                            let separatorWidth: CGFloat = 72.0
+                            let separatorSpacing: CGFloat = 10.0
+                            
+                            justCreatedCallLeftSeparatorLayer.frame = CGRect(origin: CGPoint(x: justCreatedCallSeparatorTextFrame.minX - separatorSpacing - separatorWidth, y: justCreatedCallSeparatorTextFrame.midY + 1.0), size: CGSize(width: separatorWidth, height: UIScreenPixel))
+                            justCreatedCallRightSeparatorLayer.frame = CGRect(origin: CGPoint(x: justCreatedCallSeparatorTextFrame.maxX + separatorSpacing, y: justCreatedCallSeparatorTextFrame.midY + 1.0), size: CGSize(width: separatorWidth, height: UIScreenPixel))
+                        }
+                    } else if let justCreatedCallTextNode = strongSelf.justCreatedCallTextNode {
+                        strongSelf.justCreatedCallTextNode = nil
+                        justCreatedCallTextNode.textNode.removeFromSupernode()
+
+                        strongSelf.justCreatedCallLeftSeparatorLayer?.removeFromSuperlayer()
+                        strongSelf.justCreatedCallLeftSeparatorLayer = nil
+
+                        strongSelf.justCreatedCallRightSeparatorLayer?.removeFromSuperlayer()
+                        strongSelf.justCreatedCallRightSeparatorLayer = nil
+
+                        strongSelf.justCreatedCallSeparatorText?.view?.removeFromSuperview()
+                        strongSelf.justCreatedCallSeparatorText = nil
+                    }
                     
                     var totalWidth = invitedPeersLayout.size.width
                     var leftOrigin: CGFloat = floorToScreenPixels((params.width - invitedPeersLayout.size.width) / 2.0)
@@ -498,9 +690,15 @@ public class ItemListPermanentInviteLinkItemNode: ListViewItemNode, ItemListItem
                     strongSelf.fieldButtonNode.isUserInteractionEnabled = item.invite != nil
                     strongSelf.addressButtonIconNode.alpha = item.invite != nil ? 1.0 : 0.0
                     
+                    
+                    strongSelf.copyButtonNode?.isUserInteractionEnabled = item.invite != nil
+                    strongSelf.copyButtonNode?.alpha = item.invite != nil ? 1.0 : 0.4
+                    strongSelf.copyButtonNode?.isHidden = !item.displayButton || !effectiveSeparateButtons
+                    
                     strongSelf.shareButtonNode?.isUserInteractionEnabled = item.invite != nil
                     strongSelf.shareButtonNode?.alpha = item.invite != nil ? 1.0 : 0.4
                     strongSelf.shareButtonNode?.isHidden = !item.displayButton
+                    
                     strongSelf.avatarsButtonNode.isHidden = !item.displayImporters
                     strongSelf.avatarsNode.isHidden = !item.displayImporters || item.invite == nil
                     strongSelf.invitedPeersNode.isHidden = !item.displayImporters || item.invite == nil
@@ -560,7 +758,7 @@ public class ItemListPermanentInviteLinkItemNode: ListViewItemNode, ItemListItem
         }
     }
     
-    override public func animateInsertion(_ currentTimestamp: Double, duration: Double, short: Bool) {
+    override public func animateInsertion(_ currentTimestamp: Double, duration: Double, options: ListViewItemAnimationOptions) {
         self.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.4)
     }
     

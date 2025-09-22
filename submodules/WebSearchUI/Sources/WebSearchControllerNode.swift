@@ -289,7 +289,7 @@ class WebSearchControllerNode: ASDisplayNode {
                         entries.append(WebSearchRecentQueryEntry(index: i, query: queries[i]))
                     }
                     
-                    let header = ChatListSearchItemHeader(type: .recentPeers, theme: interfaceState.presentationData.theme, strings: interfaceState.presentationData.strings, actionTitle: interfaceState.presentationData.strings.WebSearch_RecentSectionClear, action: {
+                    let header = ChatListSearchItemHeader(type: .recentPeers, theme: interfaceState.presentationData.theme, strings: interfaceState.presentationData.strings, actionTitle: interfaceState.presentationData.strings.WebSearch_RecentSectionClear, action: { _ in
                         let _ = clearRecentWebSearchQueries(engine: strongSelf.context.engine).start()
                     })
                     
@@ -717,7 +717,7 @@ class WebSearchControllerNode: ASDisplayNode {
     }
     
     @objc private func sendPressed() {
-        self.controllerInteraction.sendSelected(nil, false, nil)
+        self.controllerInteraction.sendSelected(nil, false, nil, nil)
         
         self.cancel?()
     }
@@ -740,7 +740,7 @@ class WebSearchControllerNode: ASDisplayNode {
                         return self?.transitionNode(for: result)?.transitionView()
                     }, completed: { [weak self] result in
                         if let strongSelf = self {
-                            strongSelf.controllerInteraction.sendSelected(result, false, nil)
+                            strongSelf.controllerInteraction.sendSelected(result, false, nil, nil)
                             strongSelf.cancel?()
                         }
                     }, getCaptionPanelView: self.getCaptionPanelView, present: present)
@@ -760,7 +760,7 @@ class WebSearchControllerNode: ASDisplayNode {
                         
                     }, baseNavigationController: nil, sendCurrent: { [weak self] result in
                         if let strongSelf = self {
-                            strongSelf.controllerInteraction.sendSelected(result, false, nil)
+                            strongSelf.controllerInteraction.sendSelected(result, false, nil, nil)
                             strongSelf.cancel?()
                         }
                     })

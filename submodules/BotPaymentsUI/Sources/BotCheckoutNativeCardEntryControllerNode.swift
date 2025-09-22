@@ -41,7 +41,7 @@ private final class BotCheckoutNativeCardEntryScrollerNode: ASDisplayNode {
     }
 }
 
-final class BotCheckoutNativeCardEntryControllerNode: ViewControllerTracingNode, UIScrollViewDelegate {
+final class BotCheckoutNativeCardEntryControllerNode: ViewControllerTracingNode, ASScrollViewDelegate {
     private let context: AccountContext
     private weak var navigationBar: NavigationBar?
     private let provider: BotCheckoutNativeCardEntryController.Provider
@@ -183,7 +183,7 @@ final class BotCheckoutNativeCardEntryControllerNode: ViewControllerTracingNode,
         self.scrollNode.view.alwaysBounceVertical = true
         self.scrollNode.view.showsVerticalScrollIndicator = false
         self.scrollNode.view.showsHorizontalScrollIndicator = false
-        self.scrollNode.view.delegate = self
+        self.scrollNode.view.delegate = self.wrappedScrollViewDelegate
         
         self.addSubnode(self.scrollNode)
         
@@ -502,8 +502,8 @@ final class BotCheckoutNativeCardEntryControllerNode: ViewControllerTracingNode,
         if self.scrollNode.view.contentInset != insets {
             self.scrollNode.view.contentInset = insets
         }
-        if self.scrollNode.view.scrollIndicatorInsets != insets {
-            self.scrollNode.view.scrollIndicatorInsets = insets
+        if self.scrollNode.view.verticalScrollIndicatorInsets != insets {
+            self.scrollNode.view.verticalScrollIndicatorInsets = insets
         }
         self.scrollNode.view.ignoreUpdateBounds = false
         

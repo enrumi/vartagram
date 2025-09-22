@@ -2,11 +2,14 @@ import Foundation
 import AVFoundation
 import Metal
 import MetalKit
+import ImageTransparency
+import SwiftSignalKit
 
 final class UniversalTextureSource: TextureSource {
     enum Input {
-        case image(UIImage)
-        case video(AVPlayerItem)
+        case image(UIImage, CGRect?, CGFloat, CGPoint)
+        case video(AVPlayerItem, CGRect?, CGFloat, CGPoint)
+        case entity(MediaEditorComposerEntity)
         
         fileprivate func createContext(renderTarget: RenderTarget, queue: DispatchQueue, additional: Bool) -> InputContext {
             switch self {
@@ -14,6 +17,8 @@ final class UniversalTextureSource: TextureSource {
                 return ImageInputContext(input: self, renderTarget: renderTarget, queue: queue)
             case .video:
                 return VideoInputContext(input: self, renderTarget: renderTarget, queue: queue, additional: additional)
+            case .entity:
+                return EntityInputContext(input: self, renderTarget: renderTarget, queue: queue)
             }
         }
     }
@@ -23,7 +28,7 @@ final class UniversalTextureSource: TextureSource {
     private let queue: DispatchQueue
     
     private var mainInputContext: InputContext?
-    private var additionalInputContext: InputContext?
+    private var additionalInputContexts: [InputContext] = []
     
     var forceUpdates = false
     private var rate: Float = 1.0
@@ -42,6 +47,13 @@ final class UniversalTextureSource: TextureSource {
         )
     }
     
+    var mainImage: UIImage? {
+        if let mainInput = self.mainInputContext?.input, case let .image(image, _, _, _) = mainInput {
+            return image
+        }
+        return nil
+    }
+    
     func setMainInput(_ input: Input) {
         guard let renderTarget = self.renderTarget else {
             return
@@ -50,15 +62,11 @@ final class UniversalTextureSource: TextureSource {
         self.update(forced: true)
     }
     
-    func setAdditionalInput(_ input: Input?) {
+    func setAdditionalInputs(_ inputs: [Input]) {
         guard let renderTarget = self.renderTarget else {
             return
         }
-        if let input {
-            self.additionalInputContext = input.createContext(renderTarget: renderTarget, queue: self.queue, additional: true)
-        } else {
-            self.additionalInputContext = nil
-        }
+        self.additionalInputContexts = inputs.map { $0.createContext(renderTarget: renderTarget, queue: self.queue, additional: true) }
         self.update(forced: true)
     }
     
@@ -67,11 +75,25 @@ final class UniversalTextureSource: TextureSource {
         self.rate = rate
     }
     
-    private var previousAdditionalOutput: MediaEditorRenderer.Input?
+    private var previousAdditionalOutput: [Int: MediaEditorRenderer.Input] = [:]
+    private var readyForMoreData = Atomic<Bool>(value: true)
     private func update(forced: Bool) {
         let time = CACurrentMediaTime()
         
-        let needsDisplayLink = (self.mainInputContext?.needsDisplayLink ?? false) || (self.additionalInputContext?.needsDisplayLink ?? false)
+        var fps: Int = 60
+        if self.mainInputContext?.useAsyncOutput == true {
+            fps = 30
+        }
+        
+        var additionalsNeedDisplayLink = false
+        for context in self.additionalInputContexts {
+            if context.needsDisplayLink {
+                additionalsNeedDisplayLink = true
+                break
+            }
+        }
+        
+        let needsDisplayLink = (self.mainInputContext?.needsDisplayLink ?? false) || additionalsNeedDisplayLink
         if needsDisplayLink {
             if self.displayLink == nil {
                 let displayLink = CADisplayLink(target: DisplayLinkTarget({ [weak self] in
@@ -79,7 +101,7 @@ final class UniversalTextureSource: TextureSource {
                         self.update(forced: self.forceUpdates)
                     }
                 }), selector: #selector(DisplayLinkTarget.handleDisplayLinkUpdate(sender:)))
-                displayLink.preferredFramesPerSecond = 60
+                displayLink.preferredFramesPerSecond = fps
                 displayLink.add(to: .main, forMode: .common)
                 self.displayLink = displayLink
             }
@@ -94,19 +116,43 @@ final class UniversalTextureSource: TextureSource {
             return
         }
                 
-        let main = self.mainInputContext?.output(time: time)
-        var additional = self.additionalInputContext?.output(time: time)
-        if let additional {
-            self.previousAdditionalOutput = additional
-        } else if self.additionalInputContext != nil {
-            additional = self.previousAdditionalOutput
+        if let mainInputContext = self.mainInputContext, mainInputContext.useAsyncOutput {
+            guard self.readyForMoreData.with({ $0 }) else {
+                return
+            }
+            let _ = self.readyForMoreData.swap(false)
+            mainInputContext.asyncOutput(time: time, completion: { [weak self] main in
+                guard let self else {
+                    return
+                }
+                if let main {
+                    self.output?.consume(main: main, additionals: [], render: true)
+                }
+                let _ = self.readyForMoreData.swap(true)
+            })
+        } else {
+            let main = self.mainInputContext?.output(time: time)
+            var additionals: [(Int, InputContext.Output?)] = []
+            var index = 0
+            for context in self.additionalInputContexts {
+                additionals.append((index, context.output(time: time)))
+                index += 1
+            }
+            for (index, output) in additionals {
+                if let output {
+                    self.previousAdditionalOutput[index] = output
+                }
+            }
+            for (index, output) in additionals {
+                if output == nil {
+                    additionals[index] = (index, self.previousAdditionalOutput[index])
+                }
+            }
+            guard let main else {
+                return
+            }
+            self.output?.consume(main: main, additionals: additionals.compactMap { $0.1 }, render: true)
         }
-        
-        guard let main else {
-            return
-        }
-        
-        self.output?.consume(main: main, additional: additional, render: true)
     }
     
     func connect(to consumer: MediaEditorRenderer) {
@@ -116,7 +162,7 @@ final class UniversalTextureSource: TextureSource {
     
     func invalidate() {
         self.mainInputContext?.invalidate()
-        self.additionalInputContext?.invalidate()
+        self.additionalInputContexts.forEach { $0.invalidate() }
     }
     
     private class DisplayLinkTarget {
@@ -128,45 +174,59 @@ final class UniversalTextureSource: TextureSource {
             self.update()
         }
     }
-//    
-//    private func setupDisplayLink(frameRate: Int) {
-//        self.displayLink?.invalidate()
-//        self.displayLink = nil
-//        
-//        if self.playerItemOutput != nil {
-
-//        }
-//    }
 }
 
-private protocol InputContext {
+protocol InputContext {
     typealias Input = UniversalTextureSource.Input
     typealias Output = MediaEditorRenderer.Input
     
     var input: Input { get }
+    
+    var rect: CGRect? { get }
+    
+    var useAsyncOutput: Bool { get }
     func output(time: Double) -> Output?
+    func asyncOutput(time: Double, completion: @escaping (Output?) -> Void)
     
     var needsDisplayLink: Bool { get }
     
     func invalidate()
 }
 
+extension InputContext {
+    var useAsyncOutput: Bool {
+        return false
+    }
+    
+    func asyncOutput(time: Double, completion: @escaping (Output?) -> Void) {
+        completion(self.output(time: time))
+    }
+}
+
 private class ImageInputContext: InputContext {
     fileprivate var input: Input
     private var texture: MTLTexture?
+    private var hasTransparency = false
+    fileprivate var rect: CGRect?
+    fileprivate var scale: CGFloat
+    fileprivate var offset: CGPoint
     
     init(input: Input, renderTarget: RenderTarget, queue: DispatchQueue) {
-        guard case let .image(image) = input else {
+        guard case let .image(image, rect, scale, offset) = input else {
             fatalError()
         }
         self.input = input
+        self.rect = rect
+        self.scale = scale
+        self.offset = offset
         if let device = renderTarget.mtlDevice {
             self.texture = loadTexture(image: image, device: device)
         }
+        self.hasTransparency = imageHasTransparency(image)
     }
     
     func output(time: Double) -> Output? {
-        return self.texture.flatMap { .texture($0, .zero) }
+        return self.texture.flatMap { .texture($0, .zero, self.hasTransparency, self.rect, self.scale, self.offset) }
     }
     
     func invalidate() {
@@ -182,23 +242,30 @@ private class VideoInputContext: NSObject, InputContext, AVPlayerItemOutputPullD
     fileprivate var input: Input
     private var videoOutput: AVPlayerItemVideoOutput?
     private var textureRotation: TextureRotation = .rotate0Degrees
+    fileprivate var rect: CGRect?
+    fileprivate var scale: CGFloat
+    fileprivate var offset: CGPoint
     
     var playerItem: AVPlayerItem {
-        guard case let .video(playerItem) = self.input else {
+        guard case let .video(playerItem, _, _, _) = self.input else {
             fatalError()
         }
         return playerItem
     }
     
     init(input: Input, renderTarget: RenderTarget, queue: DispatchQueue, additional: Bool) {
-        guard case .video = input else {
+        guard case let .video(_, rect, scale, offset) = input else {
             fatalError()
         }
         self.input = input
+        self.rect = rect
+        self.scale = scale
+        self.offset = offset
+        
         super.init()
         
         //TODO: mirror if self.additionalPlayer == nil && self.mirror
-        self.textureRotation = textureRotatonForAVAsset(self.playerItem.asset, mirror: additional)
+        self.textureRotation = textureRotatonForAVAsset(self.playerItem.asset, mirror: rect == nil ? additional : false)
         
         let colorProperties: [String: Any] = [
             AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
@@ -232,7 +299,7 @@ private class VideoInputContext: NSObject, InputContext, AVPlayerItemOutputPullD
         if let pixelBuffer = videoOutput.copyPixelBuffer(forItemTime: requestTime, itemTimeForDisplay: &presentationTime) {
             videoPixelBuffer = VideoPixelBuffer(pixelBuffer: pixelBuffer, rotation: self.textureRotation, timestamp: presentationTime)
         }
-        return videoPixelBuffer.flatMap { .videoBuffer($0) }
+        return videoPixelBuffer.flatMap { .videoBuffer($0, self.rect, self.scale, self.offset) }
     }
     
     func invalidate() {
@@ -244,6 +311,64 @@ private class VideoInputContext: NSObject, InputContext, AVPlayerItemOutputPullD
     }
     
     var needsDisplayLink: Bool {
+        return true
+    }
+}
+
+final class EntityInputContext: NSObject, InputContext, AVPlayerItemOutputPullDelegate {
+    internal var input: Input
+    private var textureRotation: TextureRotation = .rotate0Degrees
+    
+    var rect: CGRect?
+    
+    var entity: MediaEditorComposerEntity {
+        guard case let .entity(entity) = self.input else {
+            fatalError()
+        }
+        return entity
+    }
+    
+    private let ciContext: CIContext
+    private let startTime: Double
+    
+    init(input: Input, renderTarget: RenderTarget, queue: DispatchQueue) {
+        guard case .entity = input else {
+            fatalError()
+        }
+        self.input = input
+        self.ciContext = CIContext(options: [.workingColorSpace : CGColorSpaceCreateDeviceRGB()])
+        self.startTime = CACurrentMediaTime()
+        super.init()
+        
+        self.textureRotation = .rotate0Degrees
+    }
+    
+    func output(time: Double) -> Output? {
+        return nil
+    }
+    
+    func asyncOutput(time: Double, completion: @escaping (Output?) -> Void) {
+        let deltaTime = max(0.0, time - self.startTime)
+        let timestamp = CMTime(seconds: deltaTime, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+        self.entity.image(for: timestamp, frameRate: 30, context: self.ciContext, completion: { image in
+            Queue.mainQueue().async {
+                completion(image.flatMap { .ciImage($0, timestamp) })
+            }
+        })
+    }
+    
+    func invalidate() {
+
+    }
+    
+    var needsDisplayLink: Bool {
+        if let entity = self.entity as? MediaEditorComposerStickerEntity, entity.isAnimated {
+            return true
+        }
+        return false
+    }
+    
+    var useAsyncOutput: Bool {
         return true
     }
 }

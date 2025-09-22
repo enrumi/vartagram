@@ -196,7 +196,7 @@ private final class StoryProgressLayer: HierarchyTrackingLayer {
         self.uploadProgressLayer.path = nil
     }
     
-    func updateAnimations(transition: Transition) {
+    func updateAnimations(transition: ComponentTransition) {
         guard let params = self.currentParams else {
             return
         }
@@ -276,7 +276,7 @@ private final class StoryProgressLayer: HierarchyTrackingLayer {
         }
     }
     
-    func update(size: CGSize, lineWidth: CGFloat, radius: CGFloat, value: Value, transition: Transition) {
+    func update(size: CGSize, lineWidth: CGFloat, radius: CGFloat, value: Value, transition: ComponentTransition) {
         let params = Params(
             size: size,
             lineWidth: lineWidth,
@@ -346,7 +346,7 @@ public final class StoryPeerListItemComponent: Component {
             fatalError("init(coder:) has not been implemented")
         }
         
-        func update(state: StoryContainerScreen.TransitionState, transition: Transition) {
+        func update(state: StoryContainerScreen.TransitionState, transition: ComponentTransition) {
             let size = state.sourceSize.interpolate(to: state.destinationSize, amount: state.progress)
             
             if let snapshotView = self.snapshotView {
@@ -380,6 +380,7 @@ public final class StoryPeerListItemComponent: Component {
     public let expandEffectFraction: CGFloat
     public let leftNeighborDistance: CGPoint?
     public let rightNeighborDistance: CGPoint?
+    public let composeContentOffset: CGFloat?
     public let action: (EnginePeer) -> Void
     public let contextGesture: (ContextExtractedContentContainingNode, ContextGesture, EnginePeer) -> Void
     
@@ -399,6 +400,7 @@ public final class StoryPeerListItemComponent: Component {
         expandEffectFraction: CGFloat,
         leftNeighborDistance: CGPoint?,
         rightNeighborDistance: CGPoint?,
+        composeContentOffset: CGFloat?,
         action: @escaping (EnginePeer) -> Void,
         contextGesture: @escaping (ContextExtractedContentContainingNode, ContextGesture, EnginePeer) -> Void
     ) {
@@ -417,6 +419,7 @@ public final class StoryPeerListItemComponent: Component {
         self.expandEffectFraction = expandEffectFraction
         self.leftNeighborDistance = leftNeighborDistance
         self.rightNeighborDistance = rightNeighborDistance
+        self.composeContentOffset = composeContentOffset
         self.action = action
         self.contextGesture = contextGesture
     }
@@ -467,6 +470,9 @@ public final class StoryPeerListItemComponent: Component {
         if lhs.rightNeighborDistance != rhs.rightNeighborDistance {
             return false
         }
+        if lhs.composeContentOffset != rhs.composeContentOffset {
+            return false
+        }
         return true
     }
     
@@ -479,6 +485,7 @@ public final class StoryPeerListItemComponent: Component {
         
         private let button: HighlightTrackingButton
         
+        fileprivate var composeLayer: StoryComposeLayer?
         fileprivate let avatarContent: PortalSourceView
         private let avatarContainer: UIView
         private let avatarBackgroundContainer: UIView
@@ -494,11 +501,10 @@ public final class StoryPeerListItemComponent: Component {
         private let indicatorShapeSeenLayer: SimpleShapeLayer
         private let indicatorShapeUnseenLayer: SimpleShapeLayer
         private let title = ComponentView<Empty>()
+        private let composeTitle = ComponentView<Empty>()
         
         private var component: StoryPeerListItemComponent?
         private weak var componentState: EmptyComponentState?
-        
-        private var demoLoading = false
         
         public override init(frame: CGRect) {
             self.backgroundContainer = UIView()
@@ -635,7 +641,7 @@ public final class StoryPeerListItemComponent: Component {
             self.avatarBackgroundView.alpha = isPreviewing ? 0.0 : 1.0
         }
         
-        func update(component: StoryPeerListItemComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+        func update(component: StoryPeerListItemComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
             let size = availableSize
             
             let themeUpdated = self.component?.theme !== component.theme
@@ -823,10 +829,10 @@ public final class StoryPeerListItemComponent: Component {
             } else if let mappedLeftCenter {
                 avatarPath.addEllipse(in: CGRect(origin: CGPoint(), size: avatarSize).insetBy(dx: -indicatorLineSeenWidth * 1.4, dy: -indicatorLineSeenWidth * 1.4).offsetBy(dx: -abs(indicatorCenter.x - mappedLeftCenter.x), dy: -abs(indicatorCenter.y - mappedLeftCenter.y)))
             }
-            Transition.immediate.setShapeLayerPath(layer: self.avatarShapeLayer, path: avatarPath)
+            ComponentTransition.immediate.setShapeLayerPath(layer: self.avatarShapeLayer, path: avatarPath)
             
-            Transition.immediate.setShapeLayerPath(layer: self.indicatorShapeSeenLayer, path: calculateMergingCircleShape(center: indicatorCenter, leftCenter: mappedLeftCenter, rightCenter: mappedRightCenter, radius: indicatorRadius - indicatorLineUnseenWidth * 0.5, totalCount: component.totalCount, unseenCount: component.unseenCount, isSeen: true, segmentFraction: component.expandedAlphaFraction, rotationFraction: component.expandEffectFraction))
-            Transition.immediate.setShapeLayerPath(layer: self.indicatorShapeUnseenLayer, path: calculateMergingCircleShape(center: indicatorCenter, leftCenter: mappedLeftCenter, rightCenter: mappedRightCenter, radius: indicatorRadius - indicatorLineUnseenWidth * 0.5, totalCount: component.totalCount, unseenCount: component.unseenCount, isSeen: false, segmentFraction: component.expandedAlphaFraction, rotationFraction: component.expandEffectFraction))
+            ComponentTransition.immediate.setShapeLayerPath(layer: self.indicatorShapeSeenLayer, path: calculateMergingCircleShape(center: indicatorCenter, leftCenter: mappedLeftCenter, rightCenter: mappedRightCenter, radius: indicatorRadius - indicatorLineUnseenWidth * 0.5, totalCount: component.totalCount, unseenCount: component.unseenCount, isSeen: true, segmentFraction: component.expandedAlphaFraction, rotationFraction: component.expandEffectFraction))
+            ComponentTransition.immediate.setShapeLayerPath(layer: self.indicatorShapeUnseenLayer, path: calculateMergingCircleShape(center: indicatorCenter, leftCenter: mappedLeftCenter, rightCenter: mappedRightCenter, radius: indicatorRadius - indicatorLineUnseenWidth * 0.5, totalCount: component.totalCount, unseenCount: component.unseenCount, isSeen: false, segmentFraction: component.expandedAlphaFraction, rotationFraction: component.expandEffectFraction))
             
             let titleString: String
             if component.peer.id == component.context.account.peerId {
@@ -908,7 +914,7 @@ public final class StoryPeerListItemComponent: Component {
                 
                 switch ringAnimation {
                 case let .progress(progress):
-                    let progressTransition: Transition
+                    let progressTransition: ComponentTransition
                     if abs(progress - 0.028) < 0.001 {
                         progressTransition = .immediate
                     } else {
@@ -960,6 +966,32 @@ public final class StoryPeerListItemComponent: Component {
             self.extractedContainerNode.contentRect = CGRect(origin: CGPoint(x: self.extractedBackgroundView.frame.minX - 2.0, y: self.extractedBackgroundView.frame.minY), size: CGSize(width: self.extractedBackgroundView.frame.width + 4.0, height: self.extractedBackgroundView.frame.height))
             self.containerNode.frame = CGRect(origin: CGPoint(), size: size)
             
+            var baseSize: CGFloat = 60.0
+            var effectiveColors = component.unseenCount > 0 ? unseenColors : seenColors
+            if self.avatarAddBadgeView != nil {
+                baseSize = 52.0
+                effectiveColors = [component.theme.list.itemCheckColors.fillColor.cgColor, component.theme.list.itemCheckColors.fillColor.cgColor]
+            }
+            if let composeContentOffset = component.composeContentOffset {
+                let composeLayer: StoryComposeLayer
+                if let current = self.composeLayer {
+                    composeLayer = current
+                } else {
+                    composeLayer = StoryComposeLayer(theme: component.theme, strings: component.strings)
+                    self.composeLayer = composeLayer
+                    self.layer.addSublayer(composeLayer)
+                }
+                                
+                composeLayer.frame = CGRect(origin: CGPoint(x: size.width - 195.0, y: 0.0), size: CGSize(width: 160.0, height: 60.0))
+                composeLayer.updateOffset(composeContentOffset, baseSize: baseSize, colors: effectiveColors, transition: transition)
+            } else if let composeLayer = self.composeLayer {
+                self.composeLayer = nil
+                composeLayer.updateOffset(0.0, baseSize: baseSize, colors: effectiveColors, transition: .easeInOut(duration: 0.2))
+                Queue.mainQueue().after(0.21, {
+                    composeLayer.removeFromSuperlayer()
+                })
+            }
+            
             return availableSize
         }
     }
@@ -968,7 +1000,7 @@ public final class StoryPeerListItemComponent: Component {
         return View(frame: CGRect())
     }
     
-    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
 }

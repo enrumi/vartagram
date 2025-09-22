@@ -260,7 +260,7 @@ final class StorageUsageScreenComponent: Component {
         }
     }
     */
-    
+
     enum Category: Hashable {
         case photos
         case videos
@@ -352,7 +352,7 @@ final class StorageUsageScreenComponent: Component {
         var isSelectingPeers: Bool = false
         private(set) var selectionState: SelectionState
         */
-        
+
         let existingCategories: Set<Category>
         private(set) var selectedCategories: Set<Category>
         
@@ -367,7 +367,7 @@ final class StorageUsageScreenComponent: Component {
         private let allFiles: Set<EngineMessage.Id>
         private let allMusic: Set<EngineMessage.Id>
         */
-        
+
         private(set) var selectedSize: Int64 = 0
         private(set) var clearIncludeMessages: [Message] = []
         private(set) var clearExcludeMessages: [Message] = []
@@ -438,7 +438,7 @@ final class StorageUsageScreenComponent: Component {
             }
             self.allMusic = allMusic
             */
-            
+
             var existingCategories = Set<Category>()
             for (category, value) in self.contextStats.categories {
                 if value.size != 0 {
@@ -763,7 +763,7 @@ final class StorageUsageScreenComponent: Component {
         private let navigationEditButton = ComponentView<Empty>()
         private let navigationDoneButton = ComponentView<Empty>()
         */
-        
+
         private let headerView = ComponentView<Empty>()
         private let headerOffsetContainer: UIView
         private let headerDescriptionView = ComponentView<Empty>()
@@ -799,7 +799,7 @@ final class StorageUsageScreenComponent: Component {
         
         private var selectionPanel: ComponentView<Empty>?
         */
-        
+
         private var clearingNode: StorageUsageClearProgressOverlayNode?
         
         private var loadingView: UIActivityIndicatorView?
@@ -888,6 +888,28 @@ final class StorageUsageScreenComponent: Component {
             self.keepScreenActiveDisposable?.dispose()
         }
         
+        override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+            guard let result = super.hitTest(point, with: event) else {
+                return nil
+            }
+            var currentParent: UIView? = result
+            while true {
+                if currentParent == nil || currentParent === self {
+                    break
+                }
+                if let scrollView = currentParent as? UIScrollView {
+                    if scrollView === self.scrollView {
+                        break
+                    }
+                    if scrollView.isDecelerating && scrollView.contentOffset.y < -scrollView.contentInset.top {
+                        return self.scrollView
+                    }
+                }
+                currentParent = currentParent?.superview
+            }
+            return result
+        }
+
         func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
             self.enableVelocityTracking = true
         }
@@ -932,13 +954,13 @@ final class StorageUsageScreenComponent: Component {
             */
         }
         
-        private func updateScrolling(transition: Transition) {
+        private func updateScrolling(transition: ComponentTransition) {
             let scrollBounds = self.scrollView.bounds
             
             /*
             let isLockedAtPanels = scrollBounds.maxY == self.scrollView.contentSize.height
             */
-            
+
             if let headerView = self.headerView.view, let navigationMetrics = self.navigationMetrics {
                 var headerOffset: CGFloat = scrollBounds.minY
                 
@@ -948,7 +970,7 @@ final class StorageUsageScreenComponent: Component {
                 
                 headerOffset = min(headerOffset, minOffset)
                 
-                let animatedTransition = Transition(animation: .curve(duration: 0.18, curve: .easeInOut))
+                let animatedTransition = ComponentTransition(animation: .curve(duration: 0.18, curve: .easeInOut))
                 let navigationBackgroundAlpha: CGFloat = abs(headerOffset - minOffset) < 4.0 ? 1.0 : 0.0
                 
                 animatedTransition.setAlpha(view: self.navigationBackgroundView, alpha: navigationBackgroundAlpha)
@@ -975,7 +997,7 @@ final class StorageUsageScreenComponent: Component {
                     animatedTransition.setAlpha(view: navigationDoneButtonView, alpha: (isSelectingPeers ? 1.0 : 0.0) * buttonsMasterAlpha * navigationBackgroundAlpha)
                 }
                 */
-                
+
                 let expansionDistance: CGFloat = 32.0
                 var expansionDistanceFactor: CGFloat = abs(scrollBounds.maxY - self.scrollView.contentSize.height) / expansionDistance
                 expansionDistanceFactor = max(0.0, min(1.0, expansionDistanceFactor))
@@ -986,7 +1008,7 @@ final class StorageUsageScreenComponent: Component {
                     panelContainerView.updateNavigationMergeFactor(value: 1.0 - expansionDistanceFactor, transition: transition)
                 }
                 */
-                
+
                 var offsetFraction: CGFloat = abs(headerOffset - minOffset) / 60.0
                 offsetFraction = min(1.0, max(0.0, offsetFraction))
                 transition.setScale(view: headerView, scale: 1.0 * offsetFraction + 0.8 * (1.0 - offsetFraction))
@@ -1004,7 +1026,7 @@ final class StorageUsageScreenComponent: Component {
             */
         }
         
-        func update(component: StorageUsageScreenComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<ViewControllerComponentContainer.Environment>, transition: Transition) -> CGSize {
+        func update(component: StorageUsageScreenComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<ViewControllerComponentContainer.Environment>, transition: ComponentTransition) -> CGSize {
             self.component = component
             self.state = state
             
@@ -1017,7 +1039,7 @@ final class StorageUsageScreenComponent: Component {
                 } else {
                     let style: UIActivityIndicatorView.Style
                     if environment.theme.overallDarkAppearance {
-                        style = .whiteLarge
+                        style = .large
                     } else {
                         if #available(iOS 13.0, *) {
                             style = .large
@@ -1128,12 +1150,12 @@ final class StorageUsageScreenComponent: Component {
                 }
             }
             */
-            
+
             let animationHint = transition.userData(AnimationHint.self)
             
             if let animationHint {
                 if case .firstStatsUpdate = animationHint.value {
-                    let alphaTransition: Transition
+                    let alphaTransition: ComponentTransition
                     if environment.isVisible {
                         alphaTransition = .easeInOut(duration: 0.25)
                     } else {
@@ -1183,7 +1205,7 @@ final class StorageUsageScreenComponent: Component {
                         }
                         if let aggregatedData = self.aggregatedData, !aggregatedData.isSelectingPeers {
                             aggregatedData.isSelectingPeers = true
-                            self.state?.updated(transition: Transition(animation: .curve(duration: 0.4, curve: .spring)))
+                            self.state?.updated(transition: ComponentTransition(animation: .curve(duration: 0.4, curve: .spring)))
                         }
                     }
                 ).minSize(CGSize(width: 16.0, height: environment.navigationHeight - environment.statusBarHeight))),
@@ -1207,7 +1229,7 @@ final class StorageUsageScreenComponent: Component {
                         }
                         aggregatedData.isSelectingPeers = false
                         aggregatedData.clearPeerSelection()
-                        self.state?.updated(transition: Transition(animation: .curve(duration: 0.4, curve: .spring)))
+                        self.state?.updated(transition: ComponentTransition(animation: .curve(duration: 0.4, curve: .spring)))
                     }
                 ).minSize(CGSize(width: 16.0, height: environment.navigationHeight - environment.statusBarHeight))),
                 environment: {},
@@ -1223,7 +1245,7 @@ final class StorageUsageScreenComponent: Component {
             let navigationRightButtonMaxWidth: CGFloat = max(navigationEditButtonSize.width, navigationDoneButtonSize.width)
             */
             let navigationRightButtonMaxWidth: CGFloat = 0.0
-            
+
             self.backgroundColor = environment.theme.list.blocksBackgroundColor
             
             var contentHeight: CGFloat = 0.0
@@ -1293,7 +1315,7 @@ final class StorageUsageScreenComponent: Component {
                 }
             }
             */
-            
+
             contentHeight += environment.statusBarHeight + topInset
             
             let allCategories: [Category] = [
@@ -1384,7 +1406,7 @@ final class StorageUsageScreenComponent: Component {
                 chartItems.append(PieChartComponent.ChartData.Item(id: listCategory.key, displayValue: listCategory.sizeFraction, displaySize: listCategory.size, value: categoryChartFraction, color: listCategory.color, particle: listCategory.key.particle, title: listCategory.key.title(strings: environment.strings), mergeable: false, mergeFactor: 1.0))
             }
             */
-            
+
             var totalOtherSize: Int64 = 0
             for listCategory in otherListCategories {
                 totalOtherSize += listCategory.size
@@ -1440,7 +1462,7 @@ final class StorageUsageScreenComponent: Component {
             
             var pieChartTransition = transition
             if transition.animation.isImmediate, let animationHint, case .clearedItems = animationHint.value {
-                pieChartTransition = Transition(animation: .curve(duration: 0.4, curve: .spring))
+                pieChartTransition = ComponentTransition(animation: .curve(duration: 0.4, curve: .spring))
             }
             
             let pieChartSize = self.pieChartView.update(
@@ -1517,7 +1539,7 @@ final class StorageUsageScreenComponent: Component {
                 }
             }
             */
-            
+
             contentHeight += 23.0
             
             let headerText: String
@@ -1712,7 +1734,7 @@ final class StorageUsageScreenComponent: Component {
                 }
             }
             */
-            
+
             if !listCategories.isEmpty {
                 self.categoriesView.parentState = state
                 let categoriesSize = self.categoriesView.update(
@@ -1748,7 +1770,7 @@ final class StorageUsageScreenComponent: Component {
                                     aggregatedData.setIsCategorySelected(category: key, isSelected: true)
                                 }
                             }
-                            self.state?.updated(transition: Transition(animation: .curve(duration: 0.4, curve: .spring)))
+                            self.state?.updated(transition: ComponentTransition(animation: .curve(duration: 0.4, curve: .spring)))
                             */
                         },
                         toggleOtherExpanded: { [weak self] in
@@ -1757,7 +1779,7 @@ final class StorageUsageScreenComponent: Component {
                             }
                             
                             self.isOtherCategoryExpanded = !self.isOtherCategoryExpanded
-                            self.state?.updated(transition: Transition(animation: .curve(duration: 0.4, curve: .spring)))
+                            self.state?.updated(transition: ComponentTransition(animation: .curve(duration: 0.4, curve: .spring)))
                         },
                         clearAction: { [weak self] in
                             guard let self else {
@@ -2041,7 +2063,7 @@ final class StorageUsageScreenComponent: Component {
                             if aggregatedData.isSelectingPeers {
                                 aggregatedData.togglePeerSelection(id: peer.id)
                                 
-                                self.state?.updated(transition: Transition(animation: .curve(duration: 0.4, curve: .spring)))
+                                self.state?.updated(transition: ComponentTransition(animation: .curve(duration: 0.4, curve: .spring)))
                             } else {
                                 self.openPeer(peer: peer)
                             }
@@ -2058,7 +2080,7 @@ final class StorageUsageScreenComponent: Component {
                                 text: presentationData.strings.StorageManagement_PeerShowDetails,
                                 icon: { theme in generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Info"), color: theme.contextMenu.primaryColor) },
                                 action: { [weak self] c, _ in
-                                    c.dismiss(completion: { [weak self] in
+                                    c?.dismiss(completion: { [weak self] in
                                         guard let self else {
                                             return
                                         }
@@ -2076,7 +2098,7 @@ final class StorageUsageScreenComponent: Component {
                                     }
                                 },
                                 action: { [weak self] c, _ in
-                                    c.dismiss(completion: { [weak self] in
+                                    c?.dismiss(completion: { [weak self] in
                                         guard let self, let component = self.component, let controller = self.controller?() else {
                                             return
                                         }
@@ -2099,14 +2121,14 @@ final class StorageUsageScreenComponent: Component {
                                 text: presentationData.strings.StorageManagement_ContextSelect,
                                 icon: { theme in generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Select"), color: theme.contextMenu.primaryColor) },
                                 action: { [weak self] c, _ in
-                                    c.dismiss(completion: {
+                                    c?.dismiss(completion: {
                                     })
                                     
                                     guard let self, let aggregatedData = self.aggregatedData else {
                                         return
                                     }
                                     aggregatedData.togglePeerSelection(id: peer.id)
-                                    self.state?.updated(transition: Transition(animation: .curve(duration: 0.4, curve: .spring)))
+                                    self.state?.updated(transition: ComponentTransition(animation: .curve(duration: 0.4, curve: .spring)))
                                 })
                             ))
                             let items = ContextController.Items(content: .list(itemList))
@@ -2142,7 +2164,7 @@ final class StorageUsageScreenComponent: Component {
                                 return
                             }
                             aggregatedData.toggleMessageSelection(id: messageId)
-                            self.state?.updated(transition: Transition(animation: .curve(duration: 0.4, curve: .spring)))
+                            self.state?.updated(transition: ComponentTransition(animation: .curve(duration: 0.4, curve: .spring)))
                         },
                         contextAction: { [weak self] messageId, containerView, sourceRect, gesture in
                             guard let self else {
@@ -2169,7 +2191,7 @@ final class StorageUsageScreenComponent: Component {
                                 return
                             }
                             aggregatedData.toggleMessageSelection(id: messageId)
-                            self.state?.updated(transition: Transition(animation: .curve(duration: 0.4, curve: .spring)))
+                            self.state?.updated(transition: ComponentTransition(animation: .curve(duration: 0.4, curve: .spring)))
                         },
                         contextAction: { [weak self] messageId, containerView, gesture in
                             guard let self else {
@@ -2196,7 +2218,7 @@ final class StorageUsageScreenComponent: Component {
                                 return
                             }
                             aggregatedData.toggleMessageSelection(id: messageId)
-                            self.state?.updated(transition: Transition(animation: .curve(duration: 0.4, curve: .spring)))
+                            self.state?.updated(transition: ComponentTransition(animation: .curve(duration: 0.4, curve: .spring)))
                         },
                         contextAction: { [weak self] messageId, containerView, gesture in
                             guard let self else {
@@ -2241,7 +2263,7 @@ final class StorageUsageScreenComponent: Component {
                 self.panelContainer.view?.removeFromSuperview()
             }
             */
-            
+
             self.ignoreScrolling = true
             
             let contentOffset = self.scrollView.bounds.minY
@@ -2305,7 +2327,7 @@ final class StorageUsageScreenComponent: Component {
                     }
                     
                     if delay == 0.0 {
-                        let animationTransition = Transition(animation: .curve(duration: 0.25, curve: .easeInOut))
+                        let animationTransition = ComponentTransition(animation: .curve(duration: 0.25, curve: .easeInOut))
                         animationTransition.setAlpha(view: clearingNode.view, alpha: 0.0, completion: { [weak clearingNode] _ in
                             clearingNode?.removeFromSupernode()
                         })
@@ -2382,7 +2404,7 @@ final class StorageUsageScreenComponent: Component {
                 if firstTime {
                     self.aggregatedData = initialAggregatedData
                     
-                    self.state?.updated(transition: Transition(animation: .none).withUserData(AnimationHint(value: .firstStatsUpdate)))
+                    self.state?.updated(transition: ComponentTransition(animation: .none).withUserData(AnimationHint(value: .firstStatsUpdate)))
                     self.component?.ready.set(.single(true))
                 }
                 
@@ -2523,16 +2545,16 @@ final class StorageUsageScreenComponent: Component {
                     self.isClearing = false
                     
                     if !firstTime {
-                        self.state?.updated(transition: Transition(animation: .none).withUserData(AnimationHint(value: .clearedItems)))
+                        self.state?.updated(transition: ComponentTransition(animation: .none).withUserData(AnimationHint(value: .clearedItems)))
                     } else {
-                        self.state?.updated(transition: Transition(animation: .none))
+                        self.state?.updated(transition: ComponentTransition(animation: .none))
                     }
                     
                     completion()
                 })
             })
             */
-            
+
             self.statsDisposable = (component.context.sharedContext.activeAccountContexts
             |> mapToSignal { activeAccountContexts in
                 let contexts = activeAccountContexts.accounts.map({ $0.1 }) + activeAccountContexts.inactiveAccounts.map({ $0.1 })
@@ -2555,39 +2577,39 @@ final class StorageUsageScreenComponent: Component {
                     completion()
                     return
                 }
-                
+
                 let total = StorageUsageStats(categories: totalStorageSize == 0 ? [:] : Dictionary(uniqueKeysWithValues: StorageUsageStats.CategoryKey.allCases.map({ ($0, StorageUsageStats.CategoryData(size: $0 == .misc ? max(1, totalStorageSize - Int64(StorageUsageStats.CategoryKey.allCases.count - 1)) : 1, messages: [:])) })))
-                
+
                 let systemAttributes = try? FileManager.default.attributesOfFileSystem(forPath: NSHomeDirectory() as String)
                 let deviceAvailableSpace = (systemAttributes?[FileAttributeKey.systemSize] as? NSNumber)?.int64Value ?? 0
                 let deviceFreeSpace = (systemAttributes?[FileAttributeKey.systemFreeSize] as? NSNumber)?.int64Value ?? 0
-                
+
                 let stats = AllStorageUsageStats(
                     deviceAvailableSpace: deviceAvailableSpace,
                     deviceFreeSpace: deviceFreeSpace,
                     totalStats: total,
                     peers: [:]
                 )
-                
+
                 self.aggregatedData = AggregatedData(
                     peerId: nil,
                     stats: stats,
                     messages: [:]
                 )
-                
+
                 if firstTime {
-                    self.state?.updated(transition: Transition(animation: .none).withUserData(AnimationHint(value: .firstStatsUpdate)))
+                    self.state?.updated(transition: ComponentTransition(animation: .none).withUserData(AnimationHint(value: .firstStatsUpdate)))
                     self.component?.ready.set(.single(true))
                 }
-                
+
                 self.isClearing = false
-                
+
                 if !firstTime {
-                    self.state?.updated(transition: Transition(animation: .none).withUserData(AnimationHint(value: .clearedItems)))
+                    self.state?.updated(transition: ComponentTransition(animation: .none).withUserData(AnimationHint(value: .clearedItems)))
                 } else {
-                    self.state?.updated(transition: Transition(animation: .none))
+                    self.state?.updated(transition: ComponentTransition(animation: .none))
                 }
-                
+
                 completion()
             })
         }
@@ -2622,6 +2644,7 @@ final class StorageUsageScreenComponent: Component {
             let _ = (chatMediaListPreviewControllerData(
                 context: component.context,
                 chatLocation: .peer(id: message.id.peerId),
+                chatFilterTag: nil,
                 chatLocationContextHolder: nil,
                 message: message,
                 standalone: true,
@@ -2657,7 +2680,7 @@ final class StorageUsageScreenComponent: Component {
                     text: openTitle,
                     icon: { theme in generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Expand"), color: theme.contextMenu.primaryColor) },
                     action: { [weak self] c, _ in
-                        c.dismiss(completion: { [weak self] in
+                        c?.dismiss(completion: { [weak self] in
                             guard let self else {
                                 return
                             }
@@ -2667,7 +2690,7 @@ final class StorageUsageScreenComponent: Component {
                 ))
                 
                 items.append(.action(ContextMenuActionItem(text: strings.SharedMedia_ViewInChat, icon: { theme in generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/GoToMessage"), color: theme.contextMenu.primaryColor) }, action: { [weak self] c, f in
-                    c.dismiss(completion: { [weak self] in
+                    c?.dismiss(completion: { [weak self] in
                         guard let self, let component = self.component, let controller = self.controller?(), let navigationController = controller.navigationController as? NavigationController else {
                             return
                         }
@@ -2676,15 +2699,15 @@ final class StorageUsageScreenComponent: Component {
                         }
                         
                         var chatLocation: NavigateToChatControllerParams.Location = .peer(peer)
-                        if case let .channel(channel) = peer, channel.flags.contains(.isForum), let threadId = message.threadId {
-                            chatLocation = .replyThread(ChatReplyThreadMessage(peerId: peer.id, threadId: threadId, channelMessageId: nil, isChannelPost: false, isForumPost: true, maxMessage: nil, maxReadIncomingMessageId: nil, maxReadOutgoingMessageId: nil, unreadCount: 0, initialFilledHoles: IndexSet(), initialAnchor: .automatic, isNotAvailable: false))
+                        if case let .channel(channel) = peer, channel.isForumOrMonoForum, let threadId = message.threadId {
+                            chatLocation = .replyThread(ChatReplyThreadMessage(peerId: peer.id, threadId: threadId, channelMessageId: nil, isChannelPost: false, isForumPost: true, isMonoforumPost: false, maxMessage: nil, maxReadIncomingMessageId: nil, maxReadOutgoingMessageId: nil, unreadCount: 0, initialFilledHoles: IndexSet(), initialAnchor: .automatic, isNotAvailable: false))
                         }
                         
                         component.context.sharedContext.navigateToChatController(NavigateToChatControllerParams(
                             navigationController: navigationController,
                             context: component.context,
                             chatLocation: chatLocation,
-                            subject: .message(id: .id(message.id), highlight: ChatControllerSubject.MessageHighlight(quote: nil), timecode: nil),
+                            subject: .message(id: .id(message.id), highlight: ChatControllerSubject.MessageHighlight(quote: nil), timecode: nil, setupReply: false),
                             keepStack: .always
                         ))
                     })
@@ -2693,14 +2716,14 @@ final class StorageUsageScreenComponent: Component {
                 items.append(.action(ContextMenuActionItem(text: strings.Conversation_ContextMenuSelect, icon: { theme in
                     return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Select"), color: theme.actionSheet.primaryTextColor)
                 }, action: { [weak self] c, _ in
-                    c.dismiss(completion: {
+                    c?.dismiss(completion: {
                     })
                     
                     guard let self, let aggregatedData = self.aggregatedData else {
                         return
                     }
                     aggregatedData.toggleMessageSelection(id: message.id)
-                    self.state?.updated(transition: Transition(animation: .curve(duration: 0.4, curve: .spring)))
+                    self.state?.updated(transition: ComponentTransition(animation: .curve(duration: 0.4, curve: .spring)))
                 })))
                 
                 switch previewData {
@@ -2754,7 +2777,7 @@ final class StorageUsageScreenComponent: Component {
                     text: openTitle,
                     icon: { theme in generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Expand"), color: theme.contextMenu.primaryColor) },
                     action: { [weak self] c, _ in
-                        c.dismiss(completion: { [weak self] in
+                        c?.dismiss(completion: { [weak self] in
                             guard let self else {
                                 return
                             }
@@ -2770,7 +2793,7 @@ final class StorageUsageScreenComponent: Component {
                     return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/GoToMessage"), color: theme.contextMenu.primaryColor)
                 },
                 action: { [weak self] c, _ in
-                    c.dismiss(completion: { [weak self] in
+                    c?.dismiss(completion: { [weak self] in
                         guard let self, let component = self.component, let controller = self.controller?(), let navigationController = controller.navigationController as? NavigationController else {
                             return
                         }
@@ -2779,15 +2802,15 @@ final class StorageUsageScreenComponent: Component {
                         }
                         
                         var chatLocation: NavigateToChatControllerParams.Location = .peer(peer)
-                        if case let .channel(channel) = peer, channel.flags.contains(.isForum), let threadId = message.threadId {
-                            chatLocation = .replyThread(ChatReplyThreadMessage(peerId: peer.id, threadId: threadId, channelMessageId: nil, isChannelPost: false, isForumPost: true, maxMessage: nil, maxReadIncomingMessageId: nil, maxReadOutgoingMessageId: nil, unreadCount: 0, initialFilledHoles: IndexSet(), initialAnchor: .automatic, isNotAvailable: false))
+                        if case let .channel(channel) = peer, channel.isForumOrMonoForum, let threadId = message.threadId {
+                            chatLocation = .replyThread(ChatReplyThreadMessage(peerId: peer.id, threadId: threadId, channelMessageId: nil, isChannelPost: false, isForumPost: true, isMonoforumPost: false, maxMessage: nil, maxReadIncomingMessageId: nil, maxReadOutgoingMessageId: nil, unreadCount: 0, initialFilledHoles: IndexSet(), initialAnchor: .automatic, isNotAvailable: false))
                         }
                         
                         component.context.sharedContext.navigateToChatController(NavigateToChatControllerParams(
                             navigationController: navigationController,
                             context: component.context,
                             chatLocation: chatLocation,
-                            subject: .message(id: .id(message.id), highlight: ChatControllerSubject.MessageHighlight(quote: nil), timecode: nil),
+                            subject: .message(id: .id(message.id), highlight: ChatControllerSubject.MessageHighlight(quote: nil), timecode: nil, setupReply: false),
                             keepStack: .always
                         ))
                     })
@@ -2797,14 +2820,14 @@ final class StorageUsageScreenComponent: Component {
                 text: aggregatedData.selectionState.selectedMessages.contains(messageId) ? presentationData.strings.StorageManagement_ContextDeselect : presentationData.strings.StorageManagement_ContextSelect,
                 icon: { theme in generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Select"), color: theme.contextMenu.primaryColor) },
                 action: { [weak self] c, _ in
-                    c.dismiss(completion: {
+                    c?.dismiss(completion: {
                     })
                     
                     guard let self, let aggregatedData = self.aggregatedData else {
                         return
                     }
                     aggregatedData.toggleMessageSelection(id: message.id)
-                    self.state?.updated(transition: Transition(animation: .curve(duration: 0.4, curve: .spring)))
+                    self.state?.updated(transition: ComponentTransition(animation: .curve(duration: 0.4, curve: .spring)))
                 })
             ))
             let items = ContextController.Items(content: .list(itemList))
@@ -2838,6 +2861,7 @@ final class StorageUsageScreenComponent: Component {
             let _ = component.context.sharedContext.openChatMessage(OpenChatMessageParams(
                 context: component.context,
                 chatLocation: .peer(id: message.id.peerId),
+                chatFilterTag: nil,
                 chatLocationContextHolder: nil,
                 message: galleryMessage,
                 standalone: true,
@@ -2845,7 +2869,8 @@ final class StorageUsageScreenComponent: Component {
                 navigationController: navigationController,
                 dismissInput: { [weak self] in
                     self?.endEditing(true)
-                }, present: { [weak self] c, a in
+                },
+                present: { [weak self] c, a, _ in
                     guard let self else {
                         return
                     }
@@ -2882,7 +2907,7 @@ final class StorageUsageScreenComponent: Component {
                     let _ = self
                 },
                 callPeer: { _, _ in
-                    //self?.controllerInteraction?.callPeer(peerId)
+                }, openConferenceCall: { _ in
                 },
                 enqueueMessage: { _ in
                 },
@@ -2890,7 +2915,7 @@ final class StorageUsageScreenComponent: Component {
                 sendEmoji: nil,
                 setupTemporaryHiddenMedia: { _, _, _ in },
                 chatAvatarHiddenMedia: { _, _ in },
-                actionInteraction: GalleryControllerActionInteraction(openUrl: { [weak self] url, concealed in
+                actionInteraction: GalleryControllerActionInteraction(openUrl: { [weak self] url, concealed, forceExternal in
                     guard let self else {
                         return
                     }
@@ -2917,6 +2942,7 @@ final class StorageUsageScreenComponent: Component {
                     }
                     let _ = self
                 }, openBotCommand: { _ in
+                }, openAd: { _ in
                 }, addContact: { _ in
                 }, storeMediaPlaybackState: { [weak self] messageId, timestamp, playbackRate in
                     guard let self else {
@@ -2938,7 +2964,7 @@ final class StorageUsageScreenComponent: Component {
             ))
         }
         */
-        
+
         private func requestClear(fromCategories: Bool) {
             guard let component = self.component, let aggregatedData = self.aggregatedData else {
                 return
@@ -3275,7 +3301,7 @@ final class StorageUsageScreenComponent: Component {
                 }
             }
             */
-            
+
             let cacheSettings = context.sharedContext.accountManager.sharedData(keys: [SharedDataKeys.cacheStorageSettings])
             |> map { sharedData -> CacheStorageSettings in
                 let cacheSettings: CacheStorageSettings
@@ -3380,7 +3406,7 @@ final class StorageUsageScreenComponent: Component {
                     }
                 }
                 */
-                
+
                 if case .separator = subItems.last {
                     subItems.removeLast()
                 }
@@ -3409,7 +3435,7 @@ final class StorageUsageScreenComponent: Component {
         return View(frame: CGRect())
     }
     
-    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<ViewControllerComponentContainer.Environment>, transition: Transition) -> CGSize {
+    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<ViewControllerComponentContainer.Environment>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
 }

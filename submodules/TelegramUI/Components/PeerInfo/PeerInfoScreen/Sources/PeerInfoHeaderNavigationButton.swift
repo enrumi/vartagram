@@ -9,6 +9,7 @@ import Display
 private enum MoreIconNodeState: Equatable {
     case more
     case search
+    case sort
     case moreToSearch(Float)
 }
 
@@ -36,7 +37,7 @@ private final class MoreIconNode: ManagedAnimationNode {
         let previousState = self.iconState
         self.iconState = state
         
-        let source = ManagedAnimationSource.local("anim_moretosearch")
+        var source: ManagedAnimationSource = .local("anim_moretosearch")
         
         let totalLength: Int = 90
         if animated {
@@ -46,6 +47,9 @@ private final class MoreIconNode: ManagedAnimationNode {
                         case .more:
                             break
                         case .search:
+                            self.trackTo(item: ManagedAnimationItem(source: source, frames: .range(startFrame: 0, endFrame: totalLength), duration: self.duration))
+                        case .sort:
+                            source = .local("anim_moretosort_l")
                             self.trackTo(item: ManagedAnimationItem(source: source, frames: .range(startFrame: 0, endFrame: totalLength), duration: self.duration))
                         case let .moreToSearch(progress):
                             let frame = Int(progress * Float(totalLength))
@@ -58,6 +62,24 @@ private final class MoreIconNode: ManagedAnimationNode {
                             self.trackTo(item: ManagedAnimationItem(source: source, frames: .range(startFrame: totalLength, endFrame: 0), duration: self.duration))
                         case .search:
                             break
+                        case .sort:
+                            source = .local("anim_sorttosearch")
+                            self.trackTo(item: ManagedAnimationItem(source: source, frames: .range(startFrame: totalLength, endFrame: 0), duration: self.duration))
+                        case let .moreToSearch(progress):
+                            let frame = Int(progress * Float(totalLength))
+                            let duration = self.duration * Double((1.0 - progress))
+                            self.trackTo(item: ManagedAnimationItem(source: source, frames: .range(startFrame: totalLength, endFrame: frame), duration: duration))
+                    }
+                case .sort:
+                    switch state {
+                        case .more:
+                            source = .local("anim_moretosort_l")
+                            self.trackTo(item: ManagedAnimationItem(source: source, frames: .range(startFrame: totalLength, endFrame: 0), duration: self.duration))
+                        case .search:
+                            source = .local("anim_sorttosearch")
+                            self.trackTo(item: ManagedAnimationItem(source: source, frames: .range(startFrame: 0, endFrame: totalLength), duration: self.duration))
+                        case .sort:
+                           break
                         case let .moreToSearch(progress):
                             let frame = Int(progress * Float(totalLength))
                             let duration = self.duration * Double((1.0 - progress))
@@ -72,6 +94,8 @@ private final class MoreIconNode: ManagedAnimationNode {
                         case .search:
                             let duration = self.duration * (1.0 - Double(currentProgress))
                             self.trackTo(item: ManagedAnimationItem(source: source, frames: .range(startFrame: currentFrame, endFrame: totalLength), duration: duration))
+                        case .sort:
+                            break
                         case let .moreToSearch(progress):
                             let frame = Int(progress * Float(totalLength))
                             let duration = self.duration * Double(abs(currentProgress - progress))
@@ -83,6 +107,9 @@ private final class MoreIconNode: ManagedAnimationNode {
                 case .more:
                     self.trackTo(item: ManagedAnimationItem(source: source, frames: .range(startFrame: 0, endFrame: 0), duration: 0.0))
                 case .search:
+                    self.trackTo(item: ManagedAnimationItem(source: source, frames: .range(startFrame: totalLength, endFrame: totalLength), duration: 0.0))
+                case .sort:
+                    source = .local("anim_moretosort_l")
                     self.trackTo(item: ManagedAnimationItem(source: source, frames: .range(startFrame: totalLength, endFrame: totalLength), duration: 0.0))
                 case let .moreToSearch(progress):
                     let frame = Int(progress * Float(totalLength))
@@ -178,7 +205,7 @@ final class PeerInfoHeaderNavigationButton: HighlightableButtonNode {
         self.backgroundNode.updateColor(color: backgroundColor, transition: transition)
         
         transition.updateTintColor(layer: self.textNode.layer, color: self.contentsColor)
-        transition.updateTintColor(layer: self.iconNode.layer, color: self.contentsColor)
+        transition.updateTintColor(view: self.iconNode.view, color: self.contentsColor)
         transition.updateStrokeColor(layer: self.backIconLayer, strokeColor: self.contentsColor)
         
         switch self.key {
@@ -247,9 +274,17 @@ final class PeerInfoHeaderNavigationButton: HighlightableButtonNode {
             case .search:
                 text = ""
                 accessibilityText = presentationData.strings.Common_Search
-                icon = nil// PresentationResourcesRootController.navigationCompactSearchIcon(presentationData.theme)
+                icon = nil
                 isAnimation = true
                 animationState = .search
+            case .standaloneSearch:
+                text = ""
+                accessibilityText = presentationData.strings.Common_Search
+                icon = PresentationResourcesRootController.navigationCompactSearchWhiteIcon(presentationData.theme)
+            case .searchWithTags:
+                text = ""
+                accessibilityText = presentationData.strings.Common_Search
+                icon = PresentationResourcesRootController.navigationCompactTagsSearchWhiteIcon(presentationData.theme)
             case .editPhoto:
                 text = presentationData.strings.Settings_EditPhoto
                 accessibilityText = text
@@ -267,13 +302,19 @@ final class PeerInfoHeaderNavigationButton: HighlightableButtonNode {
                 text = ""
                 accessibilityText = presentationData.strings.PeerInfo_QRCode_Title
                 icon = PresentationResourcesRootController.navigationQrCodeIcon(presentationData.theme)
-            case .moreToSearch:
+            case .moreSearchSort:
                 text = ""
                 accessibilityText = ""
             case .postStory:
                 text = ""
                 accessibilityText = presentationData.strings.Story_Privacy_PostStory
                 icon = PresentationResourcesRootController.navigationPostStoryIcon(presentationData.theme)
+            case .sort:
+                text = ""
+                accessibilityText = presentationData.strings.Common_More
+                icon = PresentationResourcesRootController.navigationSortIcon(presentationData.theme)
+                isAnimation = true
+                animationState = .sort
             }
             self.accessibilityLabel = accessibilityText
             self.containerNode.isGestureEnabled = isGestureEnabled
@@ -283,7 +324,7 @@ final class PeerInfoHeaderNavigationButton: HighlightableButtonNode {
             self.textNode.attributedText = NSAttributedString(string: text, font: font, textColor: .white)
             transition.updateTintColor(layer: self.textNode.layer, color: self.contentsColor)
             self.iconNode.image = icon
-            transition.updateTintColor(layer: self.iconNode.layer, color: self.contentsColor)
+            transition.updateTintColor(view: self.iconNode.view, color: self.contentsColor)
             
             if isAnimation {
                 self.iconNode.isHidden = true

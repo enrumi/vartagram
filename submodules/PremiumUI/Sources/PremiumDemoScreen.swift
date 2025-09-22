@@ -18,31 +18,42 @@ import BlurredBackgroundComponent
 import Markdown
 import TelegramUIPreferences
 
-final class GradientBackgroundComponent: Component {
+public final class PremiumGradientBackgroundComponent: Component {
     public let colors: [UIColor]
+    public let cornerRadius: CGFloat
+    public let topOverscroll: Bool
     
     public init(
-        colors: [UIColor]
+        colors: [UIColor],
+        cornerRadius: CGFloat = 10.0,
+        topOverscroll: Bool = false
     ) {
         self.colors = colors
+        self.cornerRadius = cornerRadius
+        self.topOverscroll = topOverscroll
     }
     
-    public static func ==(lhs: GradientBackgroundComponent, rhs: GradientBackgroundComponent) -> Bool {
+    public static func ==(lhs: PremiumGradientBackgroundComponent, rhs: PremiumGradientBackgroundComponent) -> Bool {
         if lhs.colors != rhs.colors {
+            return false
+        }
+        if lhs.cornerRadius != rhs.cornerRadius {
+            return false
+        }
+        if lhs.topOverscroll != rhs.topOverscroll {
             return false
         }
         return true
     }
     
     public final class View: UIView {
-        private let clipLayer: CALayer
+        private let clipLayer: CAReplicatorLayer
         private let gradientLayer: CAGradientLayer
         
-        private var component: GradientBackgroundComponent?
+        private var component: PremiumGradientBackgroundComponent?
         
         override init(frame: CGRect) {
-            self.clipLayer = CALayer()
-            self.clipLayer.cornerRadius = 10.0
+            self.clipLayer = CAReplicatorLayer()
             self.clipLayer.masksToBounds = true
             
             self.gradientLayer = CAGradientLayer()
@@ -58,24 +69,38 @@ final class GradientBackgroundComponent: Component {
         }
         
         
-        func update(component: GradientBackgroundComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+        func update(component: PremiumGradientBackgroundComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
             self.clipLayer.frame = CGRect(origin: .zero, size: CGSize(width: availableSize.width, height: availableSize.height + 10.0))
             self.gradientLayer.frame = CGRect(origin: .zero, size: availableSize)
-        
+            
             var locations: [NSNumber] = []
             let delta = 1.0 / CGFloat(component.colors.count - 1)
             for i in 0 ..< component.colors.count {
                 locations.append((delta * CGFloat(i)) as NSNumber)
             }
+
             self.gradientLayer.locations = locations
             self.gradientLayer.colors = component.colors.reversed().map { $0.cgColor }
             self.gradientLayer.type = .radial
             self.gradientLayer.startPoint = CGPoint(x: 1.0, y: 0.0)
             self.gradientLayer.endPoint = CGPoint(x: -2.0, y: 3.0)
+
+            self.clipLayer.cornerRadius = component.cornerRadius
             
             self.component = component
             
             self.setupGradientAnimations()
+            
+            if component.topOverscroll {
+                self.clipLayer.instanceCount = 2
+                var instanceTransform = CATransform3DIdentity
+                instanceTransform = CATransform3DTranslate(instanceTransform, 0.0, -availableSize.height * 1.5, 0.0)
+                instanceTransform = CATransform3DScale(instanceTransform, 1.0, -2.0, 1.0)
+                self.clipLayer.instanceTransform = instanceTransform
+                self.clipLayer.masksToBounds = false
+            } else {
+                self.clipLayer.masksToBounds = true
+            }
             
             return availableSize
         }
@@ -124,7 +149,7 @@ final class GradientBackgroundComponent: Component {
         return View(frame: CGRect())
     }
     
-    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
 }
@@ -346,7 +371,7 @@ final class DemoPagerComponent: Component {
             self.ignoreContentOffsetChange = false
         }
         
-        func update(component: DemoPagerComponent, availableSize: CGSize, transition: Transition) -> CGSize {
+        func update(component: DemoPagerComponent, availableSize: CGSize, transition: ComponentTransition) -> CGSize {
             var validIds: [AnyHashable] = []
             
             component.nextAction?.connect { [weak self] in
@@ -448,7 +473,7 @@ final class DemoPagerComponent: Component {
         return View(frame: CGRect())
     }
     
-    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, transition: transition)
     }
 }
@@ -462,7 +487,6 @@ private final class DemoSheetContent: CombinedComponent {
     let context: AccountContext
     let subject: PremiumDemoScreen.Subject
     let source: PremiumDemoScreen.Source
-    let order: [PremiumPerk]
     let action: () -> Void
     let dismiss: () -> Void
     
@@ -470,14 +494,12 @@ private final class DemoSheetContent: CombinedComponent {
         context: AccountContext,
         subject: PremiumDemoScreen.Subject,
         source: PremiumDemoScreen.Source,
-        order: [PremiumPerk]?,
         action: @escaping () -> Void,
         dismiss: @escaping () -> Void
     ) {
         self.context = context
         self.subject = subject
         self.source = source
-        self.order = order ?? [.moreUpload, .fasterDownload, .voiceToText, .noAds, .uniqueReactions, .premiumStickers, .animatedEmoji, .advancedChatManagement, .profileBadge, .animatedUserpics, .appIcons, .translation, .stories, .colors, .wallpapers]
         self.action = action
         self.dismiss = dismiss
     }
@@ -490,9 +512,6 @@ private final class DemoSheetContent: CombinedComponent {
             return false
         }
         if lhs.source != rhs.source {
-            return false
-        }
-        if lhs.order != rhs.order {
             return false
         }
         return true
@@ -588,14 +607,14 @@ private final class DemoSheetContent: CombinedComponent {
                     if let items = items {
                         for item in items {
                             if let mediaItem = item.contents.get(RecentMediaItem.self) {
-                                result.append(mediaItem.media)
+                                result.append(mediaItem.media._parse())
                             }
                         }
                     }
                     return (reactions.reactions.filter({ $0.isPremium }).map { reaction -> AvailableReactions.Reaction in
                         var aroundAnimation = reaction.aroundAnimation
                         if let replacementFile = reactionOverrides[reaction.value] {
-                            aroundAnimation = replacementFile
+                            aroundAnimation = TelegramMediaFile.Accessor(replacementFile)
                         }
                         
                         return AvailableReactions.Reaction(
@@ -603,13 +622,13 @@ private final class DemoSheetContent: CombinedComponent {
                             isPremium: reaction.isPremium,
                             value: reaction.value,
                             title: reaction.title,
-                            staticIcon: reaction.staticIcon,
-                            appearAnimation: reaction.appearAnimation,
-                            selectAnimation: reaction.selectAnimation,
-                            activateAnimation: reaction.activateAnimation,
-                            effectAnimation: reaction.effectAnimation,
-                            aroundAnimation: aroundAnimation,
-                            centerAnimation: reaction.centerAnimation
+                            staticIcon: reaction.staticIcon._parse(),
+                            appearAnimation: reaction.appearAnimation._parse(),
+                            selectAnimation: reaction.selectAnimation._parse(),
+                            activateAnimation: reaction.activateAnimation._parse(),
+                            effectAnimation: reaction.effectAnimation._parse(),
+                            aroundAnimation: aroundAnimation?._parse(),
+                            centerAnimation: reaction.centerAnimation?._parse()
                         )
                     }, result.map { file -> TelegramMediaFile in
                         for attribute in file.attributes {
@@ -626,7 +645,8 @@ private final class DemoSheetContent: CombinedComponent {
                                         immediateThumbnailData: file.immediateThumbnailData,
                                         mimeType: file.mimeType,
                                         size: file.size,
-                                        attributes: file.attributes
+                                        attributes: file.attributes,
+                                        alternativeRepresentations: file.alternativeRepresentations
                                     )
                                 }
                             default:
@@ -647,7 +667,7 @@ private final class DemoSheetContent: CombinedComponent {
                 strongSelf.isPremium = isPremium
                 strongSelf.promoConfiguration = promoConfiguration
                 if !reactions.isEmpty && !stickers.isEmpty {
-                    strongSelf.updated(transition: Transition(.immediate).withUserData(DemoAnimateInTransition()))
+                    strongSelf.updated(transition: ComponentTransition(.immediate).withUserData(DemoAnimateInTransition()))
                 }
             })
         }
@@ -663,7 +683,7 @@ private final class DemoSheetContent: CombinedComponent {
     
     static var body: Body {
         let closeButton = Child(Button.self)
-        let background = Child(GradientBackgroundComponent.self)
+        let background = Child(PremiumGradientBackgroundComponent.self)
         let pager = Child(DemoPagerComponent.self)
         let button = Child(SolidRoundedButtonComponent.self)
         let measureText = Child(MultilineTextComponent.self)
@@ -679,7 +699,7 @@ private final class DemoSheetContent: CombinedComponent {
             let sideInset: CGFloat = 16.0 + environment.safeInsets.left
                     
             let background = background.update(
-                component: GradientBackgroundComponent(colors: [
+                component: PremiumGradientBackgroundComponent(colors: [
                     UIColor(rgb: 0x0077ff),
                     UIColor(rgb: 0x6b93ff),
                     UIColor(rgb: 0x8878ff),
@@ -981,17 +1001,130 @@ private final class DemoSheetContent: CombinedComponent {
                         )
                     )
                 )
+                availableItems[.messageTags] = DemoPagerComponent.Item(
+                    AnyComponentWithIdentity(
+                        id: PremiumDemoScreen.Subject.messageTags,
+                        component: AnyComponent(
+                            PageComponent(
+                                content: AnyComponent(PhoneDemoComponent(
+                                    context: component.context,
+                                    position: .top,
+                                    model: .island,
+                                    videoFile: configuration.videos["saved_tags"],
+                                    decoration: .tag
+                                )),
+                                title: strings.Premium_MessageTags,
+                                text: strings.Premium_MessageTagsInfo,
+                                textColor: textColor
+                            )
+                        )
+                    )
+                )
+                availableItems[.lastSeen] = DemoPagerComponent.Item(
+                    AnyComponentWithIdentity(
+                        id: PremiumDemoScreen.Subject.lastSeen,
+                        component: AnyComponent(
+                            PageComponent(
+                                content: AnyComponent(PhoneDemoComponent(
+                                    context: component.context,
+                                    position: .top,
+                                    model: .island,
+                                    videoFile: configuration.videos["last_seen"],
+                                    decoration: .badgeStars
+                                )),
+                                title: strings.Premium_LastSeen,
+                                text: strings.Premium_LastSeenInfo,
+                                textColor: textColor
+                            )
+                        )
+                    )
+                )
+                availableItems[.messagePrivacy] = DemoPagerComponent.Item(
+                    AnyComponentWithIdentity(
+                        id: PremiumDemoScreen.Subject.messagePrivacy,
+                        component: AnyComponent(
+                            PageComponent(
+                                content: AnyComponent(PhoneDemoComponent(
+                                    context: component.context,
+                                    position: .top,
+                                    model: .island,
+                                    videoFile: configuration.videos["message_privacy"],
+                                    decoration: .swirlStars
+                                )),
+                                title: strings.Premium_MessagePrivacy,
+                                text: strings.Premium_MessagePrivacyInfo,
+                                textColor: textColor
+                            )
+                        )
+                    )
+                )
                 
-                var items: [DemoPagerComponent.Item] = component.order.compactMap { availableItems[$0] }
-                let index: Int
-                switch component.source {
-                    case .intro, .gift:
-                        index = items.firstIndex(where: { (component.subject as AnyHashable) == $0.content.id }) ?? 0
-                    case .other:
-                        items = items.filter { item in
-                            return item.content.id == (component.subject as AnyHashable)
-                        }
-                        index = 0
+                availableItems[.folderTags] = DemoPagerComponent.Item(
+                    AnyComponentWithIdentity(
+                        id: PremiumDemoScreen.Subject.folderTags,
+                        component: AnyComponent(
+                            PageComponent(
+                                content: AnyComponent(PhoneDemoComponent(
+                                    context: component.context,
+                                    position: .top,
+                                    model: .island,
+                                    videoFile: configuration.videos["folder_tags"],
+                                    decoration: .tag
+                                )),
+                                title: strings.Premium_FolderTags,
+                                text: strings.Premium_FolderTagsStandaloneInfo,
+                                textColor: textColor
+                            )
+                        )
+                    )
+                )
+                
+                availableItems[.messageEffects] = DemoPagerComponent.Item(
+                    AnyComponentWithIdentity(
+                        id: PremiumDemoScreen.Subject.messageEffects,
+                        component: AnyComponent(
+                            PageComponent(
+                                content: AnyComponent(PhoneDemoComponent(
+                                    context: component.context,
+                                    position: .top,
+                                    model: .island,
+                                    videoFile: configuration.videos["effects"],
+                                    decoration: .swirlStars
+                                )),
+                                title: strings.Premium_MessageEffects,
+                                text: strings.Premium_MessageEffectsInfo,
+                                textColor: textColor
+                            )
+                        )
+                    )
+                )
+                                
+                availableItems[.todo] = DemoPagerComponent.Item(
+                    AnyComponentWithIdentity(
+                        id: PremiumDemoScreen.Subject.todo,
+                        component: AnyComponent(
+                            PageComponent(
+                                content: AnyComponent(PhoneDemoComponent(
+                                    context: component.context,
+                                    position: .top,
+                                    model: .island,
+                                    videoFile: configuration.videos["todo"],
+                                    decoration: .todo
+                                )),
+                                title: strings.Premium_Todo,
+                                text: strings.Premium_TodoInfo,
+                                textColor: textColor
+                            )
+                        )
+                    )
+                )
+                
+                let index: Int = 0
+                var items: [DemoPagerComponent.Item] = []
+                if let item = availableItems.first(where: { $0.value.content.id == component.subject as AnyHashable }) {
+                    items.append(item.value)
+                } else {
+                    fatalError()
                 }
                 
                 let pager = pager.update(
@@ -1015,7 +1148,7 @@ private final class DemoSheetContent: CombinedComponent {
                             id: "background",
                             component: AnyComponent(
                                 BlurredBackgroundComponent(
-                                    color:  UIColor(rgb: 0x888888, alpha: 0.1)
+                                    color: UIColor(rgb: 0x888888, alpha: 0.1)
                                 )
                             )
                         ),
@@ -1040,6 +1173,81 @@ private final class DemoSheetContent: CombinedComponent {
             )
                          
             var measuredTextHeight: CGFloat?
+            var text: String
+            switch component.subject {
+            case .moreUpload:
+                text = strings.Premium_UploadSizeInfo
+            case .fasterDownload:
+                text = strings.Premium_FasterSpeedStandaloneInfo
+            case .voiceToText:
+                text = strings.Premium_VoiceToTextStandaloneInfo
+            case .noAds:
+                text = strings.Premium_NoAdsStandaloneInfo
+            case .uniqueReactions:
+                text = strings.Premium_InfiniteReactionsInfo
+            case .premiumStickers:
+                text = strings.Premium_StickersInfo
+            case .emojiStatus:
+                text = strings.Premium_EmojiStatusInfo
+            case .advancedChatManagement:
+                text = strings.Premium_ChatManagementStandaloneInfo
+            case .profileBadge:
+                text = strings.Premium_BadgeInfo
+            case .animatedUserpics:
+                text = strings.Premium_AvatarInfo
+            case .appIcons:
+                text = strings.Premium_AppIconStandaloneInfo
+            case .animatedEmoji:
+                text = strings.Premium_AnimatedEmojiStandaloneInfo
+            case .translation:
+                text = strings.Premium_TranslationStandaloneInfo
+            case .colors:
+                text = strings.Premium_ColorsInfo
+            case .wallpapers:
+                text = strings.Premium_WallpapersInfo
+            case .messageTags:
+                text = strings.Premium_MessageTagsInfo
+            case .lastSeen:
+                text = strings.Premium_LastSeenInfo
+            case .messagePrivacy:
+                text = strings.Premium_MessagePrivacyInfo
+            case .folderTags:
+                text = strings.Premium_FolderTagsStandaloneInfo
+            case .messageEffects:
+                text = strings.Premium_MessageEffectsInfo
+            case .todo:
+                text = strings.Premium_TodoInfo
+            default:
+                text = ""
+            }
+        
+            let textSideInset: CGFloat = 24.0
+            
+            let textColor = UIColor.black
+            let textFont = Font.regular(17.0)
+            let boldTextFont = Font.semibold(17.0)
+            let markdownAttributes = MarkdownAttributes(
+                body: MarkdownAttributeSet(font: textFont, textColor: textColor),
+                bold: MarkdownAttributeSet(font: boldTextFont, textColor: textColor),
+                link: MarkdownAttributeSet(font: textFont, textColor: textColor),
+                linkAttribute: { _ in
+                    return nil
+                }
+            )
+            let measureText = measureText.update(
+                component: MultilineTextComponent(
+                    text: .markdown(text: text, attributes: markdownAttributes),
+                    horizontalAlignment: .center,
+                    maximumNumberOfLines: 0,
+                    lineSpacing: 0.0
+                ),
+                availableSize: CGSize(width: context.availableSize.width - textSideInset * 2.0, height: context.availableSize.height),
+                transition: .immediate
+            )
+            context.add(measureText
+                .position(CGPoint(x: 0.0, y: 1000.0))
+            )
+            measuredTextHeight = measureText.size.height
             
             let buttonText: String
             var buttonAnimationName: String?
@@ -1052,7 +1260,6 @@ private final class DemoSheetContent: CombinedComponent {
                 case let .gift(price):
                     buttonText = strings.Premium_Gift_GiftSubscription(price ?? "–").string
                 case .other:
-                    var text: String
                     switch component.subject {
                         case .fasterDownload:
                             buttonText = strings.Premium_FasterSpeed_Proceed
@@ -1083,74 +1290,22 @@ private final class DemoSheetContent: CombinedComponent {
                             buttonText = strings.Premium_Wallpaper_Proceed
                         case .colors:
                             buttonText = strings.Premium_Colors_Proceed
+                        case .messageTags:
+                            buttonText = strings.Premium_MessageTags_Proceed
+                        case .lastSeen:
+                            buttonText = strings.Premium_LastSeen_Proceed
+                        case .messagePrivacy:
+                            buttonText = strings.Premium_MessagePrivacy_Proceed
+                        case .folderTags:
+                            buttonText = strings.Premium_FolderTags_Proceed
+                        case .emojiStatus:
+                            buttonText = strings.Premium_EmojiStatus_Proceed
+                            buttonAnimationName = "premium_unlock"
+                        case .todo:
+                            buttonText = strings.Premium_PaidMessages_Proceed
                         default:
                             buttonText = strings.Common_OK
                     }
-                    
-                    switch component.subject {
-                    case .moreUpload:
-                        text = strings.Premium_UploadSizeInfo
-                    case .fasterDownload:
-                        text = strings.Premium_FasterSpeedStandaloneInfo
-                    case .voiceToText:
-                        text = strings.Premium_VoiceToTextStandaloneInfo
-                    case .noAds:
-                        text = strings.Premium_NoAdsStandaloneInfo
-                    case .uniqueReactions:
-                        text = strings.Premium_InfiniteReactionsInfo
-                    case .premiumStickers:
-                        text = strings.Premium_StickersInfo
-                    case .emojiStatus:
-                        text = strings.Premium_EmojiStatusInfo
-                    case .advancedChatManagement:
-                        text = strings.Premium_ChatManagementStandaloneInfo
-                    case .profileBadge:
-                        text = strings.Premium_BadgeInfo
-                    case .animatedUserpics:
-                        text = strings.Premium_AvatarInfo
-                    case .appIcons:
-                        text = strings.Premium_AppIconStandaloneInfo
-                    case .animatedEmoji:
-                        text = strings.Premium_AnimatedEmojiStandaloneInfo
-                    case .translation:
-                        text = strings.Premium_TranslationStandaloneInfo
-                    case .colors:
-                        text = strings.Premium_ColorsInfo
-                    case .wallpapers:
-                        text = strings.Premium_WallpapersInfo
-                    case .doubleLimits:
-                        text = ""
-                    case .stories:
-                        text = ""
-                    }
-                
-                    let textSideInset: CGFloat = 24.0
-                    
-                    let textColor = UIColor.black
-                    let textFont = Font.regular(17.0)
-                    let boldTextFont = Font.semibold(17.0)
-                    let markdownAttributes = MarkdownAttributes(
-                        body: MarkdownAttributeSet(font: textFont, textColor: textColor),
-                        bold: MarkdownAttributeSet(font: boldTextFont, textColor: textColor),
-                        link: MarkdownAttributeSet(font: textFont, textColor: textColor),
-                        linkAttribute: { _ in
-                            return nil
-                        }
-                    )
-                    let measureText = measureText.update(
-                        component: MultilineTextComponent(
-                            text: .markdown(text: text, attributes: markdownAttributes),
-                            horizontalAlignment: .center,
-                            maximumNumberOfLines: 0,
-                            lineSpacing: 0.0
-                        ),
-                        availableSize: CGSize(width: context.availableSize.width - textSideInset * 2.0, height: context.availableSize.height),
-                        transition: .immediate
-                    )
-                    context.add(measureText
-                        .position(CGPoint(x: 0.0, y: 1000.0))
-                    )
-                    measuredTextHeight = measureText.size.height
                 }
             }
             
@@ -1227,14 +1382,12 @@ private final class DemoSheetComponent: CombinedComponent {
     let context: AccountContext
     let subject: PremiumDemoScreen.Subject
     let source: PremiumDemoScreen.Source
-    let order: [PremiumPerk]?
     let action: () -> Void
     
-    init(context: AccountContext, subject: PremiumDemoScreen.Subject, source: PremiumDemoScreen.Source, order: [PremiumPerk]?, action: @escaping () -> Void) {
+    init(context: AccountContext, subject: PremiumDemoScreen.Subject, source: PremiumDemoScreen.Source, action: @escaping () -> Void) {
         self.context = context
         self.subject = subject
         self.source = source
-        self.order = order
         self.action = action
     }
     
@@ -1248,10 +1401,6 @@ private final class DemoSheetComponent: CombinedComponent {
         if lhs.source != rhs.source {
             return false
         }
-        if lhs.order != rhs.order {
-            return false
-        }
-        
         return true
     }
     
@@ -1270,7 +1419,6 @@ private final class DemoSheetComponent: CombinedComponent {
                         context: context.component.context,
                         subject: context.component.subject,
                         source: context.component.source,
-                        order: context.component.order,
                         action: context.component.action,
                         dismiss: {
                             animateOut.invoke(Action { _ in
@@ -1338,6 +1486,91 @@ public class PremiumDemoScreen: ViewControllerComponentContainer {
         case stories
         case colors
         case wallpapers
+        case messageTags
+        case lastSeen
+        case messagePrivacy
+        case business
+        case folderTags
+        case messageEffects
+        case todo
+        
+        case businessLocation
+        case businessHours
+        case businessGreetingMessage
+        case businessQuickReplies
+        case businessAwayMessage
+        case businessChatBots
+        case businessIntro
+        case businessLinks
+        
+        public var perk: PremiumPerk {
+            switch self {
+            case .doubleLimits:
+                return .doubleLimits
+            case .moreUpload:
+                return .moreUpload
+            case .fasterDownload:
+                return .fasterDownload
+            case .voiceToText:
+                return .voiceToText
+            case .noAds:
+                return .noAds
+            case .uniqueReactions:
+                return .uniqueReactions
+            case .premiumStickers:
+                return .premiumStickers
+            case .advancedChatManagement:
+                return .advancedChatManagement
+            case .profileBadge:
+                return .profileBadge
+            case .animatedUserpics:
+                return .animatedUserpics
+            case .appIcons:
+                return .appIcons
+            case .animatedEmoji:
+                return .animatedEmoji
+            case .emojiStatus:
+                return .emojiStatus
+            case .translation:
+                return .translation
+            case .stories:
+                return .stories
+            case .colors:
+                return .colors
+            case .wallpapers:
+                return .wallpapers
+            case .messageTags:
+                return .messageTags
+            case .lastSeen:
+                return .lastSeen
+            case .messagePrivacy:
+                return .messagePrivacy
+            case .business:
+                return .business
+            case .folderTags:
+                return .folderTags
+            case .messageEffects:
+                return .messageEffects
+            case .todo:
+                return .todo
+            case .businessLocation:
+                return .businessLocation
+            case .businessHours:
+                return .businessHours
+            case .businessGreetingMessage:
+                return .businessGreetingMessage
+            case .businessQuickReplies:
+                return .businessQuickReplies
+            case .businessAwayMessage:
+                return .businessAwayMessage
+            case .businessChatBots:
+                return .businessChatBots
+            case .businessIntro:
+                return .businessIntro
+            case .businessLinks:
+                return .businessLinks
+            }
+        }
     }
     
     public enum Source: Equatable {
@@ -1354,12 +1587,8 @@ public class PremiumDemoScreen: ViewControllerComponentContainer {
         return self._ready
     }
         
-    public convenience init(context: AccountContext, subject: PremiumDemoScreen.Subject, source: PremiumDemoScreen.Source = .other, forceDark: Bool = false, action: @escaping () -> Void) {
-        self.init(context: context, subject: subject, source: source, order: nil, forceDark: forceDark, action: action)
-    }
-    
-    init(context: AccountContext, subject: PremiumDemoScreen.Subject, source: PremiumDemoScreen.Source = .other, order: [PremiumPerk]?, forceDark: Bool = false, action: @escaping () -> Void) {
-        super.init(context: context, component: DemoSheetComponent(context: context, subject: subject, source: source, order: order, action: action), navigationBarAppearance: .none, theme: forceDark ? .dark : .default)
+    public init(context: AccountContext, subject: PremiumDemoScreen.Subject, source: PremiumDemoScreen.Source = .other, forceDark: Bool = false, action: @escaping () -> Void) {
+        super.init(context: context, component: DemoSheetComponent(context: context, subject: subject, source: source, action: action), navigationBarAppearance: .none, theme: forceDark ? .dark : .default)
         
         self.supportedOrientations = ViewControllerSupportedOrientations(regularSize: .all, compactSize: .portrait)
         
@@ -1399,4 +1628,3 @@ public class PremiumDemoScreen: ViewControllerComponentContainer {
         }
     }
 }
-

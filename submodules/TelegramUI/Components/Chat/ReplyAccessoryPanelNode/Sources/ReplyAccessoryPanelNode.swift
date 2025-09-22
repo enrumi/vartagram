@@ -28,7 +28,8 @@ public final class ReplyAccessoryPanelNode: AccessoryPanelNode {
     public let chatPeerId: EnginePeer.Id
     public let messageId: MessageId
     public let quote: EngineMessageReplyQuote?
-    
+    public let todoItemId: Int32?
+
     private var previousMediaReference: AnyMediaReference?
     
     public let closeButton: HighlightableButtonNode
@@ -48,11 +49,12 @@ public final class ReplyAccessoryPanelNode: AccessoryPanelNode {
     
     private var validLayout: (size: CGSize, inset: CGFloat, interfaceState: ChatPresentationInterfaceState)?
     
-    public init(context: AccountContext, chatPeerId: EnginePeer.Id, messageId: MessageId, quote: EngineMessageReplyQuote?, theme: PresentationTheme, strings: PresentationStrings, nameDisplayOrder: PresentationPersonNameOrder, dateTimeFormat: PresentationDateTimeFormat, animationCache: AnimationCache?, animationRenderer: MultiAnimationRenderer?) {
+    public init(context: AccountContext, chatPeerId: EnginePeer.Id, messageId: MessageId, quote: EngineMessageReplyQuote?, todoItemId: Int32?, theme: PresentationTheme, strings: PresentationStrings, nameDisplayOrder: PresentationPersonNameOrder, dateTimeFormat: PresentationDateTimeFormat, animationCache: AnimationCache?, animationRenderer: MultiAnimationRenderer?) {
         self.chatPeerId = chatPeerId
         self.messageId = messageId
         self.quote = quote
-        
+        self.todoItemId = todoItemId
+
         self.context = context
         self.theme = theme
         self.strings = strings
@@ -118,7 +120,7 @@ public final class ReplyAccessoryPanelNode: AccessoryPanelNode {
             if let strongSelf = self {
                 if messageView.message == nil {
                     Queue.mainQueue().justDispatch {
-                        strongSelf.interfaceInteraction?.setupReplyMessage(nil, { _, _ in })
+                        strongSelf.interfaceInteraction?.setupReplyMessage(nil, nil, { _, _ in })
                     }
                     return
                 }
@@ -171,7 +173,7 @@ public final class ReplyAccessoryPanelNode: AccessoryPanelNode {
                     }
                     let textColor = strongSelf.theme.chat.inputPanel.primaryTextColor
                     if entities.count > 0 {
-                        messageText = stringWithAppliedEntities(trimToLineCount(message_.text, lineCount: 1), entities: entities, baseColor: textColor, linkColor: textColor, baseFont: textFont, linkFont: textFont, boldFont: textFont, italicFont: textFont, boldItalicFont: textFont, fixedFont: textFont, blockQuoteFont: textFont,  underlineLinks: false, message: message)
+                        messageText = stringWithAppliedEntities(trimToLineCount(message_.text, lineCount: 1), entities: entities, baseColor: textColor, linkColor: textColor, baseFont: textFont, linkFont: textFont, boldFont: textFont, italicFont: textFont, boldItalicFont: textFont, fixedFont: textFont, blockQuoteFont: textFont, underlineLinks: false, message: message)
                     } else {
                         messageText = NSAttributedString(string: text, font: textFont, textColor: isMedia ? strongSelf.theme.chat.inputPanel.secondaryTextColor : strongSelf.theme.chat.inputPanel.primaryTextColor)
                     }
@@ -272,7 +274,10 @@ public final class ReplyAccessoryPanelNode: AccessoryPanelNode {
                         }
                     }
                 } else {
-                    if let _ = strongSelf.quote {
+                    if let _ = strongSelf.todoItemId {
+                        let string = strongSelf.strings.Chat_ReplyPanel_ReplyToTodoItem
+                        titleText = [.text(NSAttributedString(string: string, font: Font.medium(15.0), textColor: strongSelf.theme.chat.inputPanel.panelControlAccentColor))]
+                    } else if let _ = strongSelf.quote {
                         let string = strongSelf.strings.Chat_ReplyPanel_ReplyToQuoteBy(authorName).string
                         titleText = [.text(NSAttributedString(string: string, font: Font.medium(15.0), textColor: strongSelf.theme.chat.inputPanel.panelControlAccentColor))]
                     } else {
@@ -303,6 +308,10 @@ public final class ReplyAccessoryPanelNode: AccessoryPanelNode {
                     let quoteText = stringWithAppliedEntities(trimToLineCount(quote.text, lineCount: 1), entities: quote.entities, baseColor: textColor, linkColor: textColor, baseFont: textFont, linkFont: textFont, boldFont: textFont, italicFont: textFont, boldItalicFont: textFont, fixedFont: textFont, blockQuoteFont: textFont, underlineLinks: false, message: message)
                     
                     strongSelf.textNode.attributedText = quoteText
+                } else if let todoItemId = strongSelf.todoItemId, let todo = message?.media.first(where: { $0 is TelegramMediaTodo }) as? TelegramMediaTodo, let todoItem = todo.items.first(where: { $0.id == todoItemId }) {
+                    let textColor = strongSelf.theme.chat.inputPanel.primaryTextColor
+                    let itemText = stringWithAppliedEntities(trimToLineCount(todoItem.text, lineCount: 1), entities: todoItem.entities, baseColor: textColor, linkColor: textColor, baseFont: textFont, linkFont: textFont, boldFont: textFont, italicFont: textFont, boldItalicFont: textFont, fixedFont: textFont, blockQuoteFont: textFont, underlineLinks: false, message: message)
+                    strongSelf.textNode.attributedText = itemText
                 }
                 
                 strongSelf.titleNode.components = titleText
@@ -375,6 +384,7 @@ public final class ReplyAccessoryPanelNode: AccessoryPanelNode {
         super.didLoad()
         
         self.view.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(self.tapGesture(_:))))
+        self.view.addGestureRecognizer(UILongPressGestureRecognizer(target: self, action: #selector(self.longPressGesture(_:))))
     }
     
     override public func animateIn() {
@@ -496,9 +506,9 @@ public final class ReplyAccessoryPanelNode: AccessoryPanelNode {
         }
     }
     
-    /*@objc func tapGesture(_ recognizer: UITapGestureRecognizer) {
-        if case .ended = recognizer.state {
-            self.interfaceInteraction?.navigateToMessage(self.messageId, false, true, .generic)
+    @objc func longPressGesture(_ recognizer: UILongPressGestureRecognizer) {
+        if case .began = recognizer.state {
+            self.interfaceInteraction?.navigateToMessage(self.messageId, false, true, ChatLoadingMessageSubject.generic)
         }
-    }*/
+    }
 }

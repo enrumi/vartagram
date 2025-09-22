@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import AsyncDisplayKit
 
 open class ContextControllerSourceNode: ContextReferenceContentNode {
@@ -180,6 +181,9 @@ open class ContextControllerSourceView: UIView {
     
     override public init(frame: CGRect) {
         super.init(frame: frame)
+        
+        self.isMultipleTouchEnabled = false
+        self.isExclusiveTouch = true
         
         let contextGesture = ContextGesture(target: self, action: nil)
         self.contextGesture = contextGesture

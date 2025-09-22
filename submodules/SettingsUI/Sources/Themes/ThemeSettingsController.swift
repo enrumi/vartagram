@@ -22,6 +22,7 @@ import PeerNameColorScreen
 import ThemeCarouselItem
 import ThemeAccentColorScreen
 import WallpaperGridScreen
+import PeerNameColorItem
 
 private final class ThemeSettingsControllerArguments {
     let context: AccountContext
@@ -337,7 +338,7 @@ private enum ThemeSettingsControllerEntry: ItemListNodeEntry {
             case let .iconItem(theme, strings, icons, isPremium, value):
                 return ThemeSettingsAppIconItem(theme: theme, strings: strings, sectionId: self.section, icons: icons, isPremium: isPremium, currentIconName: value, updated: { icon in
                     arguments.selectAppIcon(icon)
-                })
+                }, tag: ThemeSettingsEntryTag.icon)
             case .powerSaving:
                 return ItemListDisclosureItem(presentationData: presentationData, icon: nil, title: presentationData.strings.AppearanceSettings_Animations, label: "", labelStyle: .text, sectionId: self.section, style: .blocks, disclosureStyle: .arrow, action: {
                     arguments.openPowerSavingSettings()
@@ -510,7 +511,7 @@ public func themeSettingsController(context: AccountContext, focusOnItemTag: The
     }, openWallpaperSettings: {
         pushControllerImpl?(ThemeGridController(context: context))
     }, openNameColorSettings: {
-        pushControllerImpl?(PeerNameColorScreen(context: context, subject: .account))
+        pushControllerImpl?(UserAppearanceScreen(context: context))
     }, selectAccentColor: { accentColor in
         selectAccentColorImpl?(accentColor)
     }, openAccentColorPicker: { themeReference, create in
@@ -649,7 +650,7 @@ public func themeSettingsController(context: AccountContext, focusOnItemTag: The
                             })
                         })
                         
-                        c.dismiss(completion: {
+                        c?.dismiss(completion: {
                             pushControllerImpl?(controller)
                         })
                     })))
@@ -697,24 +698,24 @@ public func themeSettingsController(context: AccountContext, focusOnItemTag: The
                                 })
                             }))
                             
-                            c.dismiss(completion: {
+                            c?.dismiss(completion: {
                                 pushControllerImpl?(controller)
                             })
                         })
                     })))
                 }
                 items.append(.action(ContextMenuActionItem(text: presentationData.strings.Appearance_ShareTheme, icon: { theme in generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Share"), color: theme.contextMenu.primaryColor) }, action: { c, f in
-                    c.dismiss(completion: {
+                    c?.dismiss(completion: {
                         let shareController = ShareController(context: context, subject: .url("https://t.me/addtheme/\(theme.theme.slug)"), preferredAction: .default)
                         shareController.actionCompleted = {
                             let presentationData = context.sharedContext.currentPresentationData.with { $0 }
-                            presentControllerImpl?(UndoOverlayController(presentationData: presentationData, content: .linkCopied(text: presentationData.strings.Conversation_LinkCopied), elevatedLayout: false, animateInAsReplacement: false, action: { _ in return false }), nil)
+                            presentControllerImpl?(UndoOverlayController(presentationData: presentationData, content: .linkCopied(title: nil, text: presentationData.strings.Conversation_LinkCopied), elevatedLayout: false, animateInAsReplacement: false, action: { _ in return false }), nil)
                         }
                         presentControllerImpl?(shareController, nil)
                     })
                 })))
                 items.append(.action(ContextMenuActionItem(text: presentationData.strings.Appearance_RemoveTheme, textColor: .destructive, icon: { theme in generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Delete"), color: theme.contextMenu.destructiveColor) }, action: { c, f in
-                    c.dismiss(completion: {
+                    c?.dismiss(completion: {
                         let actionSheet = ActionSheetController(presentationData: presentationData)
                         var items: [ActionSheetItem] = []
                         items.append(ActionSheetButtonItem(title: presentationData.strings.Appearance_RemoveThemeConfirmation, color: .destructive, action: { [weak actionSheet] in
@@ -762,7 +763,7 @@ public func themeSettingsController(context: AccountContext, focusOnItemTag: The
             } else {
                 items.append(.action(ContextMenuActionItem(text: strings.Theme_Context_ChangeColors, icon: { theme in generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/ApplyTheme"), color: theme.contextMenu.primaryColor)
                 }, action: { c, f in
-                    c.dismiss(completion: {
+                    c?.dismiss(completion: {
                         let controller = ThemeAccentColorController(context: context, mode: .colors(themeReference: reference, create: true))
                         pushControllerImpl?(controller)
                     })
@@ -895,7 +896,7 @@ public func themeSettingsController(context: AccountContext, focusOnItemTag: The
                                 })
                             })
                             
-                            c.dismiss(completion: {
+                            c?.dismiss(completion: {
                                 pushControllerImpl?(controller)
                             })
                         })))
@@ -948,25 +949,25 @@ public func themeSettingsController(context: AccountContext, focusOnItemTag: The
                                     })
                                 }))
                                 
-                                c.dismiss(completion: {
+                                c?.dismiss(completion: {
                                     pushControllerImpl?(controller)
                                 })
                             })
                         })))
                     }
                     items.append(.action(ContextMenuActionItem(text: presentationData.strings.Appearance_ShareTheme, icon: { theme in generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Share"), color: theme.contextMenu.primaryColor) }, action: { c, f in
-                        c.dismiss(completion: {
+                        c?.dismiss(completion: {
                             let shareController = ShareController(context: context, subject: .url("https://t.me/addtheme/\(cloudTheme.theme.slug)"), preferredAction: .default)
                             shareController.actionCompleted = {
                                 let presentationData = context.sharedContext.currentPresentationData.with { $0 }
-                                presentControllerImpl?(UndoOverlayController(presentationData: presentationData, content: .linkCopied(text: presentationData.strings.Conversation_LinkCopied), elevatedLayout: false, animateInAsReplacement: false, action: { _ in return false }), nil)
+                                presentControllerImpl?(UndoOverlayController(presentationData: presentationData, content: .linkCopied(title: nil, text: presentationData.strings.Conversation_LinkCopied), elevatedLayout: false, animateInAsReplacement: false, action: { _ in return false }), nil)
                             }
                             presentControllerImpl?(shareController, nil)
                         })
                     })))
                     if cloudThemeExists {
                         items.append(.action(ContextMenuActionItem(text: presentationData.strings.Appearance_RemoveTheme, textColor: .destructive, icon: { theme in generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Delete"), color: theme.contextMenu.destructiveColor) }, action: { c, f in
-                            c.dismiss(completion: {
+                            c?.dismiss(completion: {
                                 let actionSheet = ActionSheetController(presentationData: presentationData)
                                 var items: [ActionSheetItem] = []
                                 items.append(ActionSheetButtonItem(title: presentationData.strings.Appearance_RemoveThemeConfirmation, color: .destructive, action: { [weak actionSheet] in

@@ -55,7 +55,7 @@ public final class HeaderNetworkStatusComponent: Component {
             fatalError("init(coder:) has not been implemented")
         }
         
-        func update(component: HeaderNetworkStatusComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+        func update(component: HeaderNetworkStatusComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
             self.state = state
             
             return availableSize
@@ -66,7 +66,7 @@ public final class HeaderNetworkStatusComponent: Component {
         return View(frame: CGRect())
     }
     
-    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
 }
@@ -266,8 +266,10 @@ public final class ChatListHeaderComponent: Component {
             self.onPressed()
         }
         
-        func update(title: String, theme: PresentationTheme, availableSize: CGSize, transition: Transition) -> CGSize {
-            self.titleView.attributedText = NSAttributedString(string: title, font: Font.regular(17.0), textColor: theme.rootController.navigationBar.accentTextColor)
+        func update(title: String, theme: PresentationTheme, availableSize: CGSize, transition: ComponentTransition) -> CGSize {
+            let titleText = NSAttributedString(string: title, font: Font.regular(17.0), textColor: theme.rootController.navigationBar.accentTextColor)
+            let titleTextUpdated = self.titleView.attributedText != titleText
+            self.titleView.attributedText = titleText
             let titleSize = self.titleView.updateLayout(CGSize(width: 100.0, height: 44.0))
             
             self.accessibilityLabel = title
@@ -287,7 +289,12 @@ public final class ChatListHeaderComponent: Component {
             transition.setPosition(view: self.arrowView, position: arrowFrame.center)
             transition.setBounds(view: self.arrowView, bounds: CGRect(origin: CGPoint(), size: arrowFrame.size))
             
-            transition.setFrame(view: self.titleView, frame: CGRect(origin: CGPoint(x: iconOffset - 3.0 + arrowSize.width + iconSpacing, y: floor((availableSize.height - titleSize.height) / 2.0)), size: titleSize))
+            let titleFrame = CGRect(origin: CGPoint(x: iconOffset - 3.0 + arrowSize.width + iconSpacing, y: floor((availableSize.height - titleSize.height) / 2.0)), size: titleSize)
+            if titleTextUpdated {
+                self.titleView.frame = titleFrame
+            } else {
+                transition.setFrame(view: self.titleView, frame: titleFrame)
+            }
             
             return CGSize(width: iconOffset + arrowSize.width + iconSpacing + titleSize.width, height: availableSize.height)
         }
@@ -373,7 +380,7 @@ public final class ChatListHeaderComponent: Component {
             return nil
         }
         
-        func updateContentOffsetFraction(contentOffsetFraction: CGFloat, transition: Transition) {
+        func updateContentOffsetFraction(contentOffsetFraction: CGFloat, transition: ComponentTransition) {
             if self.contentOffsetFraction == contentOffsetFraction {
                 return
             }
@@ -386,7 +393,7 @@ public final class ChatListHeaderComponent: Component {
             transition.setSublayerTransform(view: self.titleOffsetContainer, transform: transform)
         }
         
-        func updateNavigationTransitionAsPrevious(nextView: ContentView, fraction: CGFloat, transition: Transition, completion: @escaping () -> Void) {
+        func updateNavigationTransitionAsPrevious(nextView: ContentView, fraction: CGFloat, transition: ComponentTransition, completion: @escaping () -> Void) {
             transition.setBounds(view: self.leftButtonOffsetContainer, bounds: CGRect(origin: CGPoint(x: fraction * self.bounds.width * 0.5, y: 0.0), size: self.leftButtonOffsetContainer.bounds.size), completion: { _ in
                 completion()
             })
@@ -410,7 +417,7 @@ public final class ChatListHeaderComponent: Component {
             }
         }
         
-        func updateNavigationTransitionAsNext(previousView: ContentView, storyPeerListView: StoryPeerListComponent.View?, fraction: CGFloat, transition: Transition, completion: @escaping () -> Void) {
+        func updateNavigationTransitionAsNext(previousView: ContentView, storyPeerListView: StoryPeerListComponent.View?, fraction: CGFloat, transition: ComponentTransition, completion: @escaping () -> Void) {
             transition.setBounds(view: self.titleOffsetContainer, bounds: CGRect(origin: CGPoint(x: -(1.0 - fraction) * self.bounds.width, y: 0.0), size: self.titleOffsetContainer.bounds.size), completion: { _ in
                 completion()
             })
@@ -440,7 +447,7 @@ public final class ChatListHeaderComponent: Component {
             }
         }
         
-        func updateNavigationTransitionAsPreviousInplace(nextView: ContentView, fraction: CGFloat, transition: Transition, completion: @escaping () -> Void) {
+        func updateNavigationTransitionAsPreviousInplace(nextView: ContentView, fraction: CGFloat, transition: ComponentTransition, completion: @escaping () -> Void) {
             transition.setBounds(view: self.leftButtonOffsetContainer, bounds: CGRect(origin: CGPoint(x: 0.0, y: 0.0), size: self.leftButtonOffsetContainer.bounds.size), completion: { _ in
             })
             transition.setAlpha(view: self.leftButtonOffsetContainer, alpha: pow(1.0 - fraction, 2.0))
@@ -457,7 +464,7 @@ public final class ChatListHeaderComponent: Component {
             transition.setAlpha(view: self.titleOffsetContainer, alpha: pow(1.0 - fraction, 2.0))
         }
         
-        func updateNavigationTransitionAsNextInplace(previousView: ContentView, fraction: CGFloat, transition: Transition, completion: @escaping () -> Void) {
+        func updateNavigationTransitionAsNextInplace(previousView: ContentView, fraction: CGFloat, transition: ComponentTransition, completion: @escaping () -> Void) {
             transition.setBounds(view: self.titleOffsetContainer, bounds: CGRect(origin: CGPoint(x: 0.0, y: 0.0), size: self.titleOffsetContainer.bounds.size), completion: { _ in
                 completion()
             })
@@ -472,14 +479,16 @@ public final class ChatListHeaderComponent: Component {
             }
         }
         
-        func update(context: AccountContext, theme: PresentationTheme, strings: PresentationStrings, content: Content, backTitle: String?, sideInset: CGFloat, sideContentWidth: CGFloat, sideContentFraction: CGFloat, size: CGSize, transition: Transition) {
+        func update(context: AccountContext, theme: PresentationTheme, strings: PresentationStrings, content: Content, backTitle: String?, sideInset: CGFloat, sideContentWidth: CGFloat, sideContentFraction: CGFloat, size: CGSize, transition: ComponentTransition) {
             transition.setPosition(view: self.titleOffsetContainer, position: CGPoint(x: size.width * 0.5, y: size.height * 0.5))
             transition.setBounds(view: self.titleOffsetContainer, bounds: CGRect(origin: self.titleOffsetContainer.bounds.origin, size: size))
             
             transition.setPosition(view: self.titleScaleContainer, position: CGPoint(x: size.width * 0.5, y: size.height * 0.5))
             transition.setBounds(view: self.titleScaleContainer, bounds: CGRect(origin: self.titleScaleContainer.bounds.origin, size: size))
             
-            self.titleTextView.attributedText = NSAttributedString(string: content.title, font: Font.semibold(17.0), textColor: theme.rootController.navigationBar.primaryTextColor)
+            let titleText = NSAttributedString(string: content.title, font: Font.semibold(17.0), textColor: theme.rootController.navigationBar.primaryTextColor)
+            let titleTextUpdated = self.titleTextView.attributedText != titleText
+            self.titleTextView.attributedText = titleText
             
             let buttonSpacing: CGFloat = 8.0
             
@@ -616,7 +625,11 @@ public final class ChatListHeaderComponent: Component {
             let titleTextSize = self.titleTextView.updateLayout(CGSize(width: remainingWidth, height: size.height))
             
             let titleFrame = CGRect(origin: CGPoint(x: floor((size.width - titleTextSize.width) / 2.0) + sideContentWidth, y: floor((size.height - titleTextSize.height) / 2.0)), size: titleTextSize)
-            transition.setFrame(view: self.titleTextView, frame: titleFrame)
+            if titleTextUpdated {
+                self.titleTextView.frame = titleFrame
+            } else {
+                transition.setFrame(view: self.titleTextView, frame: titleFrame)
+            }
             
             if let titleComponent = content.titleComponent {
                 var titleContentTransition = transition
@@ -733,6 +746,7 @@ public final class ChatListHeaderComponent: Component {
         private var storyPeerList: ComponentView<Empty>?
         public var storyPeerAction: ((EnginePeer?) -> Void)?
         public var storyContextPeerAction: ((ContextExtractedContentContainingNode, ContextGesture, EnginePeer) -> Void)?
+        public var storyComposeAction: ((CGFloat) -> Void)?
         
         private var effectiveContentView: ContentView? {
             return self.secondaryContentView ?? self.primaryContentView
@@ -825,10 +839,10 @@ public final class ChatListHeaderComponent: Component {
             return defaultResult
         }
         
-        private func updateContentStoryOffsets(transition: Transition) {
+        private func updateContentStoryOffsets(transition: ComponentTransition) {
         }
         
-        func update(component: ChatListHeaderComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+        func update(component: ChatListHeaderComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
             self.state = state
             
             let previousComponent = self.component
@@ -964,6 +978,12 @@ public final class ChatListHeaderComponent: Component {
                                 return
                             }
                             self.component?.toggleIsLocked()
+                        },
+                        composeAction: { [weak self] offset in
+                            guard let self else {
+                                return
+                            }
+                            self.storyComposeAction?(offset)
                         }
                     )),
                     environment: {},
@@ -1077,13 +1097,25 @@ public final class ChatListHeaderComponent: Component {
         public func findTitleView() -> ChatListTitleView? {
             return self.primaryContentView?.chatListTitleView
         }
+        
+        public func emojiStatus() -> PeerEmojiStatus? {
+            guard let component = self.component else {
+                return nil
+            }
+            if let _ = component.storySubscriptions, let primaryContent = component.primaryContent, let chatListTitle = primaryContent.chatListTitle, let peerStatus = chatListTitle.peerStatus, case let .emoji(emojiStatus) = peerStatus {
+                return emojiStatus
+            } else if let peerStatus = self.findTitleView()?.title.peerStatus, case let .emoji(emojiStatus) = peerStatus {
+                return emojiStatus
+            }
+            return nil
+        }
     }
     
     public func makeView() -> View {
         return View(frame: CGRect())
     }
     
-    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: Transition) -> CGSize {
+    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
 }
@@ -1181,7 +1213,7 @@ public final class NavigationButtonComponent: Component {
             self.component?.pressed(self)
         }
         
-        func update(component: NavigationButtonComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<NavigationButtonComponentEnvironment>, transition: Transition) -> CGSize {
+        func update(component: NavigationButtonComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<NavigationButtonComponentEnvironment>, transition: ComponentTransition) -> CGSize {
             self.component = component
             
             let theme = environment[NavigationButtonComponentEnvironment.self].value.theme
@@ -1331,7 +1363,7 @@ public final class NavigationButtonComponent: Component {
         return View(frame: CGRect())
     }
     
-    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<NavigationButtonComponentEnvironment>, transition: Transition) -> CGSize {
+    public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<NavigationButtonComponentEnvironment>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
     }
 }

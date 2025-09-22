@@ -699,19 +699,24 @@ public final class AppLockContextImpl: AppLockContext {
         assert(self.currentPtgSecretPasscodes != nil)
         
         if self.currentPtgSecretPasscodes.secretPasscodes.contains(where: { $0.active && f($0) }) {
-            var taskId: UIBackgroundTaskIdentifier?
-            taskId = UIApplication.shared.beginBackgroundTask(withName: "updateSP", expirationHandler: {
+            final class TaskIdHolder {
+                var taskId: UIBackgroundTaskIdentifier?
+            }
+
+            let taskIdHolder = TaskIdHolder()
+
+            taskIdHolder.taskId = UIApplication.shared.beginBackgroundTask(withName: "updateSP", expirationHandler: {
                 Logger.shared.log("AppLock", "Background task for updatePtgSecretPasscodes expired")
-                if let taskId {
+                if let taskId = taskIdHolder.taskId {
                     UIApplication.shared.endBackgroundTask(taskId)
                 }
             })
-            if taskId != .invalid {
+            if taskIdHolder.taskId != .invalid {
                 Logger.shared.log("AppLock", "Began background task for updatePtgSecretPasscodes")
                 
                 // current account may change as a result, allow some time to handle that
                 Queue.mainQueue().after(2.0, {
-                    if let taskId {
+                    if let taskId = taskIdHolder.taskId {
                         Logger.shared.log("AppLock", "Ending background task for updatePtgSecretPasscodes")
                         UIApplication.shared.endBackgroundTask(taskId)
                     }

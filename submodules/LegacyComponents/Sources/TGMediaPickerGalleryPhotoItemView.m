@@ -1,8 +1,9 @@
+#import <LegacyComponents/LegacyComponents.h>
 #import "TGMediaPickerGalleryPhotoItemView.h"
 
 #import "LegacyComponentsInternal.h"
-#import "TGFont.h"
-#import "TGStringUtils.h"
+#import <LegacyComponents/TGFont.h>
+#import <LegacyComponents/TGStringUtils.h>
 
 #import <LegacyComponents/TGMediaAsset.h>
 #import <LegacyComponents/TGMediaAssetImageSignals.h>
@@ -18,7 +19,7 @@
 
 #import <LegacyComponents/TGMediaPickerGalleryVideoItem.h>
 
-#import "TGMediaPickerGalleryPhotoItem.h"
+#import <LegacyComponents/TGMediaPickerGalleryPhotoItem.h>
 
 #import "TGPhotoDrawingController.h"
 
@@ -248,11 +249,11 @@
 
         }]];
         
-        if (!item.asFile) {
-            [_facesDisposable setDisposable:[[TGPaintFaceDetector detectFacesInItem:item.editableMediaItem editingContext:item.editingContext] startStrictWithNext:nil file:__FILE_NAME__ line:__LINE__]];
-            
-            return;
-        }
+//        if (!item.asFile) {
+//            [_facesDisposable setDisposable:[[TGPaintFaceDetector detectFacesInItem:item.editableMediaItem editingContext:item.editingContext] startStrictWithNext:nil file:__FILE_NAME__ line:__LINE__]];
+//            
+//            return;
+//        }
         
         _fileInfoLabel.text = nil;
         

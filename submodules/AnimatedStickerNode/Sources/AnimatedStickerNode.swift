@@ -6,6 +6,7 @@ import AsyncDisplayKit
 import YuvConversion
 import MediaResources
 import AnimationCompression
+import UIKit
 
 private let sharedQueue = Queue()
 
@@ -168,7 +169,7 @@ public protocol AnimatedStickerNode: ASDisplayNode {
     var visibility: Bool { get set }
     var overrideVisibility: Bool { get set }
     
-    var isPlayingChanged: (Bool) -> Void { get }
+    var isPlayingChanged: (Bool) -> Void { get set }
     
     func cloneCurrentFrame(from otherNode: AnimatedStickerNode?)
     func setup(source: AnimatedStickerNodeSource, width: Int, height: Int, playbackMode: AnimatedStickerPlaybackMode, mode: AnimatedStickerMode)
@@ -201,7 +202,10 @@ public final class DefaultAnimatedStickerNodeImpl: ASDisplayNode, AnimatedSticke
     public var frameUpdated: (Int, Int) -> Void = { _, _ in }
     public private(set) var currentFrameIndex: Int = 0
     public private(set) var currentFrameCount: Int = 0
+    public private(set) var currentFrameRate: Int = 0
     private var playFromIndex: Int?
+    
+    public var frameColorUpdated: ((UIColor) -> Void)?
     
     private let timer = Atomic<SwiftSignalKit.Timer?>(value: nil)
     private let frameSource = Atomic<QueueLocalObject<AnimatedStickerFrameSourceWrapper>?>(value: nil)
@@ -215,7 +219,7 @@ public final class DefaultAnimatedStickerNodeImpl: ASDisplayNode, AnimatedSticke
     public var isPlaying: Bool = false
     private var currentLoopCount: Int = 0
     private var canDisplayFirstFrame: Bool = false
-    private var playbackMode: AnimatedStickerPlaybackMode = .loop
+    public var playbackMode: AnimatedStickerPlaybackMode = .loop
     
     public var stopAtNearestLoop: Bool = false
     
@@ -525,11 +529,17 @@ public final class DefaultAnimatedStickerNodeImpl: ASDisplayNode, AnimatedSticke
                                     strongSelf.reportedStarted = true
                                     strongSelf.started()
                                 }
+                            }, averageColor: strongSelf.frameColorUpdated == nil ? nil : { color in
+                                guard let strongSelf = self else {
+                                    return
+                                }
+                                strongSelf.frameColorUpdated?(color)
                             })
                             
                             strongSelf.frameUpdated(frame.index, frame.totalFrames)
                             strongSelf.currentFrameIndex = frame.index
                             strongSelf.currentFrameCount = frame.totalFrames
+                            strongSelf.currentFrameRate = frameRate
                             
                             if frame.isLastFrame {
                                 var stopped = false
@@ -635,11 +645,17 @@ public final class DefaultAnimatedStickerNodeImpl: ASDisplayNode, AnimatedSticke
                                     strongSelf.reportedStarted = true
                                     strongSelf.started()
                                 }
+                            }, averageColor: strongSelf.frameColorUpdated == nil ? nil : { color in
+                                guard let strongSelf = self else {
+                                    return
+                                }
+                                strongSelf.frameColorUpdated?(color)
                             })
                             
                             strongSelf.frameUpdated(frame.index, frame.totalFrames)
                             strongSelf.currentFrameIndex = frame.index
-                            strongSelf.currentFrameCount = frame.totalFrames;
+                            strongSelf.currentFrameCount = frame.totalFrames
+                            strongSelf.currentFrameRate = frameRate
                             
                             if frame.isLastFrame {
                                 var stopped = false
@@ -790,6 +806,11 @@ public final class DefaultAnimatedStickerNodeImpl: ASDisplayNode, AnimatedSticke
                             strongSelf.reportedStarted = true
                             strongSelf.started()
                         }
+                    }, averageColor: strongSelf.frameColorUpdated == nil ? nil : { color in
+                        guard let strongSelf = self else {
+                            return
+                        }
+                        strongSelf.frameColorUpdated?(color)
                     })
 
                     strongSelf.playbackStatus.set(.single(AnimatedStickerStatus(playing: false, duration: duration, timestamp: 0.0)))

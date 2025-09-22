@@ -7,7 +7,7 @@ public struct NetworkSettings: Codable {
     public var useNetworkFramework: Bool?
     public var useExperimentalDownload: Bool?
     public var onlineUpdatePeriodMs: Int32?
-    
+
     public static var defaultSettings: NetworkSettings {
         return NetworkSettings(reducedBackupDiscoveryTimeout: false, applicationUpdateUrlPrefix: nil, backupHostOverride: nil, useNetworkFramework: nil, useExperimentalDownload: nil, onlineUpdatePeriodMs: nil)
     }
@@ -28,7 +28,7 @@ public struct NetworkSettings: Codable {
         self.applicationUpdateUrlPrefix = try? container.decodeIfPresent(String.self, forKey: "applicationUpdateUrlPrefix")
         self.backupHostOverride = try? container.decodeIfPresent(String.self, forKey: "backupHostOverride")
         self.useNetworkFramework = try container.decodeIfPresent(Bool.self, forKey: "useNetworkFramework_v2")
-        self.useExperimentalDownload = try container.decodeIfPresent(Bool.self, forKey: "useExperimentalDownload")
+        self.useExperimentalDownload = try container.decodeIfPresent(Bool.self, forKey: "useExperimentalDownload_v2")
         self.onlineUpdatePeriodMs = try container.decodeIfPresent(Int32.self, forKey: "onlineUpdatePeriodMs")
     }
     
@@ -39,7 +39,7 @@ public struct NetworkSettings: Codable {
         try container.encodeIfPresent(self.applicationUpdateUrlPrefix, forKey: "applicationUpdateUrlPrefix")
         try container.encodeIfPresent(self.backupHostOverride, forKey: "backupHostOverride")
         try container.encodeIfPresent(self.useNetworkFramework, forKey: "useNetworkFramework_v2")
-        try container.encodeIfPresent(self.useExperimentalDownload, forKey: "useExperimentalDownload")
+        try container.encodeIfPresent(self.useExperimentalDownload, forKey: "useExperimentalDownload_v2")
         try container.encodeIfPresent(self.onlineUpdatePeriodMs, forKey: "onlineUpdatePeriodMs")
     }
 }

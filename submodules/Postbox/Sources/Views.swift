@@ -1,19 +1,71 @@
 import Foundation
 
 public enum PostboxViewKey: Hashable {
+    public struct HistoryView: Equatable {
+        public var peerId: PeerId
+        public var threadId: Int64?
+        public var clipHoles: Bool
+        public var trackHoles: Bool
+        public var orderStatistics: MessageHistoryViewOrderStatistics
+        public var ignoreMessagesInTimestampRange: ClosedRange<Int32>?
+        public var ignoreMessageIds: Set<MessageId>
+        public var anchor: HistoryViewInputAnchor
+        public var combinedReadStates: MessageHistoryViewReadState?
+        public var transientReadStates: MessageHistoryViewReadState?
+        public var tag: HistoryViewInputTag?
+        public var appendMessagesFromTheSameGroup: Bool
+        public var namespaces: MessageIdNamespaces
+        public var count: Int
+        
+        public init(
+            peerId: PeerId,
+            threadId: Int64?,
+            clipHoles: Bool,
+            trackHoles: Bool,
+            orderStatistics: MessageHistoryViewOrderStatistics = [],
+            ignoreMessagesInTimestampRange: ClosedRange<Int32>? = nil,
+            ignoreMessageIds: Set<MessageId> = Set(),
+            anchor: HistoryViewInputAnchor,
+            combinedReadStates: MessageHistoryViewReadState? = nil,
+            transientReadStates: MessageHistoryViewReadState? = nil,
+            tag: HistoryViewInputTag? = nil,
+            appendMessagesFromTheSameGroup: Bool,
+            namespaces: MessageIdNamespaces,
+            count: Int
+        ) {
+            self.peerId = peerId
+            self.threadId = threadId
+            self.clipHoles = clipHoles
+            self.trackHoles = trackHoles
+            self.orderStatistics = orderStatistics
+            self.ignoreMessagesInTimestampRange = ignoreMessagesInTimestampRange
+            self.ignoreMessageIds = ignoreMessageIds
+            self.anchor = anchor
+            self.combinedReadStates = combinedReadStates
+            self.transientReadStates = transientReadStates
+            self.tag = tag
+            self.appendMessagesFromTheSameGroup = appendMessagesFromTheSameGroup
+            self.namespaces = namespaces
+            self.count = count
+        }
+    }
+    
     case itemCollectionInfos(namespaces: [ItemCollectionId.Namespace])
     case itemCollectionIds(namespaces: [ItemCollectionId.Namespace])
     case itemCollectionInfo(id: ItemCollectionId)
     case peerChatState(peerId: PeerId)
     case orderedItemList(id: Int32)
     case preferences(keys: Set<ValueBoxKey>)
+    case preferencesPrefix(keyPrefix: ValueBoxKey)
     case globalMessageTags(globalTag: GlobalMessageTags, position: MessageIndex, count: Int, groupingPredicate: ((Message, Message) -> Bool)?)
     case peer(peerId: PeerId, components: PeerViewComponents)
     case pendingMessageActions(type: PendingMessageActionType)
     case invalidatedMessageHistoryTagSummaries(peerId: PeerId?, threadId: Int64?, tagMask: MessageTags, namespace: MessageId.Namespace)
     case pendingMessageActionsSummary(type: PendingMessageActionType, peerId: PeerId, namespace: MessageId.Namespace)
-    case historyTagSummaryView(tag: MessageTags, peerId: PeerId, threadId: Int64?, namespace: MessageId.Namespace)
+    case historyTagSummaryView(tag: MessageTags, peerId: PeerId, threadId: Int64?, namespace: MessageId.Namespace, customTag: MemoryBuffer?)
+    case historyCustomTagSummariesView(peerId: PeerId, threadId: Int64?, namespace: MessageId.Namespace)
     case cachedPeerData(peerId: PeerId)
+    case cachedPeerDataWithMessages(peerId: PeerId)
     case unreadCounts(items: [UnreadMessageCountsItem])
     case combinedReadState(peerId: PeerId, handleThreads: Bool)
     case peerNotificationSettings(peerIds: Set<PeerId>)
@@ -48,6 +100,8 @@ public enum PostboxViewKey: Hashable {
     case story(id: StoryId)
     case savedMessagesIndex(peerId: PeerId)
     case savedMessagesStats(peerId: PeerId)
+    case chatInterfaceState(peerId: PeerId)
+    case historyView(HistoryView)
 
     public func hash(into hasher: inout Hasher) {
         switch self {
@@ -63,6 +117,8 @@ public enum PostboxViewKey: Hashable {
             hasher.combine(id)
         case .preferences:
             hasher.combine(3)
+        case .preferencesPrefix:
+            hasher.combine(21)
         case .globalMessageTags:
             hasher.combine(4)
         case let .peer(peerId, _):
@@ -78,12 +134,19 @@ public enum PostboxViewKey: Hashable {
             hasher.combine(type)
             hasher.combine(peerId)
             hasher.combine(namespace)
-        case let .historyTagSummaryView(tag, peerId, threadId, namespace):
+        case let .historyTagSummaryView(tag, peerId, threadId, namespace, customTag):
             hasher.combine(tag)
             hasher.combine(peerId)
             hasher.combine(threadId)
             hasher.combine(namespace)
+            hasher.combine(customTag)
+        case let .historyCustomTagSummariesView(peerId, threadId, namespace):
+            hasher.combine(peerId)
+            hasher.combine(threadId)
+            hasher.combine(namespace)
         case let .cachedPeerData(peerId):
+            hasher.combine(peerId)
+        case let .cachedPeerDataWithMessages(peerId):
             hasher.combine(peerId)
         case .unreadCounts:
             hasher.combine(5)
@@ -159,6 +222,12 @@ public enum PostboxViewKey: Hashable {
             hasher.combine(peerId)
         case let .savedMessagesStats(peerId):
             hasher.combine(peerId)
+        case let .chatInterfaceState(peerId):
+            hasher.combine(peerId)
+        case let .historyView(historyView):
+            hasher.combine(20)
+            hasher.combine(historyView.peerId)
+            hasher.combine(historyView.threadId)
         }
     }
     
@@ -200,6 +269,12 @@ public enum PostboxViewKey: Hashable {
             } else {
                 return false
             }
+        case let .preferencesPrefix(lhsKeyPrefix):
+            if case let .preferencesPrefix(rhsKeyPrefix) = rhs, lhsKeyPrefix == rhsKeyPrefix {
+                return true
+            } else {
+                return false
+            }
         case let .globalMessageTags(globalTag, position, count, _):
             if case .globalMessageTags(globalTag, position, count, _) = rhs {
                 return true
@@ -230,14 +305,26 @@ public enum PostboxViewKey: Hashable {
             } else {
                 return false
             }
-        case let .historyTagSummaryView(tag, peerId, threadId, namespace):
-            if case .historyTagSummaryView(tag, peerId, threadId, namespace) = rhs {
+        case let .historyTagSummaryView(tag, peerId, threadId, namespace, customTag):
+            if case .historyTagSummaryView(tag, peerId, threadId, namespace, customTag) = rhs {
+                return true
+            } else {
+                return false
+            }
+        case let .historyCustomTagSummariesView(peerId, threadId, namespace):
+            if case .historyCustomTagSummariesView(peerId, threadId, namespace) = rhs {
                 return true
             } else {
                 return false
             }
         case let .cachedPeerData(peerId):
             if case .cachedPeerData(peerId) = rhs {
+                return true
+            } else {
+                return false
+            }
+        case let .cachedPeerDataWithMessages(peerId):
+            if case .cachedPeerDataWithMessages(peerId) = rhs {
                 return true
             } else {
                 return false
@@ -446,6 +533,18 @@ public enum PostboxViewKey: Hashable {
             } else {
                 return false
             }
+        case let .chatInterfaceState(peerId):
+            if case .chatInterfaceState(peerId) = rhs {
+                return true
+            } else {
+                return false
+            }
+        case let .historyView(historyView):
+            if case .historyView(historyView) = rhs {
+                return true
+            } else {
+                return false
+            }
         }
     }
 }
@@ -464,6 +563,8 @@ func postboxViewForKey(postbox: PostboxImpl, key: PostboxViewKey) -> MutablePost
         return MutableOrderedItemListView(postbox: postbox, collectionId: id)
     case let .preferences(keys):
         return MutablePreferencesView(postbox: postbox, keys: keys)
+    case let .preferencesPrefix(keyPrefix):
+        return MutablePreferencesPrefixView(postbox: postbox, keyPrefix: keyPrefix)
     case let .globalMessageTags(globalTag, position, count, groupingPredicate):
         return MutableGlobalMessageTagsView(postbox: postbox, globalTag: globalTag, position: position, count: count, groupingPredicate: groupingPredicate)
     case let .peer(peerId, components):
@@ -474,10 +575,14 @@ func postboxViewForKey(postbox: PostboxImpl, key: PostboxViewKey) -> MutablePost
         return MutableInvalidatedMessageHistoryTagSummariesView(postbox: postbox, peerId: peerId, threadId: threadId, tagMask: tagMask, namespace: namespace)
     case let .pendingMessageActionsSummary(type, peerId, namespace):
         return MutablePendingMessageActionsSummaryView(postbox: postbox, type: type, peerId: peerId, namespace: namespace)
-    case let .historyTagSummaryView(tag, peerId, threadId, namespace):
-        return MutableMessageHistoryTagSummaryView(postbox: postbox, tag: tag, peerId: peerId, threadId: threadId, namespace: namespace)
+    case let .historyTagSummaryView(tag, peerId, threadId, namespace, customTag):
+        return MutableMessageHistoryTagSummaryView(postbox: postbox, tag: tag, peerId: peerId, threadId: threadId, namespace: namespace, customTag: customTag)
+    case let .historyCustomTagSummariesView(peerId, threadId, namespace):
+        return MutableMessageHistoryCustomTagSummariesView(postbox: postbox, peerId: peerId, threadId: threadId, namespace: namespace)
     case let .cachedPeerData(peerId):
-        return MutableCachedPeerDataView(postbox: postbox, peerId: peerId)
+        return MutableCachedPeerDataView(postbox: postbox, peerId: peerId, trackAssociatedMessages: false)
+    case let .cachedPeerDataWithMessages(peerId):
+        return MutableCachedPeerDataView(postbox: postbox, peerId: peerId, trackAssociatedMessages: true)
     case let .unreadCounts(items):
         return MutableUnreadMessageCountsView(postbox: postbox, items: items)
     case let .combinedReadState(peerId, handleThreads):
@@ -546,5 +651,26 @@ func postboxViewForKey(postbox: PostboxImpl, key: PostboxViewKey) -> MutablePost
         return MutableMessageHistorySavedMessagesIndexView(postbox: postbox, peerId: peerId)
     case let .savedMessagesStats(peerId):
         return MutableMessageHistorySavedMessagesStatsView(postbox: postbox, peerId: peerId)
+    case let .chatInterfaceState(peerId):
+        return MutableChatInterfaceStateView(postbox: postbox, peerId: peerId)
+    case let .historyView(historyView):
+        return MutableMessageHistoryView(
+            postbox: postbox,
+            orderStatistics: historyView.orderStatistics,
+            clipHoles: historyView.clipHoles,
+            trackHoles: historyView.trackHoles,
+            peerIds: .single(peerId: historyView.peerId, threadId: historyView.threadId),
+            ignoreMessagesInTimestampRange: historyView.ignoreMessagesInTimestampRange,
+            ignoreMessageIds: historyView.ignoreMessageIds,
+            anchor: historyView.anchor,
+            combinedReadStates: historyView.combinedReadStates,
+            transientReadStates: historyView.transientReadStates,
+            tag: historyView.tag,
+            appendMessagesFromTheSameGroup: historyView.appendMessagesFromTheSameGroup,
+            namespaces: historyView.namespaces,
+            count: historyView.count,
+            topTaggedMessages: [:],
+            additionalDatas: []
+        )
     }
 }

@@ -58,6 +58,9 @@ func _internal_requestStickerSet(postbox: Postbox, network: Network, reference: 
     case .iconTopicEmoji:
         collectionId = nil
         input = .inputStickerSetEmojiDefaultTopicIcons
+    case .tonGifts:
+        collectionId = nil
+        input = .inputStickerSetTonGifts
     }
     
     let localSignal: (ItemCollectionId) -> Signal<(ItemCollectionInfo, [ItemCollectionItem])?, NoError> = { collectionId in
@@ -117,7 +120,7 @@ func _internal_requestStickerSet(postbox: Postbox, network: Network, reference: 
                 }
                 
                 for apiDocument in documents {
-                    if let file = telegramMediaFileFromApiDocument(apiDocument), let id = file.id {
+                    if let file = telegramMediaFileFromApiDocument(apiDocument, altDocuments: []), let id = file.id {
                         let fileIndexKeys: [MemoryBuffer]
                         if let indexKeys = indexKeysByFile[id] {
                             fileIndexKeys = indexKeys
@@ -199,7 +202,7 @@ func _internal_installStickerSetInteractively(account: Account, info: StickerPac
                 
                 var items:[StickerPackItem] = []
                 for apiDocument in apiDocuments {
-                    if let file = telegramMediaFileFromApiDocument(apiDocument), let id = file.id {
+                    if let file = telegramMediaFileFromApiDocument(apiDocument, altDocuments: []), let id = file.id {
                         items.append(StickerPackItem(index: ItemCollectionItemIndex(index: Int32(items.count), id: id.id), file: file, indexKeys: []))
                     }
                 }

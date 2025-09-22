@@ -18,9 +18,10 @@ private let subtitleFont = Font.regular(12.0)
 
 private struct ShareTopicEntry: Comparable, Identifiable {
     let index: Int32
+    let basePeer: EnginePeer
     let peer: EngineRenderedPeer
     let id: Int64
-    let threadData: MessageHistoryThreadData
+    let threadData: MessageHistoryThreadData?
     let theme: PresentationTheme
     let strings: PresentationStrings
     
@@ -30,6 +31,9 @@ private struct ShareTopicEntry: Comparable, Identifiable {
     
     static func ==(lhs: ShareTopicEntry, rhs: ShareTopicEntry) -> Bool {
         if lhs.index != rhs.index {
+            return false
+        }
+        if lhs.basePeer != rhs.basePeer {
             return false
         }
         if lhs.peer != rhs.peer {
@@ -53,7 +57,7 @@ private struct ShareTopicEntry: Comparable, Identifiable {
     }
     
     func item(environment: ShareControllerEnvironment, context: ShareControllerAccountContext, interfaceInteraction: ShareControllerInteraction) -> GridItem {
-        return ShareTopicGridItem(environment: environment, context: context, theme: self.theme, strings: self.strings, peer: self.peer, id: self.id, threadInfo: self.threadData, controllerInteraction: interfaceInteraction)
+        return ShareTopicGridItem(environment: environment, context: context, theme: self.theme, strings: self.strings, basePeer: self.basePeer, peer: self.peer, id: self.id, threadInfo: self.threadData, controllerInteraction: interfaceInteraction)
     }
 }
 
@@ -174,6 +178,7 @@ final class ShareTopicsContainerNode: ASDisplayNode, ShareContentContainerNode {
     private let contentSubtitleNode: ASTextNode
     private let backNode: CancelButtonNode
     
+    private var contentDidBeginDragging: (() -> Void)?
     private var contentOffsetUpdated: ((CGFloat, ContainedViewLayoutTransition) -> Void)?
         
     private var validLayout: (CGSize, CGFloat)?
@@ -204,7 +209,10 @@ final class ShareTopicsContainerNode: ASDisplayNode, ShareContentContainerNode {
             
             for topic in topics {
                 if case let .forum(_, _, threadId, _, _) = topic.index, let threadData = topic.threadData {
-                    entries.append(ShareTopicEntry(index: index, peer: EngineRenderedPeer(peer: peer), id: threadId, threadData: threadData, theme: theme, strings: strings))
+                    entries.append(ShareTopicEntry(index: index, basePeer: peer, peer: EngineRenderedPeer(peer: peer), id: threadId, threadData: threadData, theme: theme, strings: strings))
+                    index += 1
+                } else if case .chatList = topic.index {
+                    entries.append(ShareTopicEntry(index: index, basePeer: peer, peer: topic.renderedPeer, id: topic.renderedPeer.peerId.toInt64(), threadData: nil, theme: theme, strings: strings))
                     index += 1
                 }
             }
@@ -249,6 +257,10 @@ final class ShareTopicsContainerNode: ASDisplayNode, ShareContentContainerNode {
                 strongSelf.enqueueTransition(transition, firstTime: firstTime)
             }
         }))
+        
+        self.contentGridNode.scrollingInitiated = { [weak self] in
+            self?.contentDidBeginDragging?()
+        }
 
         self.contentGridNode.presentationLayoutUpdated = { [weak self] presentationLayout, transition in
             self?.gridPresentationLayoutUpdated(presentationLayout, transition: transition)
@@ -285,6 +297,10 @@ final class ShareTopicsContainerNode: ASDisplayNode, ShareContentContainerNode {
             }
             self.contentGridNode.transaction(GridNodeTransaction(deleteItems: transition.deletions, insertItems: transition.insertions, updateItems: transition.updates, scrollToItem: nil, updateLayout: nil, itemTransition: itemTransition, stationaryItems: .none, updateFirstIndexInSectionOffset: nil), completion: { _ in })
         }
+    }
+    
+    func setDidBeginDragging(_ f: (() -> Void)?) {
+        self.contentDidBeginDragging = f
     }
         
     func setContentOffsetUpdated(_ f: ((CGFloat, ContainedViewLayoutTransition) -> Void)?) {
@@ -457,8 +473,6 @@ final class ShareTopicsContainerNode: ASDisplayNode, ShareContentContainerNode {
         originalSubtitleFrame.size = subtitleFrame.size
         self.contentSubtitleNode.frame = originalSubtitleFrame
         transition.updateFrame(node: self.contentSubtitleNode, frame: subtitleFrame)
-        
-
         
         self.contentOffsetUpdated?(presentationLayout.contentOffset.y, actualTransition)
     }

@@ -15,12 +15,12 @@ public extension TelegramEngine {
 		    return _internal_acceptTermsOfService(account: self.account, id: id)
 		}
 
-        public func requestChangeAccountPhoneNumberVerification(phoneNumber: String, pushNotificationConfiguration: AuthorizationCodePushNotificationConfiguration?, firebaseSecretStream: Signal<[String: String], NoError>) -> Signal<ChangeAccountPhoneNumberData, RequestChangeAccountPhoneNumberVerificationError> {
-            return _internal_requestChangeAccountPhoneNumberVerification(account: self.account, phoneNumber: phoneNumber, pushNotificationConfiguration: pushNotificationConfiguration, firebaseSecretStream: firebaseSecretStream)
+        public func requestChangeAccountPhoneNumberVerification(apiId: Int32, apiHash: String, phoneNumber: String, pushNotificationConfiguration: AuthorizationCodePushNotificationConfiguration?, firebaseSecretStream: Signal<[String: String], NoError>) -> Signal<ChangeAccountPhoneNumberData, RequestChangeAccountPhoneNumberVerificationError> {
+            return _internal_requestChangeAccountPhoneNumberVerification(account: self.account, apiId: apiId, apiHash: apiHash, phoneNumber: phoneNumber, pushNotificationConfiguration: pushNotificationConfiguration, firebaseSecretStream: firebaseSecretStream)
         }
 
-        public func requestNextChangeAccountPhoneNumberVerification(phoneNumber: String, phoneCodeHash: String) -> Signal<ChangeAccountPhoneNumberData, RequestChangeAccountPhoneNumberVerificationError> {
-            return _internal_requestNextChangeAccountPhoneNumberVerification(account: self.account, phoneNumber: phoneNumber, phoneCodeHash: phoneCodeHash)
+        public func requestNextChangeAccountPhoneNumberVerification(phoneNumber: String, phoneCodeHash: String, apiId: Int32, apiHash: String, firebaseSecretStream: Signal<[String: String], NoError>) -> Signal<ChangeAccountPhoneNumberData, RequestChangeAccountPhoneNumberVerificationError> {
+            return _internal_requestNextChangeAccountPhoneNumberVerification(account: self.account, phoneNumber: phoneNumber, phoneCodeHash: phoneCodeHash, apiId: apiId, apiHash: apiHash, firebaseSecretStream: firebaseSecretStream)
         }
 
         public func requestChangeAccountPhoneNumber(phoneNumber: String, phoneCodeHash: String, phoneCode: String) -> Signal<Void, ChangeAccountPhoneNumberError> {
@@ -33,6 +33,10 @@ public extension TelegramEngine {
 
         public func updateAbout(about: String?) -> Signal<Void, UpdateAboutError> {
             return _internal_updateAbout(account: self.account, about: about)
+        }
+        
+        public func updateBirthday(birthday: TelegramBirthday?) -> Signal<Never, UpdateBirthdayError> {
+            return _internal_updateBirthday(account: self.account, birthday: birthday)
         }
         
         public func observeAvailableColorOptions(scope: PeerColorsScope) -> Signal<EngineAvailableColorOptions, NoError> {
@@ -71,15 +75,75 @@ public extension TelegramEngine {
             return _internal_removeAccountPhoto(account: self.account, reference: reference, fallback: true)
         }
         
+        public func setStarGiftStatus(starGift: StarGift.UniqueGift, expirationDate: Int32?) -> Signal<Never, NoError> {
+            let peerId = self.account.peerId
+            
+            var flags: Int32 = 0
+            if let _ = expirationDate {
+                flags |= (1 << 0)
+            }
+            var file: TelegramMediaFile?
+            var patternFile: TelegramMediaFile?
+            var innerColor: Int32?
+            var outerColor: Int32?
+            var patternColor: Int32?
+            var textColor: Int32?
+            for attribute in starGift.attributes {
+                switch attribute {
+                case let .model(_, fileValue, _):
+                    file = fileValue
+                case let .pattern(_, patternFileValue, _):
+                    patternFile = patternFileValue
+                case let .backdrop(_, _, innerColorValue, outerColorValue, patternColorValue, textColorValue, _):
+                    innerColor = innerColorValue
+                    outerColor = outerColorValue
+                    patternColor = patternColorValue
+                    textColor = textColorValue
+                default:
+                    break
+                }
+            }
+            let apiEmojiStatus: Api.EmojiStatus
+            var emojiStatus: PeerEmojiStatus?
+            if let file, let patternFile, let innerColor, let outerColor, let patternColor, let textColor {
+                apiEmojiStatus = .inputEmojiStatusCollectible(flags: flags, collectibleId: starGift.id, until: expirationDate)
+                emojiStatus = PeerEmojiStatus(content: .starGift(id: starGift.id, fileId: file.fileId.id, title: starGift.title, slug: starGift.slug, patternFileId: patternFile.fileId.id, innerColor: innerColor, outerColor: outerColor, patternColor: patternColor, textColor: textColor), expirationDate: expirationDate)
+            } else {
+                apiEmojiStatus = .emojiStatusEmpty
+            }
+            
+            let remoteApply = self.account.network.request(Api.functions.account.updateEmojiStatus(emojiStatus: apiEmojiStatus))
+            |> `catch` { _ -> Signal<Api.Bool, NoError> in
+                return .single(.boolFalse)
+            }
+            |> ignoreValues
+            
+            return self.account.postbox.transaction { transaction -> Void in
+                if let file, let patternFile {
+                    transaction.storeMediaIfNotPresent(media: file)
+                    transaction.storeMediaIfNotPresent(media: patternFile)
+                }
+                if let peer = transaction.getPeer(peerId) as? TelegramUser {
+                    updatePeersCustom(transaction: transaction, peers: [
+                        peer.withUpdatedEmojiStatus(emojiStatus)
+                    ], update: { _, updated in
+                        updated
+                    })
+                }
+            }
+            |> ignoreValues
+            |> then(remoteApply)
+        }
+        
         public func setEmojiStatus(file: TelegramMediaFile?, expirationDate: Int32?) -> Signal<Never, NoError> {
             let peerId = self.account.peerId
             
             let remoteApply = self.account.network.request(Api.functions.account.updateEmojiStatus(emojiStatus: file.flatMap({ file in
-                if let expirationDate = expirationDate {
-                    return Api.EmojiStatus.emojiStatusUntil(documentId: file.fileId.id, until: expirationDate)
-                } else {
-                    return Api.EmojiStatus.emojiStatus(documentId: file.fileId.id)
+                var flags: Int32 = 0
+                if let _ = expirationDate {
+                    flags |= (1 << 0)
                 }
+                return Api.EmojiStatus.emojiStatus(flags: flags, documentId: file.fileId.id, until: expirationDate)
             }) ?? Api.EmojiStatus.emojiStatusEmpty))
             |> `catch` { _ -> Signal<Api.Bool, NoError> in
                 return .single(.boolFalse)
@@ -97,13 +161,141 @@ public extension TelegramEngine {
                 }
                 
                 if let peer = transaction.getPeer(peerId) as? TelegramUser {
-                    updatePeersCustom(transaction: transaction, peers: [peer.withUpdatedEmojiStatus(file.flatMap({ PeerEmojiStatus(fileId: $0.fileId.id, expirationDate: expirationDate) }))], update: { _, updated in
+                    updatePeersCustom(transaction: transaction, peers: [peer.withUpdatedEmojiStatus(file.flatMap({ PeerEmojiStatus(content: .emoji(fileId: $0.fileId.id), expirationDate: expirationDate) }))], update: { _, updated in
                         updated
                     })
                 }
             }
             |> ignoreValues
             |> then(remoteApply)
+        }
+        
+        public func updateAccountBusinessHours(businessHours: TelegramBusinessHours?) -> Signal<Never, NoError> {
+            let peerId = self.account.peerId
+            
+            var flags: Int32 = 0
+            if businessHours != nil {
+                flags |= 1 << 0
+            }
+            let remoteApply: Signal<Never, NoError> = self.account.network.request(Api.functions.account.updateBusinessWorkHours(flags: flags, businessWorkHours: businessHours?.apiBusinessHours))
+            |> `catch` { _ -> Signal<Api.Bool, NoError> in
+                return .single(.boolFalse)
+            }
+            |> ignoreValues
+            
+            return self.account.postbox.transaction { transaction -> Void in
+                transaction.updatePeerCachedData(peerIds: Set([peerId]), update: { _, current in
+                    let current = current as? CachedUserData ?? CachedUserData()
+                    return current.withUpdatedBusinessHours(businessHours)
+                })
+            }
+            |> ignoreValues
+            |> then(remoteApply)
+        }
+        
+        public func updateAccountBusinessLocation(businessLocation: TelegramBusinessLocation?) -> Signal<Never, NoError> {
+            let peerId = self.account.peerId
+            
+            var flags: Int32 = 0
+            
+            var inputGeoPoint: Api.InputGeoPoint?
+            var inputAddress: String?
+            if let businessLocation {
+                flags |= 1 << 0
+                inputAddress = businessLocation.address
+                
+                inputGeoPoint = businessLocation.coordinates?.apiInputGeoPoint
+                if inputGeoPoint != nil {
+                    flags |= 1 << 1
+                }
+            }
+            
+            let remoteApply: Signal<Never, NoError> = self.account.network.request(Api.functions.account.updateBusinessLocation(flags: flags, geoPoint: inputGeoPoint, address: inputAddress))
+            |> `catch` { _ -> Signal<Api.Bool, NoError> in
+                return .single(.boolFalse)
+            }
+            |> ignoreValues
+            
+            return self.account.postbox.transaction { transaction -> Void in
+                transaction.updatePeerCachedData(peerIds: Set([peerId]), update: { _, current in
+                    let current = current as? CachedUserData ?? CachedUserData()
+                    return current.withUpdatedBusinessLocation(businessLocation)
+                })
+            }
+            |> ignoreValues
+            |> then(remoteApply)
+        }
+        
+        public func shortcutMessageList(onlyRemote: Bool) -> Signal<ShortcutMessageList, NoError> {
+            return _internal_shortcutMessageList(account: self.account, onlyRemote: onlyRemote)
+        }
+
+        public func keepShortcutMessageListUpdated() -> Signal<Never, NoError> {
+            return _internal_keepShortcutMessagesUpdated(account: self.account)
+        }
+        
+        public func editMessageShortcut(id: Int32, shortcut: String) {
+            let _ = _internal_editMessageShortcut(account: self.account, id: id, shortcut: shortcut).startStandalone()
+        }
+        
+        public func deleteMessageShortcuts(ids: [Int32]) {
+            let _ = _internal_deleteMessageShortcuts(account: self.account, ids: ids).startStandalone()
+        }
+        
+        public func reorderMessageShortcuts(ids: [Int32], completion: @escaping () -> Void) {
+            let _ = _internal_reorderMessageShortcuts(account: self.account, ids: ids, localCompletion: completion).startStandalone()
+        }
+        
+        public func sendMessageShortcut(peerId: EnginePeer.Id, id: Int32) {
+            let _ = _internal_sendMessageShortcut(account: self.account, peerId: peerId, id: id).startStandalone()
+        }
+        
+        public func cachedTimeZoneList() -> Signal<TimeZoneList?, NoError> {
+            return _internal_cachedTimeZoneList(account: self.account)
+        }
+
+        public func keepCachedTimeZoneListUpdated() -> Signal<Never, NoError> {
+            return _internal_keepCachedTimeZoneListUpdated(account: self.account)
+        }
+        
+        public func updateBusinessGreetingMessage(greetingMessage: TelegramBusinessGreetingMessage?) -> Signal<Never, NoError> {
+            return _internal_updateBusinessGreetingMessage(account: self.account, greetingMessage: greetingMessage)
+        }
+        
+        public func updateBusinessAwayMessage(awayMessage: TelegramBusinessAwayMessage?) -> Signal<Never, NoError> {
+            return _internal_updateBusinessAwayMessage(account: self.account, awayMessage: awayMessage)
+        }
+        
+        public func setAccountConnectedBot(bot: TelegramAccountConnectedBot?) -> Signal<Never, NoError> {
+            return _internal_setAccountConnectedBot(account: self.account, bot: bot)
+        }
+        
+        public func updateBusinessIntro(intro: TelegramBusinessIntro?) -> Signal<Never, NoError> {
+            return _internal_updateBusinessIntro(account: self.account, intro: intro)
+        }
+        
+        public func createBusinessChatLink(message: String, entities: [MessageTextEntity], title: String?) -> Signal<TelegramBusinessChatLinks.Link, AddBusinessChatLinkError> {
+            return _internal_createBusinessChatLink(account: self.account, message: message, entities: entities, title: title)
+        }
+        
+        public func editBusinessChatLink(url: String, message: String, entities: [MessageTextEntity], title: String?) -> Signal<TelegramBusinessChatLinks.Link, AddBusinessChatLinkError> {
+            return _internal_editBusinessChatLink(account: self.account, url: url, message: message, entities: entities, title: title)
+        }
+        
+        public func deleteBusinessChatLink(url: String) -> Signal<Never, NoError> {
+            return _internal_deleteBusinessChatLink(account: self.account, url: url)
+        }
+        
+        public func refreshBusinessChatLinks() -> Signal<Never, NoError> {
+            return _internal_refreshBusinessChatLinks(postbox: self.account.postbox, network: self.account.network, accountPeerId: self.account.peerId)
+        }
+        
+        public func updatePersonalChannel(personalChannel: TelegramPersonalChannel?) -> Signal<Never, NoError> {
+            return _internal_updatePersonalChannel(account: self.account, personalChannel: personalChannel)
+        }
+        
+        public func updateAdMessagesEnabled(enabled: Bool) -> Signal<Never, AdMessagesEnableError> {
+            return _internal_updateAdMessagesEnabled(account: self.account, enabled: enabled)
         }
     }
 }
