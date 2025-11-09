@@ -76,8 +76,6 @@
     
     MTTimer *_requestsServiceTimer;
     MTTimer *_requestsTimeoutTimer;
-    
-    MTContextBlockChangeListener *_changeListener;
 }
 
 @end
@@ -92,14 +90,14 @@
         _context = context;
         
         __weak MTRequestMessageService *weakSelf = self;
-        _changeListener = [[MTContextBlockChangeListener alloc] init];
-        _changeListener.contextIsPasswordRequiredUpdated = ^(MTContext *context, NSInteger datacenterId)
+        MTContextBlockChangeListener *changeListener = [[MTContextBlockChangeListener alloc] init];
+        changeListener.contextIsPasswordRequiredUpdated = ^(MTContext *context, NSInteger datacenterId)
         {
             __strong MTRequestMessageService *strongSelf = weakSelf;
             [strongSelf _contextIsPasswordRequiredUpdated:context datacenterId:datacenterId];
         };
         
-        [_context addChangeListener:_changeListener];
+        [_context addChangeListener:changeListener];
         
         _requests = [[NSMutableArray alloc] init];
         _dropReponseContexts = [[NSMutableArray alloc] init];
@@ -118,7 +116,6 @@
         [_requestsTimeoutTimer invalidate];
         _requestsTimeoutTimer = nil;
     }
-    [_context removeChangeListener:_changeListener];
 }
 
 - (void)addRequest:(MTRequest *)request
@@ -473,17 +470,17 @@
         currentData = buffer.data;
     }
     
-    if ((_apiEnvironment != nil && _apiEnvironment.disableUpdates) || _forceBackgroundRequests)
-    {
-        MTBuffer *buffer = [[MTBuffer alloc] init];
+    // if ((_apiEnvironment != nil && _apiEnvironment.disableUpdates) || _forceBackgroundRequests)
+    // {
+    //     MTBuffer *buffer = [[MTBuffer alloc] init];
         
-        [buffer appendInt32:(int32_t)0xbf9459b7];
+    //     [buffer appendInt32:(int32_t)0xbf9459b7];
 
-        [buffer appendBytes:currentData.bytes length:currentData.length];
-        currentData = buffer.data;
+    //     [buffer appendBytes:currentData.bytes length:currentData.length];
+    //     currentData = buffer.data;
         
-        debugDescription = [debugDescription stringByAppendingString:@", disableUpdates"];
-    }
+    //     debugDescription = [debugDescription stringByAppendingString:@", disableUpdates"];
+    // }
     
     if (request.shouldDependOnRequest != nil)
     {
@@ -1200,10 +1197,8 @@
                 request.requestContext.responseMessageId = responseMessageId;
                 return true;
             } else {
-                if (MTLogEnabled()) {
-                    MTLog(@"[MTRequestMessageService#%" PRIxPTR " will not request message %" PRId64 " (transaction was not completed)]", (intptr_t)self, messageId);
-                    MTLog(@"[MTRequestMessageService#%" PRIxPTR " but today it will]", (intptr_t)self);
-                }
+                MTLog(@"[MTRequestMessageService#%" PRIxPTR " will not request message %" PRId64 " (transaction was not completed)]", (intptr_t)self, messageId);
+                MTLog(@"[MTRequestMessageService#%" PRIxPTR " but today it will]", (intptr_t)self);
                 return true;
             }
         }
