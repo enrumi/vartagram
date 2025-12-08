@@ -1,7 +1,7 @@
 name: Build Vartagram Unsigned IPA
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # ручной запуск
   push:
     branches: [ main ]
 
@@ -11,74 +11,82 @@ jobs:
     timeout-minutes: 120
 
     steps:
-      - name: Checkout repository + submodules
+      - name: Checkout repo + submodules
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      # Иногда runner загажен — чистим место
+      # Чистим диск (macos-14 жрёт место как свинья)
       - name: Free disk space
         run: |
           sudo rm -rf /Applications/Xcode_15.app || true
+          sudo rm -rf /opt/homebrew || true
           df -h
 
-      # Переходим в корень репо (ОБЯЗАТЕЛЬНО, иначе не найдёт build-system/)
-      - name: Go to repository root
-        run: cd $GITHUB_WORKSPACE
-
-      # Убираем PEP 668
+      # Убираем PEP 668 (главный фикс 2025)
       - name: Disable PEP 668
         run: |
-          rm -f $(python3.11 -c 'import sysconfig, pathlib; print(pathlib.Path(sysconfig.get_path("stdlib")) / "EXTERNALLY-MANAGED")') || true
+          rm -f $(python3 -c 'import sysconfig, pathlib; print(pathlib.Path(sysconfig.get_path("stdlib")) / "EXTERNALLY-MANAGED")') || true
+          echo "PEP 668 убран, pip свободен"
 
-      # Обновляем pip и ставим requirements (теперь точно найдёт файл)
-      - name: Install Python dependencies
+      # Обновляем pip и ставим реальные зависимости для Telegram/Vartagram (без requirements.txt)
+      - name: Install Python deps (manual, как в README)
         run: |
-          python3.11 -m pip install --upgrade pip setuptools wheel
-          python3.11 -m pip install -r build-system/requirements.txt --break-system-packages
+          python3 -m pip install --upgrade pip setuptools wheel --break-system-packages
+          python3 -m pip install protobuf requests colorama pyyaml --break-system-packages
+          echo "Зависимости установлены: protobuf, requests, colorama, pyyaml"
 
-      # Bazelisk через npm (самый надёжный способ без brew)
+      # Bazelisk через npm (без brew, 100% стабильно)
       - name: Install Bazelisk
-        run: npm i -g @bazel/bazelisk
+        run: |
+          npm install -g @bazel/bazelisk
+          bazelisk version  # тест
 
-      # Ninja через pip
+      # Ninja через pip (для быстрого компиля)
       - name: Install ninja
-        run: python3.11 -m pip install ninja
+        run: |
+          python3 -m pip install ninja --break-system-packages
 
-      # Генерируем проект
+      # Генерируем Xcode проект (как в README, с отключением лишнего)
       - name: Generate Xcode project
         run: |
-          python3.11 build-system/Make/Make.py generateProject \
+          python3 build-system/Make/Make.py generateProject \
             --configurationPath=build-system/template_minimal_development_configuration.json \
             --disableSwiftlint \
-            --disableCodesigning
+            --disableCodesigning \
+            --xcodeManagedCodesigning
 
-      # Билдим приложение (unsigned)
-      - name: Build app
+      # Билдим unsigned app (без архива, прямой билд в Release-iphoneos)
+      - name: Build Vartagram unsigned
         run: |
-          xcodebuild -scheme Vartagram \
+          xcodebuild -project Vartagram.xcodeproj \
+                     -scheme Vartagram \
                      -configuration Release \
                      -sdk iphoneos \
+                     -derivedDataPath build \
                      CODE_SIGNING_ALLOWED=NO \
                      CODE_SIGNING_REQUIRED=NO \
                      CODE_SIGN_IDENTITY="" \
                      PROVISIONING_PROFILE="" \
-                     -quiet \
-                     archive
+                     -quiet
 
-      # Пакуем .ipa
-      - name: Create unsigned IPA
+      # Пакуем .ipa из билда
+      - name: Package unsigned IPA
         run: |
           mkdir -p Payload
-          cp -r build/Release-iphoneos/Vartagram.app Payload/
+          cp -r build/Build/Products/Release-iphoneos/Vartagram.app Payload/
           zip -r9 Vartagram-unsigned.ipa Payload/
-          echo "IPA size:"
+          echo "IPA готов:"
           ls -lh Vartagram-unsigned.ipa
 
-      # Выкладываем артефакт
+      # Выкладываем артефакт (держим 30 дней)
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: Vartagram-unsigned-${{ github.sha }}
           path: Vartagram-unsigned.ipa
           retention-days: 30
+
+      - name: Success message
+        run: echo "Готово! Твой unsigned Vartagram.ipa в Artifacts. Ставь через Sideloadly/TrollStore."
+  
