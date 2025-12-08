@@ -1,0 +1,52 @@
+name: Build Unsigned Vartagram IPA
+
+on:
+  workflow_dispatch:      # можно запускать вручную
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Python & deps
+        run: |
+          brew install python@3.11 bazelisk
+          pip3 install -r build-system/requirements.txt
+
+      - name: Generate Xcode project
+        run: |
+          python3 build-system/Make/Make.py generateProject \
+            --configurationPath=build-system/template_minimal_development_configuration.json \
+            --disableSwiftlint
+
+      - name: Build app (unsigned)
+        run: |
+          xcodebuild -scheme Vartagram \
+                     -configuration Release \
+                     -sdk iphoneos \
+                     CODE_SIGNING_ALLOWED=NO \
+                     CODE_SIGNING_REQUIRED=NO \
+                     CODE_SIGN_IDENTITY="" \
+                     PROVISIONING_PROFILE="" \
+                     -allowProvisioningUpdates \
+                     -quiet
+
+      - name: Create Payload folder & zip IPA
+        run: |
+          mkdir -p Payload
+          cp -r "build/Release-iphoneos/Vartagram.app" Payload/
+          zip -r9 Vartagram-unsigned.ipa Payload/
+          ls -la *.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vartagram-unsigned-${{ github.sha }}
+          path: Vartagram-unsigned.ipa
+          retention-days: 7
