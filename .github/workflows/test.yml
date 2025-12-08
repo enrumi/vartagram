@@ -11,39 +11,39 @@ jobs:
     timeout-minutes: 120
 
     steps:
-      - name: Checkout + submodules
+      - name: Checkout repository + submodules
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      # Освобождаем место (обязательно, иначе падает)
+      # Иногда runner загажен — чистим место
       - name: Free disk space
         run: |
           sudo rm -rf /Applications/Xcode_15.app || true
-          sudo rm -rf /Applications/Xcode_16.app || true
-          sudo rm -rf /opt/homebrew || true
           df -h
 
-      # Python 3.11 и pip уже есть в образе macos-14, просто обновляем pip
-      - name: Upgrade pip & install Python deps
+      # Переходим в корень репо (ОБЯЗАТЕЛЬНО, иначе не найдёт build-system/)
+      - name: Go to repository root
+        run: cd $GITHUB_WORKSPACE
+
+      # Убираем PEP 668
+      - name: Disable PEP 668
+        run: |
+          rm -f $(python3.11 -c 'import sysconfig, pathlib; print(pathlib.Path(sysconfig.get_path("stdlib")) / "EXTERNALLY-MANAGED")') || true
+
+      # Обновляем pip и ставим requirements (теперь точно найдёт файл)
+      - name: Install Python dependencies
         run: |
           python3.11 -m pip install --upgrade pip setuptools wheel
           python3.11 -m pip install -r build-system/requirements.txt --break-system-packages
 
-      # Убираем PEP 668 (главная строчка 2025)
-      - name: Disable PEP 668 (EXTERNALLY-MANAGED)
-        run: |
-          rm -f $(python3.11 -c 'import sysconfig, pathlib; print(pathlib.Path(sysconfig.get_path("stdlib")) / "EXTERNALLY-MANAGED")') || true
+      # Bazelisk через npm (самый надёжный способ без brew)
+      - name: Install Bazelisk
+        run: npm i -g @bazel/bazelisk
 
-      # Bazelisk — ставим через npm (самый стабильный способ на macos-14 сейчас)
-      - name: Install Bazelisk via npm
-        run: |
-          npm i -g @bazel/bazelisk
-
-      # Ninja — ставим через pip (быстро и без brew)
-      - name: Install ninja via pip
-        run: |
-          python3.11 -m pip install ninja
+      # Ninja через pip
+      - name: Install ninja
+        run: python3.11 -m pip install ninja
 
       # Генерируем проект
       - name: Generate Xcode project
@@ -53,8 +53,8 @@ jobs:
             --disableSwiftlint \
             --disableCodesigning
 
-      # Билдим unsigned
-      - name: Build Vartagram (unsigned)
+      # Билдим приложение (unsigned)
+      - name: Build app
         run: |
           xcodebuild -scheme Vartagram \
                      -configuration Release \
@@ -63,20 +63,22 @@ jobs:
                      CODE_SIGNING_REQUIRED=NO \
                      CODE_SIGN_IDENTITY="" \
                      PROVISIONING_PROFILE="" \
-                     -quiet archive
+                     -quiet \
+                     archive
 
       # Пакуем .ipa
-      - name: Package unsigned IPA
+      - name: Create unsigned IPA
         run: |
           mkdir -p Payload
           cp -r build/Release-iphoneos/Vartagram.app Payload/
           zip -r9 Vartagram-unsigned.ipa Payload/
-          ls -la Vartagram-unsigned.ipa
+          echo "IPA size:"
+          ls -lh Vartagram-unsigned.ipa
 
-      # Загружаем артефакт
+      # Выкладываем артефакт
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: Vartagram-unsigned-${{ github.sha }}
           path: Vartagram-unsigned.ipa
-          retention-days: 14
+          retention-days: 30
