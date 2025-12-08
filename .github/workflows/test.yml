@@ -1,7 +1,7 @@
 name: Build Vartagram Unsigned IPA
 
 on:
-  workflow_dispatch:    # можно запускать вручную
+  workflow_dispatch:
   push:
     branches: [ main ]
 
@@ -11,89 +11,72 @@ jobs:
     timeout-minutes: 120
 
     steps:
-      - name: Checkout code + submodules
+      - name: Checkout + submodules
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Free up disk space (важно на macos-14)
+      # Освобождаем место (обязательно, иначе падает)
+      - name: Free disk space
         run: |
-          sudo rm -rf /opt/homebrew /usr/local/Homebrew
-          sudo rm -rf /Applications/Xcode_15.app /Applications/Xcode_16.app
+          sudo rm -rf /Applications/Xcode_15.app || true
+          sudo rm -rf /Applications/Xcode_16.app || true
+          sudo rm -rf /opt/homebrew || true
           df -h
 
-      - name: Install dependencies
+      # Python 3.11 и pip уже есть в образе macos-14, просто обновляем pip
+      - name: Upgrade pip & install Python deps
         run: |
-          brew install python@3.11 bazelisk ninja
+          python3.11 -m pip install --upgrade pip setuptools wheel
+          python3.11 -m pip install -r build-system/requirements.txt --break-system-packages
 
-      # ГЛАВНЫЙ ФИКС 2025 — убираем PEP 668 навсегда
-      - name: Remove PEP 668 marker (EXTERNALLY-MANAGED)
+      # Убираем PEP 668 (главная строчка 2025)
+      - name: Disable PEP 668 (EXTERNALLY-MANAGED)
         run: |
-          rm -f $(python3 -c 'import sysconfig, pathlib; print(pathlib.Path(sysconfig.get_path("stdlib")) / "EXTERNALLY-MANAGED")') || true
-          echo "PEP 668 disabled"
+          rm -f $(python3.11 -c 'import sysconfig, pathlib; print(pathlib.Path(sysconfig.get_path("stdlib")) / "EXTERNALLY-MANAGED")') || true
 
-      # Устанавливаем requirements без ошибок
-      - name: Install Python requirements
+      # Bazelisk — ставим через npm (самый стабильный способ на macos-14 сейчас)
+      - name: Install Bazelisk via npm
         run: |
-          pip3 install -r build-system/requirements.txt --break-system-packages
+          npm i -g @bazel/bazelisk
 
-      # Генерируем Xcode проект (с отключением SwiftLint и лишних проверок)
+      # Ninja — ставим через pip (быстро и без brew)
+      - name: Install ninja via pip
+        run: |
+          python3.11 -m pip install ninja
+
+      # Генерируем проект
       - name: Generate Xcode project
         run: |
-          python3 build-system/Make/Make.py generateProject \
+          python3.11 build-system/Make/Make.py generateProject \
             --configurationPath=build-system/template_minimal_development_configuration.json \
             --disableSwiftlint \
             --disableCodesigning
 
-      # Билдим приложение (UNSIGNED, без подписи)
+      # Билдим unsigned
       - name: Build Vartagram (unsigned)
         run: |
           xcodebuild -scheme Vartagram \
                      -configuration Release \
                      -sdk iphoneos \
-                     -archivePath build/Vartagram.xcarchive \
                      CODE_SIGNING_ALLOWED=NO \
                      CODE_SIGNING_REQUIRED=NO \
                      CODE_SIGN_IDENTITY="" \
                      PROVISIONING_PROFILE="" \
                      -quiet archive
 
-      # Экспортируем .ipa
-      - name: Export unsigned IPA
+      # Пакуем .ipa
+      - name: Package unsigned IPA
         run: |
-          xcodebuild -exportArchive \
-                     -archivePath build/Vartagram.xcarchive \
-                     -exportOptionsPlist <(cat <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>method</key><string>ad-hoc</string>
-            <key>compileBitcode</key><false/>
-            <key>signingStyle</key><string>manual</string>
-            <key>signingCertificate</key><string></string>
-          </dict>
-          </plist>
-          EOF
-          ) \
-                     -exportPath build/ipa \
-                     -allowProvisioningUpdates \
-                     CODE_SIGNING_ALLOWED=NO
+          mkdir -p Payload
+          cp -r build/Release-iphoneos/Vartagram.app Payload/
+          zip -r9 Vartagram-unsigned.ipa Payload/
+          ls -la Vartagram-unsigned.ipa
 
-          cd build/ipa
-          zip -r9 ../Vartagram-unsigned.ipa Payload/
-          cd ../..
-          ls -la build/*.ipa
-
-      # Загружаем .ipa как артефакт
-      - name: Upload unsigned IPA
+      # Загружаем артефакт
+      - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: Vartagram-unsigned-${{ github.sha }}
-          path: build/Vartagram-unsigned.ipa
+          path: Vartagram-unsigned.ipa
           retention-days: 14
-
-      - name: Done
-        run: |
-          echo "Готово! Скачивай Vartagram-unsigned.ipa из Artifacts"
-          echo "Ставь через Sideloadly / TrollStore / Esign / Scarlet"
