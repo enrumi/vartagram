@@ -16,38 +16,41 @@ jobs:
         with:
           submodules: recursive
 
-      # Чистим диск (macos-14 жрёт место как свинья)
+      # Чистим диск (macos-14 жрёт место)
       - name: Free disk space
         run: |
           sudo rm -rf /Applications/Xcode_15.app || true
           sudo rm -rf /opt/homebrew || true
           df -h
 
-      # Убираем PEP 668 (главный фикс 2025)
+      # Убираем PEP 668 (фикс 2025)
       - name: Disable PEP 668
         run: |
           rm -f $(python3 -c 'import sysconfig, pathlib; print(pathlib.Path(sysconfig.get_path("stdlib")) / "EXTERNALLY-MANAGED")') || true
-          echo "PEP 668 убран, pip свободен"
+          echo "PEP 668 удалён"
 
-      # Обновляем pip и ставим реальные зависимости для Telegram/Vartagram (без requirements.txt)
-      - name: Install Python deps (manual, как в README)
+      # Обновляем pip и ставим реальные deps (manual, без requirements.txt)
+      - name: Install Python deps
         run: |
           python3 -m pip install --upgrade pip setuptools wheel --break-system-packages
-          python3 -m pip install protobuf requests colorama pyyaml --break-system-packages
-          echo "Зависимости установлены: protobuf, requests, colorama, pyyaml"
+          python3 -m pip install protobuf requests colorama pyyaml ninja --break-system-packages
+          echo "Deps готовы: protobuf, requests, colorama, pyyaml, ninja"
 
-      # Bazelisk через npm (без brew, 100% стабильно)
-      - name: Install Bazelisk
+      # Ставим Node.js + npm (через официальный action, без хуйни)
+      - name: Setup Node.js (для возможных инструментов, но не используем npm)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Ставим Bazelisk бинарником (без npm, 100% стабильно, как в официальном гайде Bazel)
+      - name: Install Bazelisk binary
         run: |
-          npm install -g @bazel/bazelisk
-          bazelisk version  # тест
+          curl -L -o /usr/local/bin/bazel https://github.com/bazelbuild/bazelisk/releases/download/v1.19.0/bazelisk-darwin-arm64
+          chmod +x /usr/local/bin/bazel
+          bazel version
+          echo "Bazelisk установлен"
 
-      # Ninja через pip (для быстрого компиля)
-      - name: Install ninja
-        run: |
-          python3 -m pip install ninja --break-system-packages
-
-      # Генерируем Xcode проект (как в README, с отключением лишнего)
+      # Генерируем Xcode проект
       - name: Generate Xcode project
         run: |
           python3 build-system/Make/Make.py generateProject \
@@ -56,7 +59,7 @@ jobs:
             --disableCodesigning \
             --xcodeManagedCodesigning
 
-      # Билдим unsigned app (без архива, прямой билд в Release-iphoneos)
+      # Билдим unsigned app
       - name: Build Vartagram unsigned
         run: |
           xcodebuild -project Vartagram.xcodeproj \
@@ -70,7 +73,7 @@ jobs:
                      PROVISIONING_PROFILE="" \
                      -quiet
 
-      # Пакуем .ipa из билда
+      # Пакуем .ipa
       - name: Package unsigned IPA
         run: |
           mkdir -p Payload
@@ -79,7 +82,7 @@ jobs:
           echo "IPA готов:"
           ls -lh Vartagram-unsigned.ipa
 
-      # Выкладываем артефакт (держим 30 дней)
+      # Выкладываем артефакт
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
@@ -87,6 +90,5 @@ jobs:
           path: Vartagram-unsigned.ipa
           retention-days: 30
 
-      - name: Success message
-        run: echo "Готово! Твой unsigned Vartagram.ipa в Artifacts. Ставь через Sideloadly/TrollStore."
-  
+      - name: Success
+        run: echo "Готово! Unsigned Vartagram.ipa в Artifacts. Ставь на iPhone через Sideloadly/TrollStore/Esign."
