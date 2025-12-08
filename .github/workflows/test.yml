@@ -1,52 +1,99 @@
-name: Build Unsigned Vartagram IPA
+name: Build Vartagram Unsigned IPA
 
 on:
-  workflow_dispatch:      # можно запускать вручную
+  workflow_dispatch:    # можно запускать вручную
   push:
     branches: [ main ]
 
 jobs:
   build:
     runs-on: macos-14
+    timeout-minutes: 120
+
     steps:
-      - name: Checkout code
+      - name: Checkout code + submodules
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Setup Python & deps
+      - name: Free up disk space (важно на macos-14)
         run: |
-          brew install python@3.11 bazelisk
-          pip3 install -r build-system/requirements.txt
+          sudo rm -rf /opt/homebrew /usr/local/Homebrew
+          sudo rm -rf /Applications/Xcode_15.app /Applications/Xcode_16.app
+          df -h
 
+      - name: Install dependencies
+        run: |
+          brew install python@3.11 bazelisk ninja
+
+      # ГЛАВНЫЙ ФИКС 2025 — убираем PEP 668 навсегда
+      - name: Remove PEP 668 marker (EXTERNALLY-MANAGED)
+        run: |
+          rm -f $(python3 -c 'import sysconfig, pathlib; print(pathlib.Path(sysconfig.get_path("stdlib")) / "EXTERNALLY-MANAGED")') || true
+          echo "PEP 668 disabled"
+
+      # Устанавливаем requirements без ошибок
+      - name: Install Python requirements
+        run: |
+          pip3 install -r build-system/requirements.txt --break-system-packages
+
+      # Генерируем Xcode проект (с отключением SwiftLint и лишних проверок)
       - name: Generate Xcode project
         run: |
           python3 build-system/Make/Make.py generateProject \
             --configurationPath=build-system/template_minimal_development_configuration.json \
-            --disableSwiftlint
+            --disableSwiftlint \
+            --disableCodesigning
 
-      - name: Build app (unsigned)
+      # Билдим приложение (UNSIGNED, без подписи)
+      - name: Build Vartagram (unsigned)
         run: |
           xcodebuild -scheme Vartagram \
                      -configuration Release \
                      -sdk iphoneos \
+                     -archivePath build/Vartagram.xcarchive \
                      CODE_SIGNING_ALLOWED=NO \
                      CODE_SIGNING_REQUIRED=NO \
                      CODE_SIGN_IDENTITY="" \
                      PROVISIONING_PROFILE="" \
-                     -allowProvisioningUpdates \
-                     -quiet
+                     -quiet archive
 
-      - name: Create Payload folder & zip IPA
+      # Экспортируем .ipa
+      - name: Export unsigned IPA
         run: |
-          mkdir -p Payload
-          cp -r "build/Release-iphoneos/Vartagram.app" Payload/
-          zip -r9 Vartagram-unsigned.ipa Payload/
-          ls -la *.ipa
+          xcodebuild -exportArchive \
+                     -archivePath build/Vartagram.xcarchive \
+                     -exportOptionsPlist <(cat <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>ad-hoc</string>
+            <key>compileBitcode</key><false/>
+            <key>signingStyle</key><string>manual</string>
+            <key>signingCertificate</key><string></string>
+          </dict>
+          </plist>
+          EOF
+          ) \
+                     -exportPath build/ipa \
+                     -allowProvisioningUpdates \
+                     CODE_SIGNING_ALLOWED=NO
 
-      - name: Upload IPA
+          cd build/ipa
+          zip -r9 ../Vartagram-unsigned.ipa Payload/
+          cd ../..
+          ls -la build/*.ipa
+
+      # Загружаем .ipa как артефакт
+      - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
           name: Vartagram-unsigned-${{ github.sha }}
-          path: Vartagram-unsigned.ipa
-          retention-days: 7
+          path: build/Vartagram-unsigned.ipa
+          retention-days: 14
+
+      - name: Done
+        run: |
+          echo "Готово! Скачивай Vartagram-unsigned.ipa из Artifacts"
+          echo "Ставь через Sideloadly / TrollStore / Esign / Scarlet"
