@@ -58,29 +58,11 @@ jobs:
           bazel version
           echo "Bazelisk установлен (v1.19.0)"
 
-      # Создаём минимальный конфиг для unsigned билда
-      - name: Create unsigned config
-        run: |
-          cat > build-system/minimal-unsigned-config.json << 'EOF'
-          {
-            "api_id": "0",
-            "api_hash": "00000000000000000000000000000000",
-            "app_center_id": "",
-            "is_internal_build": false,
-            "is_appstore_build": false,
-            "app_specific_url_scheme": "tgapp",
-            "team_id": "",
-            "bundle_id": "org.telegram.messenger",
-            "enable_watch": false,
-            "is_non_dev_account": true
-          }
-          EOF
-
-      # Генерируем Xcode проект (unsigned mode)
+      # Генерируем Xcode проект (unsigned mode) - используем конфиг из репозитория
       - name: Generate Xcode project (unsigned mode)
         run: |
           python3 build-system/Make/Make.py generateProject \
-            --configurationPath=build-system/minimal-unsigned-config.json \
+            --configurationPath=build-system/Make/minimal-unsigned-config.json \
             --xcodeManagedCodesigning \
             --disableProvisioningProfiles
 
@@ -116,4 +98,4 @@ jobs:
           retention-days: 30
 
       - name: Success
-        run: echo "Готово! Unsigned Vartagram.ipa в Artifacts. Ставь на iPhone через Sideloadly/TrollStore/Esign/Scarlet."
+        run: echo "Готово! Unsigned Vartagram.ipa в Artifacts. Ставь на iPhone через Sideloadly/TrollStore/Esign/Scarlet.
