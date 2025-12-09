@@ -23,6 +23,14 @@ jobs:
           sudo rm -rf /opt/homebrew || true
           df -h
 
+      # ГЛАВНЫЙ ФИКС: Устанавливаем Xcode 16.4 (решает ошибку "Required Xcode version is 16.4, but 15.4 is reported")
+      - name: Set Xcode 16.4 (required for Make.py)
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.4.app
+          xcode-select -p  # проверяем путь
+          xcodebuild -version  # выводим версию (должен быть 16.4)
+          echo "Xcode 16.4 установлен и выбран"
+
       # Убираем PEP 668 (фикс 2025)
       - name: Disable PEP 668
         run: |
