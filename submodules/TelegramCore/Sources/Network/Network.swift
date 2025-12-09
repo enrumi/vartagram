@@ -1,4 +1,4 @@
-import MonotonicTime
+﻿import MonotonicTime
 
 import Foundation
 import Postbox
@@ -623,7 +623,6 @@ func initializedNetwork(accountId: AccountRecordId, arguments: NetworkInitializa
                             disposable.dispose()
                         })
                     })
-                })
             }
             
             /*#if DEBUG
