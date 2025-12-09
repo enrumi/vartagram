@@ -7,6 +7,10 @@
   "app_specific_url_scheme": "tgapp",
   "team_id": "",
   "bundle_id": "org.telegram.messenger",
+  "appstore_id": "",
+  "premium_iap_product_id": "",
+  "enable_siri": false,
+  "enable_icloud": false,
   "enable_watch": false,
   "is_non_dev_account": true
 }
