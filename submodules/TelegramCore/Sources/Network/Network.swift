@@ -1,4 +1,4 @@
-﻿import MonotonicTime
+import MonotonicTime
 
 import Foundation
 import Postbox
@@ -621,8 +621,9 @@ func initializedNetwork(accountId: AccountRecordId, arguments: NetworkInitializa
 
                         return MTBlockDisposable(block: {
                             disposable.dispose()
-                        })
                     })
+                    })
+                })
             }
             
             /*#if DEBUG
