@@ -1,4 +1,64 @@
-# Билдим unsigned app (без подписи, для iphoneos)
+name: Build Vartagram Unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout repo + submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /Applications/Xcode_15.app || true
+          sudo rm -rf /opt/homebrew || true
+          df -h
+
+      - name: Set Xcode 16.4
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '16.4'
+
+      - name: Verify Xcode version
+        run: |
+          xcode-select -p
+          xcodebuild -version
+          echo "Xcode 16.4 установлен"
+
+      - name: Disable PEP 668
+        run: |
+          rm -f $(python3 -c 'import sysconfig, pathlib; print(pathlib.Path(sysconfig.get_path("stdlib")) / "EXTERNALLY-MANAGED")') || true
+          echo "PEP 668 удалён"
+
+      - name: Install Python deps
+        run: |
+          python3 -m pip install --upgrade pip setuptools wheel --break-system-packages
+          python3 -m pip install protobuf requests colorama pyyaml ninja --break-system-packages
+          echo "Deps готовы"
+
+      - name: Install Bazelisk binary
+        run: |
+          curl -LO https://github.com/bazelbuild/bazelisk/releases/download/v1.19.0/bazelisk-darwin-arm64
+          chmod +x bazelisk-darwin-arm64
+          sudo mv bazelisk-darwin-arm64 /usr/local/bin/bazel
+          bazel version
+          echo "Bazelisk установлен"
+
+      - name: Generate Xcode project
+        run: |
+          python3 build-system/Make/Make.py generateProject \
+            --configurationPath=build-system/Make/minimal-unsigned-config.json \
+            --xcodeManagedCodesigning \
+            --disableProvisioningProfiles
+
       - name: Build Vartagram unsigned
         run: |
           xcodebuild -project Telegram/Telegram.xcodeproj \
@@ -10,89 +70,8 @@
                      CODE_SIGNING_ALLOWED=NO \
                      CODE_SIGNING_REQUIRED=NO \
                      CODE_SIGN_IDENTITY="" \
-                     PROVISIONING_PROFILE=""name: Build Vartagram Unsigned IPA
+                     PROVISIONING_PROFILE=""
 
-on:
-  workflow_dispatch:  # ручной запуск
-  push:
-    branches: [ main ]
-
-jobs:
-  build:
-    runs-on: macos-15  # ИСПРАВЛЕНО: macos-15 поддерживает Xcode 16.4
-    timeout-minutes: 180  # Увеличено до 3 часов для первого билда
-
-    steps:
-      - name: Checkout repo + submodules
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      # Чистим диск (macos-15 тоже жрёт место)
-      - name: Free disk space
-        run: |
-          sudo rm -rf /Applications/Xcode_15.app || true
-          sudo rm -rf /opt/homebrew || true
-          df -h
-
-      # ГЛАВНЫЙ ФИКС: Устанавливаем Xcode 16.4 (требуется Make.py)
-      - name: Set Xcode 16.4 (required for Make.py)
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: '16.4'  # ИСПРАВЛЕНО: 16.4 вместо 16.2
-
-      # Проверяем версию (для логов)
-      - name: Verify Xcode version
-        run: |
-          xcode-select -p
-          xcodebuild -version  # Должен быть Xcode 16.4
-          echo "Xcode 16.4 установлен и выбран"
-
-      # Убираем PEP 668 (фикс 2025)
-      - name: Disable PEP 668
-        run: |
-          rm -f $(python3 -c 'import sysconfig, pathlib; print(pathlib.Path(sysconfig.get_path("stdlib")) / "EXTERNALLY-MANAGED")') || true
-          echo "PEP 668 удалён, pip свободен"
-
-      # Обновляем pip и ставим реальные deps
-      - name: Install Python deps
-        run: |
-          python3 -m pip install --upgrade pip setuptools wheel --break-system-packages
-          python3 -m pip install protobuf requests colorama pyyaml ninja --break-system-packages
-          echo "Deps готовы: protobuf, requests, colorama, pyyaml, ninja"
-
-      # Bazelisk бинарником (без npm, curl с GitHub releases)
-      - name: Install Bazelisk binary
-        run: |
-          curl -LO https://github.com/bazelbuild/bazelisk/releases/download/v1.19.0/bazelisk-darwin-arm64
-          chmod +x bazelisk-darwin-arm64
-          sudo mv bazelisk-darwin-arm64 /usr/local/bin/bazel
-          bazel version
-          echo "Bazelisk установлен (v1.19.0)"
-
-      # Генерируем Xcode проект (unsigned mode) - используем конфиг из репозитория
-      - name: Generate Xcode project (unsigned mode)
-        run: |
-          python3 build-system/Make/Make.py generateProject \
-            --configurationPath=build-system/Make/minimal-unsigned-config.json \
-            --xcodeManagedCodesigning \
-            --disableProvisioningProfiles
-
-      # Билдим unsigned app (без подписи, для iphoneos)
-      - name: Build Vartagram unsigned
-        run: |
-          xcodebuild -project Telegram/Telegram.xcodeproj \
-                     -scheme Telegram \
-                     -configuration Release \
-                     -sdk iphoneos \
-                     -derivedDataPath build \
-                     CODE_SIGNING_ALLOWED=NO \
-                     CODE_SIGNING_REQUIRED=NO \
-                     CODE_SIGN_IDENTITY="" \
-                     PROVISIONING_PROFILE="" \
-                     -quiet
-
-      # Пакуем .ipa из билда
       - name: Package unsigned IPA
         run: |
           mkdir -p Payload
@@ -101,7 +80,6 @@ jobs:
           echo "IPA готов:"
           ls -lh Vartagram-unsigned.ipa
 
-      # Выкладываем артефакт (держим 30 дней)
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
@@ -110,4 +88,4 @@ jobs:
           retention-days: 30
 
       - name: Success
-        run: echo "Готово! Unsigned Vartagram.ipa в Artifacts. Ставь на iPhone через Sideloadly/TrollStore/Esign/Scarlet."
+        run: echo "Готово! Unsigned Vartagram.ipa в Artifacts."
