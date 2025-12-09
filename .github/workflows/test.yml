@@ -98,12 +98,12 @@ jobs:
           print("✅ Updated config with mock team_id")
           EOF
 
-      - name: Create fake provisioning profiles
-        run: |
-          mkdir -p build-system/fake-codesigning
+          - name: Create fake codesigning structure
+          run: |
+          mkdir -p build-system/fake-codesigning/provisioning
           
-          # Создаём fake mobileprovision файлы
-          cat > build-system/fake-codesigning/fake.mobileprovision << 'EOF'
+          # Создаём fake mobileprovision файл
+          cat > build-system/fake-codesigning/provisioning/fake.mobileprovision << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -130,7 +130,7 @@ jobs:
                   <string>MOCK_TEAM_ID.org.telegram.messenger</string>
               </dict>
               <key>Name</key>
-              <string>iOS Team Provisioning Profile: org.telegram.messenger</string>
+              <string>iOS Team Provisioning Profile</string>
               <key>TeamIdentifier</key>
               <array>
                   <string>MOCK_TEAM_ID</string>
@@ -147,24 +147,33 @@ jobs:
           </plist>
           EOF
           
-          # Копируем для всех расширений
-          cp build-system/fake-codesigning/fake.mobileprovision \
-             "build-system/fake-codesigning/iOS Team Provisioning Profile: org.telegram.messenger.mobileprovision"
-          cp build-system/fake-codesigning/fake.mobileprovision \
-             "build-system/fake-codesigning/iOS Team Provisioning Profile: org.telegram.messenger.Share.mobileprovision"
-          cp build-system/fake-codesigning/fake.mobileprovision \
-             "build-system/fake-codesigning/iOS Team Provisioning Profile: org.telegram.messenger.NotificationContent.mobileprovision"
-          cp build-system/fake-codesigning/fake.mobileprovision \
-             "build-system/fake-codesigning/iOS Team Provisioning Profile: org.telegram.messenger.NotificationService.mobileprovision"
-          cp build-system/fake-codesigning/fake.mobileprovision \
-             "build-system/fake-codesigning/iOS Team Provisioning Profile: org.telegram.messenger.Widget.mobileprovision"
-          cp build-system/fake-codesigning/fake.mobileprovision \
-             "build-system/fake-codesigning/iOS Team Provisioning Profile: org.telegram.messenger.IntentsExtension.mobileprovision"
-          cp build-system/fake-codesigning/fake.mobileprovision \
-             "build-system/fake-codesigning/iOS Team Provisioning Profile: org.telegram.messenger.BroadcastUpload.mobileprovision"
+          # Копируем для всех таргетов
+          cp build-system/fake-codesigning/provisioning/fake.mobileprovision \
+             build-system/fake-codesigning/provisioning/Telegram.mobileprovision
+          cp build-system/fake-codesigning/provisioning/fake.mobileprovision \
+             build-system/fake-codesigning/provisioning/Share.mobileprovision
+          cp build-system/fake-codesigning/provisioning/fake.mobileprovision \
+             build-system/fake-codesigning/provisioning/ShareExtension.mobileprovision
+          cp build-system/fake-codesigning/provisioning/fake.mobileprovision \
+             build-system/fake-codesigning/provisioning/NotificationContent.mobileprovision
+          cp build-system/fake-codesigning/provisioning/fake.mobileprovision \
+             build-system/fake-codesigning/provisioning/NotificationService.mobileprovision
+          cp build-system/fake-codesigning/provisioning/fake.mobileprovision \
+             build-system/fake-codesigning/provisioning/Widget.mobileprovision
+          cp build-system/fake-codesigning/provisioning/fake.mobileprovision \
+             build-system/fake-codesigning/provisioning/IntentsExtension.mobileprovision
+          cp build-system/fake-codesigning/provisioning/fake.mobileprovision \
+             build-system/fake-codesigning/provisioning/BroadcastUpload.mobileprovision
+          cp build-system/fake-codesigning/provisioning/fake.mobileprovision \
+             build-system/fake-codesigning/provisioning/BroadcastUploadExtension.mobileprovision
           
-          echo "✅ Created fake provisioning profiles"
-          ls -la build-system/fake-codesigning/
+          # Создаём BUILD файл для Bazel
+          cat > build-system/fake-codesigning/provisioning/BUILD << 'EOF'
+          exports_files(glob(["*.mobileprovision"]))
+          EOF
+          
+          echo "✅ Created fake codesigning structure"
+          ls -la build-system/fake-codesigning/provisioning/
 
       - name: Clean build artifacts only
         run: |
