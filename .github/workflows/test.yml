@@ -80,7 +80,6 @@ jobs:
           python3 << 'EOF'
           import re, pathlib
           
-          # Отключаем все provisioning_profile в Telegram/BUILD
           path = pathlib.Path('Telegram/BUILD')
           if path.exists():
               content = path.read_text(encoding='utf-8')
@@ -134,18 +133,9 @@ jobs:
           name: Vartagram-unsigned-${{ github.sha }}
           path: build-output/Telegram.ipa
           retention-days: 30
+          if-no-files-found: ignore
 
       - name: Upload DSYMs (if any)
-        if: always()
-        run: |
-          if [ -f "build-output/Telegram.DSYMs.zip" ]; then
-            echo "Uploading DSYMs..."
-            actions/upload-artifact@v4
-            with:
-              name: Vartagram-DSYMs-${{ github.sha }}
-              path: build-output/Telegram.DSYMs.zip
-              retention-days: 30
-          fi
         uses: actions/upload-artifact@v4
         with:
           name: Vartagram-DSYMs-${{ github.sha }}
