@@ -66,12 +66,6 @@ jobs:
               content = f.read()
           
           # Паттерн для поиска xcode_provisioning_profile без team_id
-          # Ищем правила вида:
-          # xcode_provisioning_profile(
-          #     name = "...",
-          #     provisioning_profile = "...",
-          # )
-          
           pattern = r'(xcode_provisioning_profile\(\s*\n\s*name\s*=\s*"[^"]+",\s*\n\s*provisioning_profile\s*=\s*"[^"]+",?\s*\n\))'
           
           def add_team_id(match):
@@ -104,6 +98,74 @@ jobs:
           print("✅ Updated config with mock team_id")
           EOF
 
+      - name: Create fake provisioning profiles
+        run: |
+          mkdir -p build-system/fake-codesigning
+          
+          # Создаём fake mobileprovision файлы
+          cat > build-system/fake-codesigning/fake.mobileprovision << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>AppIDName</key>
+              <string>Telegram</string>
+              <key>ApplicationIdentifierPrefix</key>
+              <array>
+                  <string>MOCK_TEAM_ID</string>
+              </array>
+              <key>CreationDate</key>
+              <date>2024-01-01T00:00:00Z</date>
+              <key>Platform</key>
+              <array>
+                  <string>iOS</string>
+              </array>
+              <key>DeveloperCertificates</key>
+              <array>
+                  <data>MOCK_CERT_DATA</data>
+              </array>
+              <key>Entitlements</key>
+              <dict>
+                  <key>application-identifier</key>
+                  <string>MOCK_TEAM_ID.org.telegram.messenger</string>
+              </dict>
+              <key>Name</key>
+              <string>iOS Team Provisioning Profile: org.telegram.messenger</string>
+              <key>TeamIdentifier</key>
+              <array>
+                  <string>MOCK_TEAM_ID</string>
+              </array>
+              <key>TeamName</key>
+              <string>Mock Team</string>
+              <key>TimeToLive</key>
+              <integer>365</integer>
+              <key>UUID</key>
+              <string>MOCK-UUID-1234-5678-ABCD</string>
+              <key>Version</key>
+              <integer>1</integer>
+          </dict>
+          </plist>
+          EOF
+          
+          # Копируем для всех расширений
+          cp build-system/fake-codesigning/fake.mobileprovision \
+             "build-system/fake-codesigning/iOS Team Provisioning Profile: org.telegram.messenger.mobileprovision"
+          cp build-system/fake-codesigning/fake.mobileprovision \
+             "build-system/fake-codesigning/iOS Team Provisioning Profile: org.telegram.messenger.Share.mobileprovision"
+          cp build-system/fake-codesigning/fake.mobileprovision \
+             "build-system/fake-codesigning/iOS Team Provisioning Profile: org.telegram.messenger.NotificationContent.mobileprovision"
+          cp build-system/fake-codesigning/fake.mobileprovision \
+             "build-system/fake-codesigning/iOS Team Provisioning Profile: org.telegram.messenger.NotificationService.mobileprovision"
+          cp build-system/fake-codesigning/fake.mobileprovision \
+             "build-system/fake-codesigning/iOS Team Provisioning Profile: org.telegram.messenger.Widget.mobileprovision"
+          cp build-system/fake-codesigning/fake.mobileprovision \
+             "build-system/fake-codesigning/iOS Team Provisioning Profile: org.telegram.messenger.IntentsExtension.mobileprovision"
+          cp build-system/fake-codesigning/fake.mobileprovision \
+             "build-system/fake-codesigning/iOS Team Provisioning Profile: org.telegram.messenger.BroadcastUpload.mobileprovision"
+          
+          echo "✅ Created fake provisioning profiles"
+          ls -la build-system/fake-codesigning/
+
       - name: Clean build artifacts only
         run: |
           rm -rf build/
@@ -114,8 +176,7 @@ jobs:
         run: |
           python3 build-system/Make/Make.py generateProject \
             --configurationPath=build-system/Make/minimal-unsigned-config.json \
-            --xcodeManagedCodesigning \
-            --disableProvisioningProfiles
+            --xcodeManagedCodesigning
 
       - name: Check generated project
         run: |
@@ -148,6 +209,7 @@ jobs:
             --configuration=release_arm64 \
             --buildNumber=10000 \
             --xcodeManagedCodesigning \
+            --codesigningInformationPath=build-system/fake-codesigning \
             --outputBuildArtifactsPath=./build-output
 
       - name: Check build output
