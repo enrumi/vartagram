@@ -93,72 +93,35 @@ jobs:
             exit 1
           fi
 
-      - name: Build for iphoneos
+      - name: Build for iphoneos using Make.py
         run: |
-          set -o pipefail
-          xcodebuild -project Telegram/Telegram.xcodeproj \
-                     -scheme Telegram \
-                     -configuration Release \
-                     -sdk iphoneos \
-                     -derivedDataPath build \
-                     -jobs $(sysctl -n hw.ncpu) \
-                     ONLY_ACTIVE_ARCH=NO \
-                     VALID_ARCHS="arm64" \
-                     ARCHS="arm64" \
-                     CODE_SIGNING_ALLOWED=NO \
-                     CODE_SIGNING_REQUIRED=NO \
-                     CODE_SIGN_IDENTITY="" \
-                     PROVISIONING_PROFILE="" \
-                     DEVELOPMENT_TEAM="" \
-                     2>&1 | tee build.log
+          python3 build-system/Make/Make.py build \
+            --configurationPath=build-system/Make/minimal-unsigned-config.json \
+            --configuration=release_arm64 \
+            --buildNumber=10000 \
+            --xcodeManagedCodesigning \
+            --outputBuildArtifactsPath=./build-output
 
-      - name: Show build errors if failed
-        if: failure()
+      - name: Check build output
         run: |
-          echo "❌ BUILD FAILED - Showing errors:"
-          echo ""
-          echo "==================== ERRORS ===================="
-          grep -i "error:" build.log | head -30 || echo "No errors found"
-          echo ""
-          echo "==================== LAST 100 LINES ===================="
-          tail -100 build.log
-
-      - name: Find built app
-        run: |
-          echo "Looking for Telegram.app..."
-          find build -name "Telegram.app" -type d || true
-
-      - name: Package unsigned IPA
-        run: |
-          APP_PATH=$(find build/Build/Products -name "Telegram.app" -type d | grep "Release-iphoneos" | head -1)
-          
-          if [ -z "$APP_PATH" ]; then
-            echo "❌ Telegram.app not found in Release-iphoneos!"
-            echo "Available paths:"
-            find build -name "*.app" -type d
-            exit 1
-          fi
-          
-          echo "✅ Found app at: $APP_PATH"
-          mkdir -p Payload
-          cp -r "$APP_PATH" Payload/
-          zip -r9 Vartagram-unsigned.ipa Payload/
-          ls -lh Vartagram-unsigned.ipa
+          echo "Build completed, checking output..."
+          ls -la build-output/ || echo "build-output directory not found"
+          ls -la build-output/*.ipa || echo "IPA not found"
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: Vartagram-unsigned-${{ github.sha }}
-          path: Vartagram-unsigned.ipa
+          path: build-output/Telegram.ipa
           retention-days: 30
 
-      - name: Upload build log on failure
-        if: failure()
+      - name: Upload DSYMs if available
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-log-${{ github.sha }}
-          path: build.log
-          retention-days: 7
+          name: Vartagram-DSYMs-${{ github.sha }}
+          path: build-output/Telegram.DSYMs.zip
+          retention-days: 30
 
       - name: Success
-        run: echo "✅ Готово! Unsigned Vartagram.ipa в Artifacts."
+        run: echo "✅ Готово! Unsigned Telegram.ipa в Artifacts."
