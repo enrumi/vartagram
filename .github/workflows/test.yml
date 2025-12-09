@@ -1,4 +1,16 @@
-name: Build Vartagram Unsigned IPA
+# Билдим unsigned app (без подписи, для iphoneos)
+      - name: Build Vartagram unsigned
+        run: |
+          xcodebuild -project Telegram/Telegram.xcodeproj \
+                     -scheme Telegram \
+                     -configuration Release \
+                     -sdk iphoneos \
+                     -derivedDataPath build \
+                     -jobs $(sysctl -n hw.ncpu) \
+                     CODE_SIGNING_ALLOWED=NO \
+                     CODE_SIGNING_REQUIRED=NO \
+                     CODE_SIGN_IDENTITY="" \
+                     PROVISIONING_PROFILE=""name: Build Vartagram Unsigned IPA
 
 on:
   workflow_dispatch:  # ручной запуск
@@ -8,7 +20,7 @@ on:
 jobs:
   build:
     runs-on: macos-15  # ИСПРАВЛЕНО: macos-15 поддерживает Xcode 16.4
-    timeout-minutes: 120
+    timeout-minutes: 180  # Увеличено до 3 часов для первого билда
 
     steps:
       - name: Checkout repo + submodules
