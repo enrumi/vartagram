@@ -175,8 +175,7 @@ jobs:
       - name: Generate Xcode project
         run: |
           python3 build-system/Make/Make.py generateProject \
-            --configurationPath=build-system/Make/minimal-unsigned-config.json \
-            --xcodeManagedCodesigning
+            --configurationPath=build-system/Make/minimal-unsigned-config.json
 
       - name: Check generated project
         run: |
@@ -208,7 +207,6 @@ jobs:
             --configurationPath=build-system/Make/minimal-unsigned-config.json \
             --configuration=release_arm64 \
             --buildNumber=10000 \
-            --xcodeManagedCodesigning \
             --codesigningInformationPath=build-system/fake-codesigning \
             --outputBuildArtifactsPath=./build-output
 
