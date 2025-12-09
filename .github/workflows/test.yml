@@ -1,166 +1,164 @@
 name: Build Vartagram Unsigned IPA
 
 on:
-workflow_dispatch:
-push:
-branches: [ main ]
+  workflow_dispatch:
+  push:
+    branches: [ main ]
 
 jobs:
-build:
-runs-on: macos-15
-timeout-minutes: 180
+  build:
+    runs-on: macos-15
+    timeout-minutes: 180
 
-```
-steps:
-  - name: Checkout repo + submodules
-    uses: actions/checkout@v4
-    with:
-      submodules: recursive
+    steps:
+      - name: Checkout repo + submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-  - name: Free disk space
-    run: |
-      sudo rm -rf /Applications/Xcode_15.app || true
-      sudo rm -rf /opt/homebrew || true
-      df -h
+      - name: Free disk space
+        run: |
+          sudo rm -rf /Applications/Xcode_15.app || true
+          sudo rm -rf /opt/homebrew || true
+          df -h
 
-  - name: Set Xcode 16.4
-    uses: maxim-lobanov/setup-xcode@v1
-    with:
-      xcode-version: '16.4'
+      - name: Set Xcode 16.4
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '16.4'
 
-  - name: Verify Xcode version
-    run: |
-      xcode-select -p
-      xcodebuild -version
+      - name: Verify Xcode version
+        run: |
+          xcode-select -p
+          xcodebuild -version
 
-  - name: Disable PEP 668
-    run: |
-      rm -f $(python3 -c 'import sysconfig, pathlib; print(pathlib.Path(sysconfig.get_path("stdlib")) / "EXTERNALLY-MANAGED")') || true
+      - name: Disable PEP 668
+        run: |
+          rm -f $(python3 -c 'import sysconfig, pathlib; print(pathlib.Path(sysconfig.get_path("stdlib")) / "EXTERNALLY-MANAGED")') || true
 
-  - name: Install Python deps
-    run: |
-      python3 -m pip install --upgrade pip setuptools wheel --break-system-packages
-      python3 -m pip install protobuf requests colorama pyyaml ninja --break-system-packages
+      - name: Install Python deps
+        run: |
+          python3 -m pip install --upgrade pip setuptools wheel --break-system-packages
+          python3 -m pip install protobuf requests colorama pyyaml ninja --break-system-packages
 
-  - name: Install Bazelisk binary
-    run: |
-      curl -LO https://github.com/bazelbuild/bazelisk/releases/download/v1.19.0/bazelisk-darwin-arm64
-      chmod +x bazelisk-darwin-arm64
-      sudo mv bazelisk-darwin-arm64 /usr/local/bin/bazel
-      bazel version
+      - name: Install Bazelisk binary
+        run: |
+          curl -LO https://github.com/bazelbuild/bazelisk/releases/download/v1.19.0/bazelisk-darwin-arm64
+          chmod +x bazelisk-darwin-arm64
+          sudo mv bazelisk-darwin-arm64 /usr/local/bin/bazel
+          bazel version
 
-  - name: Fix BuildConfig BUILD file
-    run: |
-      sed -i '' 's/"-DAPP_CONFIG_IS_INTERNAL_BUILD={}".format(telegram_is_internal_build)/"-DAPP_CONFIG_IS_INTERNAL_BUILD={}".format("NO" if not telegram_is_internal_build else "YES")/g' submodules/BuildConfig/BUILD
-      sed -i '' 's/"-DAPP_CONFIG_IS_APPSTORE_BUILD={}".format(telegram_is_appstore_build)/"-DAPP_CONFIG_IS_APPSTORE_BUILD={}".format("NO" if not telegram_is_appstore_build else "YES")/g' submodules/BuildConfig/BUILD
-      
-      echo "Checking BUILD file..."
-      grep "APP_CONFIG_IS_INTERNAL_BUILD\|APP_CONFIG_IS_APPSTORE_BUILD" submodules/BuildConfig/BUILD
+      - name: Fix BuildConfig BUILD file
+        run: |
+          sed -i '' 's/"-DAPP_CONFIG_IS_INTERNAL_BUILD={}".format(telegram_is_internal_build)/"-DAPP_CONFIG_IS_INTERNAL_BUILD={}".format("NO" if not telegram_is_internal_build else "YES")/g' submodules/BuildConfig/BUILD
+          sed -i '' 's/"-DAPP_CONFIG_IS_APPSTORE_BUILD={}".format(telegram_is_appstore_build)/"-DAPP_CONFIG_IS_APPSTORE_BUILD={}".format("NO" if not telegram_is_appstore_build else "YES")/g' submodules/BuildConfig/BUILD
+          
+          echo "Checking BUILD file..."
+          grep "APP_CONFIG_IS_INTERNAL_BUILD\|APP_CONFIG_IS_APPSTORE_BUILD" submodules/BuildConfig/BUILD
 
-  - name: Clean build artifacts only
-    run: |
-      rm -rf build/
-      rm -rf bazel-*
-      rm -rf ~/Library/Developer/Xcode/DerivedData/
+      - name: Clean build artifacts only
+        run: |
+          rm -rf build/
+          rm -rf bazel-*
+          rm -rf ~/Library/Developer/Xcode/DerivedData/
 
-  - name: Generate Xcode project
-    run: |
-      python3 build-system/Make/Make.py generateProject \
-        --configurationPath=build-system/Make/minimal-unsigned-config.json \
-        --xcodeManagedCodesigning \
-        --disableProvisioningProfiles
+      - name: Generate Xcode project
+        run: |
+          python3 build-system/Make/Make.py generateProject \
+            --configurationPath=build-system/Make/minimal-unsigned-config.json \
+            --xcodeManagedCodesigning \
+            --disableProvisioningProfiles
 
-  - name: Check generated project
-    run: |
-      echo "Checking if Telegram.xcodeproj exists..."
-      ls -la Telegram/ || echo "Telegram/ directory not found"
-      
-      if [ -d "Telegram/Telegram.xcodeproj" ]; then
-        echo "✅ Project directory exists"
-        ls -la Telegram/Telegram.xcodeproj/
-      else
-        echo "❌ Telegram.xcodeproj not found!"
-        echo "Available files in root:"
-        ls -la
-        exit 1
-      fi
-      
-      if [ -f "Telegram/Telegram.xcodeproj/project.pbxproj" ]; then
-        echo "✅ Project generated successfully"
-        echo "Checking target SDK..."
-        grep "SDKROOT" Telegram/Telegram.xcodeproj/project.pbxproj | head -10
-      else
-        echo "❌ project.pbxproj not found!"
-        exit 1
-      fi
+      - name: Check generated project
+        run: |
+          echo "Checking if Telegram.xcodeproj exists..."
+          ls -la Telegram/ || echo "Telegram/ directory not found"
+          
+          if [ -d "Telegram/Telegram.xcodeproj" ]; then
+            echo "✅ Project directory exists"
+            ls -la Telegram/Telegram.xcodeproj/
+          else
+            echo "❌ Telegram.xcodeproj not found!"
+            echo "Available files in root:"
+            ls -la
+            exit 1
+          fi
+          
+          if [ -f "Telegram/Telegram.xcodeproj/project.pbxproj" ]; then
+            echo "✅ Project generated successfully"
+            echo "Checking target SDK..."
+            grep "SDKROOT" Telegram/Telegram.xcodeproj/project.pbxproj | head -10
+          else
+            echo "❌ project.pbxproj not found!"
+            exit 1
+          fi
 
-  - name: Build for iphoneos
-    run: |
-      set -o pipefail
-      xcodebuild -project Telegram/Telegram.xcodeproj \
-                 -scheme Telegram \
-                 -configuration Release \
-                 -sdk iphoneos \
-                 -derivedDataPath build \
-                 -jobs $(sysctl -n hw.ncpu) \
-                 ONLY_ACTIVE_ARCH=NO \
-                 VALID_ARCHS="arm64" \
-                 ARCHS="arm64" \
-                 CODE_SIGNING_ALLOWED=NO \
-                 CODE_SIGNING_REQUIRED=NO \
-                 CODE_SIGN_IDENTITY="" \
-                 PROVISIONING_PROFILE="" \
-                 DEVELOPMENT_TEAM="" \
-                 2>&1 | tee build.log
+      - name: Build for iphoneos
+        run: |
+          set -o pipefail
+          xcodebuild -project Telegram/Telegram.xcodeproj \
+                     -scheme Telegram \
+                     -configuration Release \
+                     -sdk iphoneos \
+                     -derivedDataPath build \
+                     -jobs $(sysctl -n hw.ncpu) \
+                     ONLY_ACTIVE_ARCH=NO \
+                     VALID_ARCHS="arm64" \
+                     ARCHS="arm64" \
+                     CODE_SIGNING_ALLOWED=NO \
+                     CODE_SIGNING_REQUIRED=NO \
+                     CODE_SIGN_IDENTITY="" \
+                     PROVISIONING_PROFILE="" \
+                     DEVELOPMENT_TEAM="" \
+                     2>&1 | tee build.log
 
-  - name: Show build errors if failed
-    if: failure()
-    run: |
-      echo "❌ BUILD FAILED - Showing errors:"
-      echo ""
-      echo "==================== ERRORS ===================="
-      grep -i "error:" build.log | head -30 || echo "No errors found"
-      echo ""
-      echo "==================== LAST 100 LINES ===================="
-      tail -100 build.log
+      - name: Show build errors if failed
+        if: failure()
+        run: |
+          echo "❌ BUILD FAILED - Showing errors:"
+          echo ""
+          echo "==================== ERRORS ===================="
+          grep -i "error:" build.log | head -30 || echo "No errors found"
+          echo ""
+          echo "==================== LAST 100 LINES ===================="
+          tail -100 build.log
 
-  - name: Find built app
-    run: |
-      echo "Looking for Telegram.app..."
-      find build -name "Telegram.app" -type d || true
+      - name: Find built app
+        run: |
+          echo "Looking for Telegram.app..."
+          find build -name "Telegram.app" -type d || true
 
-  - name: Package unsigned IPA
-    run: |
-      APP_PATH=$(find build/Build/Products -name "Telegram.app" -type d | grep "Release-iphoneos" | head -1)
-      
-      if [ -z "$APP_PATH" ]; then
-        echo "❌ Telegram.app not found in Release-iphoneos!"
-        echo "Available paths:"
-        find build -name "*.app" -type d
-        exit 1
-      fi
-      
-      echo "✅ Found app at: $APP_PATH"
-      mkdir -p Payload
-      cp -r "$APP_PATH" Payload/
-      zip -r9 Vartagram-unsigned.ipa Payload/
-      ls -lh Vartagram-unsigned.ipa
+      - name: Package unsigned IPA
+        run: |
+          APP_PATH=$(find build/Build/Products -name "Telegram.app" -type d | grep "Release-iphoneos" | head -1)
+          
+          if [ -z "$APP_PATH" ]; then
+            echo "❌ Telegram.app not found in Release-iphoneos!"
+            echo "Available paths:"
+            find build -name "*.app" -type d
+            exit 1
+          fi
+          
+          echo "✅ Found app at: $APP_PATH"
+          mkdir -p Payload
+          cp -r "$APP_PATH" Payload/
+          zip -r9 Vartagram-unsigned.ipa Payload/
+          ls -lh Vartagram-unsigned.ipa
 
-  - name: Upload IPA
-    uses: actions/upload-artifact@v4
-    with:
-      name: Vartagram-unsigned-${{ github.sha }}
-      path: Vartagram-unsigned.ipa
-      retention-days: 30
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vartagram-unsigned-${{ github.sha }}
+          path: Vartagram-unsigned.ipa
+          retention-days: 30
 
-  - name: Upload build log on failure
-    if: failure()
-    uses: actions/upload-artifact@v4
-    with:
-      name: build-log-${{ github.sha }}
-      path: build.log
-      retention-days: 7
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ github.sha }}
+          path: build.log
+          retention-days: 7
 
-  - name: Success
-    run: echo "✅ Готово! Unsigned Vartagram.ipa в Artifacts."
-```
+      - name: Success
+        run: echo "✅ Готово! Unsigned Vartagram.ipa в Artifacts."
