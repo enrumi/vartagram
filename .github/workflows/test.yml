@@ -52,7 +52,6 @@ jobs:
         run: |
           sed -i '' 's/"-DAPP_CONFIG_IS_INTERNAL_BUILD={}".format(telegram_is_internal_build)/"-DAPP_CONFIG_IS_INTERNAL_BUILD={}".format("NO" if not telegram_is_internal_build else "YES")/g' submodules/BuildConfig/BUILD
           sed -i '' 's/"-DAPP_CONFIG_IS_APPSTORE_BUILD={}".format(telegram_is_appstore_build)/"-DAPP_CONFIG_IS_APPSTORE_BUILD={}".format("NO" if not telegram_is_appstore_build else "YES")/g' submodules/BuildConfig/BUILD
-          
           echo "Checking BUILD file..."
           grep "APP_CONFIG_IS_INTERNAL_BUILD\|APP_CONFIG_IS_APPSTORE_BUILD" submodules/BuildConfig/BUILD
 
@@ -60,56 +59,50 @@ jobs:
         run: |
           python3 << 'EOF'
           import re
-          
-          # Читаем BUILD файл
-          with open('Telegram/BUILD', 'r') as f:
+          path = 'Telegram/BUILD'
+          with open(path, 'r', encoding='utf-8') as f:
               content = f.read()
-          
-          # Паттерн для поиска xcode_provisioning_profile без team_id
           pattern = r'(xcode_provisioning_profile\(\s*\n\s*name\s*=\s*"[^"]+",\s*\n\s*provisioning_profile\s*=\s*"[^"]+",?\s*\n\))'
-          
           def add_team_id(match):
               rule = match.group(1)
-              # Вставляем team_id перед закрывающей скобкой
+              if 'team_id' in rule:
+                  return rule
               return rule.replace('\n)', '\n    team_id = "MOCK_TEAM_ID",\n)')
-          
-          content = re.sub(pattern, add_team_id, content)
-          
-          # Сохраняем
-          with open('Telegram/BUILD', 'w') as f:
-              f.write(content)
-          
+          new_content = re.sub(pattern, add_team_id, content)
+          with open(path, 'w', encoding='utf-8') as f:
+              f.write(new_content)
           print("✅ Added mock team_id to all xcode_provisioning_profile rules")
           EOF
 
-      - name: Update config with mock team_id
+      - name: Update minimal unsigned config
         run: |
           python3 << 'EOF'
-          import json
-          
-          with open('build-system/Make/minimal-unsigned-config.json', 'r') as f:
+          import json, os
+          cfg_path = 'build-system/Make/minimal-unsigned-config.json'
+          if not os.path.exists(cfg_path):
+              raise SystemExit(f"{cfg_path} not found, create it from template_minimal_development_configuration.json")
+          with open(cfg_path, 'r', encoding='utf-8') as f:
               config = json.load(f)
-          
           config['team_id'] = 'MOCK_TEAM_ID'
-          
-          with open('build-system/Make/minimal-unsigned-config.json', 'w') as f:
+          # При желании можно сюда же вкрутить твой api_id/api_hash/bundle_id
+          # config['api_id'] = '2040'
+          # config['api_hash'] = 'b18441a1ff607e10a989891a5462e627'
+          # config['bundle_id'] = 'org.telegram.messenger'
+          with open(cfg_path, 'w', encoding='utf-8') as f:
               json.dump(config, f, indent=2)
-          
-          print("✅ Updated config with mock team_id")
+          print("✅ Updated minimal unsigned config with mock team_id")
           EOF
 
       - name: Create fake codesigning structure
         run: |
           mkdir -p build-system/fake-codesigning/provisioning
-          
-          # Создаём fake mobileprovision файл
           cat > build-system/fake-codesigning/provisioning/fake.mobileprovision << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
               <key>AppIDName</key>
-              <string>Telegram</string>
+              <string>Vartagram</string>
               <key>ApplicationIdentifierPrefix</key>
               <array>
                   <string>MOCK_TEAM_ID</string>
@@ -146,32 +139,16 @@ jobs:
           </dict>
           </plist>
           EOF
-          
-          # Копируем для всех таргетов
-          cp build-system/fake-codesigning/provisioning/fake.mobileprovision \
-             build-system/fake-codesigning/provisioning/Telegram.mobileprovision
-          cp build-system/fake-codesigning/provisioning/fake.mobileprovision \
-             build-system/fake-codesigning/provisioning/Share.mobileprovision
-          cp build-system/fake-codesigning/provisioning/fake.mobileprovision \
-             build-system/fake-codesigning/provisioning/ShareExtension.mobileprovision
-          cp build-system/fake-codesigning/provisioning/fake.mobileprovision \
-             build-system/fake-codesigning/provisioning/NotificationContent.mobileprovision
-          cp build-system/fake-codesigning/provisioning/fake.mobileprovision \
-             build-system/fake-codesigning/provisioning/NotificationService.mobileprovision
-          cp build-system/fake-codesigning/provisioning/fake.mobileprovision \
-             build-system/fake-codesigning/provisioning/Widget.mobileprovision
-          cp build-system/fake-codesigning/provisioning/fake.mobileprovision \
-             build-system/fake-codesigning/provisioning/IntentsExtension.mobileprovision
-          cp build-system/fake-codesigning/provisioning/fake.mobileprovision \
-             build-system/fake-codesigning/provisioning/BroadcastUpload.mobileprovision
-          cp build-system/fake-codesigning/provisioning/fake.mobileprovision \
-             build-system/fake-codesigning/provisioning/BroadcastUploadExtension.mobileprovision
-          
-          # Создаём BUILD файл для Bazel
+
+          for name in Telegram Share ShareExtension NotificationContent NotificationService Widget IntentsExtension BroadcastUpload BroadcastUploadExtension; do
+            cp build-system/fake-codesigning/provisioning/fake.mobileprovision \
+               build-system/fake-codesigning/provisioning/$name.mobileprovision
+          done
+
           cat > build-system/fake-codesigning/provisioning/BUILD << 'EOF'
           exports_files(glob(["*.mobileprovision"]))
           EOF
-          
+
           echo "✅ Created fake codesigning structure"
           ls -la build-system/fake-codesigning/provisioning/
 
@@ -191,7 +168,6 @@ jobs:
         run: |
           echo "Checking if Telegram.xcodeproj exists..."
           ls -la Telegram/ || echo "Telegram/ directory not found"
-          
           if [ -d "Telegram/Telegram.xcodeproj" ]; then
             echo "✅ Project directory exists"
             ls -la Telegram/Telegram.xcodeproj/
@@ -201,11 +177,9 @@ jobs:
             ls -la
             exit 1
           fi
-          
           if [ -f "Telegram/Telegram.xcodeproj/project.pbxproj" ]; then
             echo "✅ Project generated successfully"
-            echo "Checking target SDK..."
-            grep "SDKROOT" Telegram/Telegram.xcodeproj/project.pbxproj | head -10
+            grep "SDKROOT" Telegram/Telegram.xcodeproj/project.pbxproj | head -10 || true
           else
             echo "❌ project.pbxproj not found!"
             exit 1
