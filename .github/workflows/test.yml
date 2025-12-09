@@ -1,4 +1,22 @@
-name: Build Vartagram Unsigned IPA
+- name: Install Bazelisk binary
+        run: |
+          curl -LO https://github.com/bazelbuild/bazelisk/releases/download/v1.19.0/bazelisk-darwin-arm64
+          chmod +x bazelisk-darwin-arm64
+          sudo mv bazelisk-darwin-arm64 /usr/local/bin/bazel
+          bazel version
+          echo "Bazelisk установлен"
+
+      - name: Fix BuildConfiguration.py for C macros
+        run: |
+          python3 << 'EOF'
+          import re
+          path = 'build-system/Make/BuildConfiguration.py'
+          with open(path, 'r') as f:
+              content = f.read()
+          
+          # Фикс: заменяем Python True/False на C 1/0 для макросов
+          content = re.sub(
+              r"file\.write\('APP_CONFIG_IS_INTERNAL_BUILD=\{\}\\n'\.format\(self\.is_internal_build\)\)",name: Build Vartagram Unsigned IPA
 
 on:
   workflow_dispatch:
@@ -51,6 +69,12 @@ jobs:
           sudo mv bazelisk-darwin-arm64 /usr/local/bin/bazel
           bazel version
           echo "Bazelisk установлен"
+
+      - name: Fix BuildConfiguration.py boolean handling
+        run: |
+          sed -i '' "s/string += 'telegram_is_internal_build = \"{}\"/string += 'telegram_is_internal_build = {}/g" build-system/Make/BuildConfiguration.py
+          sed -i '' "s/string += 'telegram_is_appstore_build = \"{}\"/string += 'telegram_is_appstore_build = {}/g" build-system/Make/BuildConfiguration.py
+          echo "BuildConfiguration.py patched"
 
       - name: Generate Xcode project
         run: |
