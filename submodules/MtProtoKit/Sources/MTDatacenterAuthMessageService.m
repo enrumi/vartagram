@@ -58,8 +58,8 @@ static NSArray<MTDatacenterAuthPublicKey *> *defaultPublicKeys(bool isProduction
              "9JXKK+T6dkFXbpMy14DNbRIg0qEftHqMuQIDAQAB\n"
              "-----END RSA PUBLIC KEY-----"]
         ];
-
-
+        
+        
         productionPublicKeys = @[
             [[MTDatacenterAuthPublicKey alloc] initWithPublicKey:@"-----BEGIN RSA PUBLIC KEY-----\n"
              "MIIBCgKCAQEAy2+9TLsRl6RJV6QG7yXOY195odD8+Arn4lBpItEJnPNvvySU12Ys\n"
@@ -70,6 +70,7 @@ static NSArray<MTDatacenterAuthPublicKey *> *defaultPublicKeys(bool isProduction
              "9JXKK+T6dkFXbpMy14DNbRIg0qEftHqMuQIDAQAB\n"
              "-----END RSA PUBLIC KEY-----"]
         ];
+
 
     });
     if (isProduction) {
