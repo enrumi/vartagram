@@ -69,8 +69,8 @@ jobs:
       # Билдим unsigned app (без подписи, для iphoneos)
       - name: Build Vartagram unsigned
         run: |
-          xcodebuild -project Vartagram.xcodeproj \
-                     -scheme Vartagram \
+          xcodebuild -project Telegram.xcodeproj \
+                     -scheme Telegram \
                      -configuration Release \
                      -sdk iphoneos \
                      -derivedDataPath build \
@@ -84,7 +84,7 @@ jobs:
       - name: Package unsigned IPA
         run: |
           mkdir -p Payload
-          cp -r build/Build/Products/Release-iphoneos/Vartagram.app Payload/
+          cp -r build/Build/Products/Release-iphoneos/Telegram.app Payload/
           zip -r9 Vartagram-unsigned.ipa Payload/
           echo "IPA готов:"
           ls -lh Vartagram-unsigned.ipa
@@ -98,4 +98,4 @@ jobs:
           retention-days: 30
 
       - name: Success
-        run: echo "Готово! Unsigned Vartagram.ipa в Artifacts. Ставь на iPhone через Sideloadly/TrollStore/Esign/Scarlet.
+        run: echo "Готово! Unsigned Vartagram.ipa в Artifacts. Ставь на iPhone через Sideloadly/TrollStore/Esign/Scarlet."
