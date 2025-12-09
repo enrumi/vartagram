@@ -1,5 +1,6 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 import plistlib
+import datetime
 import subprocess
 import sys
 import os
@@ -29,7 +30,7 @@ def create_dummy_mobileprovision(name, team_id, bundle_id, output_path, cert_pat
     profile_dict = {
         'AppIDName': f'Vartagram {name}',
         'ApplicationIdentifierPrefix': [team_id],
-        'CreationDate': '2024-01-01T00:00:00Z',
+        'CreationDate': datetime.datetime(2024, 1, 1, 0, 0, 0),
         'Platform': ['iOS'],
         'IsXcodeManaged': False,
         'DeveloperCertificates': [],
@@ -39,7 +40,7 @@ def create_dummy_mobileprovision(name, team_id, bundle_id, output_path, cert_pat
             'get-task-allow': True,
             'aps-environment': 'development'
         },
-        'ExpirationDate': '2099-12-31T23:59:59Z',
+        'ExpirationDate': datetime.datetime(2099, 12, 31, 23, 59, 59),
         'Name': f'Vartagram {name} Profile',
         'ProvisionedDevices': [],
         'TeamIdentifier': [team_id],
@@ -140,7 +141,7 @@ if __name__ == '__main__':
             if create_dummy_mobileprovision(profile_name, team_id, bundle_id, output_path, cert_path, key_path):
                 success_count += 1
         
-        print(f'\n✅ Successfully created {success_count}/{len(profiles)} profiles in {output_dir}')
+        print(f'\n? Successfully created {success_count}/{len(profiles)} profiles in {output_dir}')
         
     finally:
         # Clean up temp files
