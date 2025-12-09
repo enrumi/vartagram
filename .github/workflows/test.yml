@@ -48,35 +48,88 @@ jobs:
           sudo mv bazelisk-darwin-arm64 /usr/local/bin/bazel
           bazel version
 
-      - name: Fix BuildConfiguration.py boolean handling
+      - name: Fix BuildConfig BUILD file
         run: |
-          sed -i '' 's/telegram_is_internal_build = "{}"/telegram_is_internal_build = {}/g' build-system/Make/BuildConfiguration.py
-          sed -i '' 's/telegram_is_appstore_build = "{}"/telegram_is_appstore_build = {}/g' build-system/Make/BuildConfiguration.py
+          sed -i '' 's/"-DAPP_CONFIG_IS_INTERNAL_BUILD={}".format(telegram_is_internal_build)/"-DAPP_CONFIG_IS_INTERNAL_BUILD={}".format("NO" if not telegram_is_internal_build else "YES")/g' submodules/BuildConfig/BUILD
+          sed -i '' 's/"-DAPP_CONFIG_IS_APPSTORE_BUILD={}".format(telegram_is_appstore_build)/"-DAPP_CONFIG_IS_APPSTORE_BUILD={}".format("NO" if not telegram_is_appstore_build else "YES")/g' submodules/BuildConfig/BUILD
+          
+          echo "Checking BUILD file..."
+          grep "APP_CONFIG_IS_INTERNAL_BUILD\|APP_CONFIG_IS_APPSTORE_BUILD" submodules/BuildConfig/BUILD
 
-      - name: Generate Xcode project
+      - name: Clean all build artifacts
+        run: |
+          rm -rf build/
+          rm -rf Telegram/
+          rm -rf bazel-*
+          rm -rf ~/Library/Developer/Xcode/DerivedData/
+
+      - name: Generate Xcode project for DEVICE
         run: |
           python3 build-system/Make/Make.py generateProject \
             --configurationPath=build-system/Make/minimal-unsigned-config.json \
             --xcodeManagedCodesigning \
             --disableProvisioningProfiles
 
-      - name: Build Vartagram unsigned
+      - name: Check generated SDK
         run: |
+          if [ -f "Telegram/Telegram.xcodeproj/project.pbxproj" ]; then
+            echo "Checking target SDK..."
+            grep -i "SDKROOT\|iphonesimulator\|iphoneos" Telegram/Telegram.xcodeproj/project.pbxproj | head -20
+          fi
+
+      - name: Build for iphoneos (not simulator)
+        run: |
+          set -o pipefail
           xcodebuild -project Telegram/Telegram.xcodeproj \
                      -scheme Telegram \
                      -configuration Release \
                      -sdk iphoneos \
+                     -destination 'generic/platform=iOS' \
                      -derivedDataPath build \
                      -jobs $(sysctl -n hw.ncpu) \
+                     ONLY_ACTIVE_ARCH=NO \
+                     VALID_ARCHS="arm64" \
+                     ARCHS="arm64" \
                      CODE_SIGNING_ALLOWED=NO \
                      CODE_SIGNING_REQUIRED=NO \
                      CODE_SIGN_IDENTITY="" \
-                     PROVISIONING_PROFILE=""
+                     PROVISIONING_PROFILE="" \
+                     DEVELOPMENT_TEAM="" \
+                     2>&1 | tee build.log
+
+      - name: Show build errors if failed
+        if: failure()
+        run: |
+          echo "❌ BUILD FAILED - Showing errors:"
+          echo ""
+          echo "==================== ERRORS ===================="
+          grep -i "error:" build.log | head -30 || echo "No errors found"
+          echo ""
+          echo "==================== LAST 100 LINES ===================="
+          tail -100 build.log
+
+      - name: Find built app
+        run: |
+          echo "Looking for Telegram.app..."
+          find build -name "Telegram.app" -type d || true
+          
+          APP_PATH=$(find build/Build/Products -name "Telegram.app" -type d | grep -v "iphonesimulator" | head -1)
+          echo "Found app at: $APP_PATH"
+          ls -la "$APP_PATH" || echo "App not found!"
 
       - name: Package unsigned IPA
         run: |
+          APP_PATH=$(find build/Build/Products -name "Telegram.app" -type d | grep "Release-iphoneos" | head -1)
+          
+          if [ -z "$APP_PATH" ]; then
+            echo "❌ Telegram.app not found!"
+            echo "Available paths:"
+            find build -name "*.app" -type d
+            exit 1
+          fi
+          
           mkdir -p Payload
-          cp -r build/Build/Products/Release-iphoneos/Telegram.app Payload/
+          cp -r "$APP_PATH" Payload/
           zip -r9 Vartagram-unsigned.ipa Payload/
           ls -lh Vartagram-unsigned.ipa
 
@@ -87,5 +140,15 @@ jobs:
           path: Vartagram-unsigned.ipa
           retention-days: 30
 
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ github.sha }}
+          path: build.log
+          retention-days: 7
+
       - name: Success
-        run: echo "Готово! Unsigned Vartagram.ipa в Artifacts."
+        run: echo "✅ Готово! Unsigned Vartagram.ipa в Artifacts."
+
+  
