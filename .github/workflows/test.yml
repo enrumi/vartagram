@@ -1,4 +1,4 @@
-﻿name: Build Vartagram Unsigned IPA
+name: Build Vartagram Unsigned IPA
 
 on:
   workflow_dispatch:
@@ -68,13 +68,13 @@ jobs:
             "is_non_dev_account": true
           }
           EOF
-          echo "вњ… Created minimal-unsigned-config.json"
+          echo "✅ Created minimal-unsigned-config.json"
 
       - name: Create valid dummy codesigning profiles
         run: |
           mkdir -p build-system/empty-codesigning/profiles build-system/empty-codesigning/certs
-          python3 build-system/Make/create_dummy_profiles.py "XXXXXXXXXX" "org.telegram.messenger" "build-system/empty-codesigning/profiles"
-          echo "✅: Valid dummy codesigning profiles created"
+          python3 build-system/Make/create_dummy_profiles.py "" "org.telegram.messenger" "build-system/empty-codesigning/profiles"
+          echo "?: Valid dummy codesigning profiles created"
 
       - name: Clean build artifacts
         run: |

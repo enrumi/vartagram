@@ -24,12 +24,16 @@ def create_dummy_mobileprovision(name, team_id, bundle_id, output_path, cert_pat
     }
     
     suffix = name_to_suffix.get(name, '')
-    app_id = f'{team_id}.{bundle_id}{suffix}'
+    # Handle empty team_id for unsigned builds
+    if team_id:
+        app_id = f'{team_id}.{bundle_id}{suffix}'
+    else:
+        app_id = f'{bundle_id}{suffix}'
     
     # Create minimal provisioning profile plist
     profile_dict = {
         'AppIDName': f'Vartagram {name}',
-        'ApplicationIdentifierPrefix': [team_id],
+        'ApplicationIdentifierPrefix': [team_id] if team_id else [],
         'CreationDate': datetime.datetime(2024, 1, 1, 0, 0, 0),
         'Platform': ['iOS'],
         'IsXcodeManaged': False,
