@@ -1,22 +1,4 @@
-- name: Install Bazelisk binary
-        run: |
-          curl -LO https://github.com/bazelbuild/bazelisk/releases/download/v1.19.0/bazelisk-darwin-arm64
-          chmod +x bazelisk-darwin-arm64
-          sudo mv bazelisk-darwin-arm64 /usr/local/bin/bazel
-          bazel version
-          echo "Bazelisk установлен"
-
-      - name: Fix BuildConfiguration.py for C macros
-        run: |
-          python3 << 'EOF'
-          import re
-          path = 'build-system/Make/BuildConfiguration.py'
-          with open(path, 'r') as f:
-              content = f.read()
-          
-          # Фикс: заменяем Python True/False на C 1/0 для макросов
-          content = re.sub(
-              r"file\.write\('APP_CONFIG_IS_INTERNAL_BUILD=\{\}\\n'\.format\(self\.is_internal_build\)\)",name: Build Vartagram Unsigned IPA
+name: Build Vartagram Unsigned IPA
 
 on:
   workflow_dispatch:
@@ -49,18 +31,15 @@ jobs:
         run: |
           xcode-select -p
           xcodebuild -version
-          echo "Xcode 16.4 установлен"
 
       - name: Disable PEP 668
         run: |
           rm -f $(python3 -c 'import sysconfig, pathlib; print(pathlib.Path(sysconfig.get_path("stdlib")) / "EXTERNALLY-MANAGED")') || true
-          echo "PEP 668 удалён"
 
       - name: Install Python deps
         run: |
           python3 -m pip install --upgrade pip setuptools wheel --break-system-packages
           python3 -m pip install protobuf requests colorama pyyaml ninja --break-system-packages
-          echo "Deps готовы"
 
       - name: Install Bazelisk binary
         run: |
@@ -68,13 +47,11 @@ jobs:
           chmod +x bazelisk-darwin-arm64
           sudo mv bazelisk-darwin-arm64 /usr/local/bin/bazel
           bazel version
-          echo "Bazelisk установлен"
 
       - name: Fix BuildConfiguration.py boolean handling
         run: |
           sed -i '' 's/telegram_is_internal_build = "{}"/telegram_is_internal_build = {}/g' build-system/Make/BuildConfiguration.py
           sed -i '' 's/telegram_is_appstore_build = "{}"/telegram_is_appstore_build = {}/g' build-system/Make/BuildConfiguration.py
-          echo "BuildConfiguration.py patched"
 
       - name: Generate Xcode project
         run: |
@@ -101,7 +78,6 @@ jobs:
           mkdir -p Payload
           cp -r build/Build/Products/Release-iphoneos/Telegram.app Payload/
           zip -r9 Vartagram-unsigned.ipa Payload/
-          echo "IPA готов:"
           ls -lh Vartagram-unsigned.ipa
 
       - name: Upload IPA
