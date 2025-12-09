@@ -69,7 +69,7 @@ jobs:
       # Билдим unsigned app (без подписи, для iphoneos)
       - name: Build Vartagram unsigned
         run: |
-          xcodebuild -project Telegram.xcodeproj \
+          xcodebuild -project Telegram/Telegram.xcodeproj \
                      -scheme Telegram \
                      -configuration Release \
                      -sdk iphoneos \
