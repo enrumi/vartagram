@@ -72,8 +72,8 @@ jobs:
 
       - name: Fix BuildConfiguration.py boolean handling
         run: |
-          sed -i '' "s/string += 'telegram_is_internal_build = \"{}\"/string += 'telegram_is_internal_build = {}/g" build-system/Make/BuildConfiguration.py
-          sed -i '' "s/string += 'telegram_is_appstore_build = \"{}\"/string += 'telegram_is_appstore_build = {}/g" build-system/Make/BuildConfiguration.py
+          sed -i '' 's/telegram_is_internal_build = "{}"/telegram_is_internal_build = {}/g' build-system/Make/BuildConfiguration.py
+          sed -i '' 's/telegram_is_appstore_build = "{}"/telegram_is_appstore_build = {}/g' build-system/Make/BuildConfiguration.py
           echo "BuildConfiguration.py patched"
 
       - name: Generate Xcode project
