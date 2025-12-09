@@ -1,4 +1,4 @@
-name: Build Vartagram Unsigned IPA
+﻿name: Build Vartagram Unsigned IPA
 
 on:
   workflow_dispatch:
@@ -68,16 +68,13 @@ jobs:
             "is_non_dev_account": true
           }
           EOF
-          echo "✅ Created minimal-unsigned-config.json"
+          echo "вњ… Created minimal-unsigned-config.json"
 
-      - name: Create empty codesigning (skip validation)
+      - name: Create valid dummy codesigning profiles
         run: |
           mkdir -p build-system/empty-codesigning/profiles build-system/empty-codesigning/certs
-          # Создаём пустые .mobileprovision файлы (DER заглушки)
-          for name in Telegram Share ShareExtension NotificationContent NotificationService Widget IntentsExtension BroadcastUpload BroadcastUploadExtension; do
-            echo -n $'\x30\x82\x01\x34\x02\x01\x00\x30\x0D\x06\x09\x2A\x86\x48\x86\xF7\x0D\x01\x01\x0B\x05\x00\x30\x0B\x06\x09\x2A\x86\x48\x86\xF7\x0D\x01\x07\x01' > build-system/empty-codesigning/profiles/$name.mobileprovision
-          done
-          echo "✅ Empty codesigning with DER stubs created"
+          python3 build-system/Make/create_dummy_profiles.py "XXXXXXXXXX" "org.telegram.messenger" "build-system/empty-codesigning/profiles"
+          echo "✅: Valid dummy codesigning profiles created"
 
       - name: Clean build artifacts
         run: |
