@@ -52,28 +52,6 @@ jobs:
         run: |
           sed -i '' 's/"-DAPP_CONFIG_IS_INTERNAL_BUILD={}".format(telegram_is_internal_build)/"-DAPP_CONFIG_IS_INTERNAL_BUILD={}".format("NO" if not telegram_is_internal_build else "YES")/g' submodules/BuildConfig/BUILD || true
           sed -i '' 's/"-DAPP_CONFIG_IS_APPSTORE_BUILD={}".format(telegram_is_appstore_build)/"-DAPP_CONFIG_IS_APPSTORE_BUILD={}".format("NO" if not telegram_is_appstore_build else "YES")/g' submodules/BuildConfig/BUILD || true
-          echo "Checking BUILD file..."
-          grep "APP_CONFIG_IS_INTERNAL_BUILD\|APP_CONFIG_IS_APPSTORE_BUILD" submodules/BuildConfig/BUILD || true
-
-      - name: Patch BUILD file for unsigned build (mock team_id)
-        run: |
-          python3 << 'EOF'
-          import re, pathlib
-          path = pathlib.Path('Telegram/BUILD')
-          if not path.exists():
-              print("Telegram/BUILD not found, skipping patch")
-          else:
-              content = path.read_text(encoding='utf-8')
-              pattern = r'(xcode_provisioning_profile\(\s*\n\s*name\s*=\s*"[^"]+",\s*\n\s*provisioning_profile\s*=\s*"[^"]+",?\s*\n\))'
-              def add_team_id(match):
-                  rule = match.group(1)
-                  if 'team_id' in rule:
-                      return rule
-                  return rule.replace('\n)', '\n    team_id = "MOCK_TEAM_ID",\n)')
-              new_content = re.sub(pattern, add_team_id, content)
-              path.write_text(new_content, encoding='utf-8')
-              print("✅ Added mock team_id to all xcode_provisioning_profile rules")
-          EOF
 
       - name: Create minimal unsigned config
         run: |
@@ -85,7 +63,7 @@ jobs:
             "is_internal_build": false,
             "is_appstore_build": false,
             "app_specific_url_scheme": "tgapp",
-            "team_id": "MOCK_TEAM_ID",
+            "team_id": "",
             "bundle_id": "org.telegram.messenger",
             "appstore_id": "0",
             "premium_iap_product_id": "",
@@ -97,27 +75,58 @@ jobs:
           EOF
           echo "✅ Created minimal-unsigned-config.json"
 
-      - name: Clean build artifacts only
+      - name: Patch Telegram/BUILD - disable all provisioning profiles
         run: |
-          rm -rf build/
-          rm -rf bazel-*
-          rm -rf ~/Library/Developer/Xcode/DerivedData/
-          rm -rf build-input/
+          python3 << 'EOF'
+          import re, pathlib
+          
+          # Отключаем все provisioning_profile в Telegram/BUILD
+          path = pathlib.Path('Telegram/BUILD')
+          if path.exists():
+              content = path.read_text(encoding='utf-8')
+              
+              # Заменяем все provisioning_profile = ... на None
+              content = re.sub(
+                  r'provisioning_profile\s*=\s*select.*?None.*?mobileprovision',
+                  'provisioning_profile = None',
+                  content,
+                  flags=re.DOTALL
+              )
+              
+              # Убираем xcode_provisioning_profile полностью
+              content = re.sub(r'xcode_provisioning_profile\s*\([^)]*\),?\s*\n?', '', content)
+              
+              path.write_text(content, encoding='utf-8')
+              print("✅ Disabled all provisioning profiles in Telegram/BUILD")
+          else:
+              print("⚠️ Telegram/BUILD not found")
+          EOF
 
-      - name: Build for iphoneos (DISABLED codesigning)
+      - name: Clean build artifacts
+        run: |
+          rm -rf build/ bazel-* ~/Library/Developer/Xcode/DerivedData/ build-input/
+
+      - name: Build unsigned IPA
         run: |
           python3 build-system/Make/Make.py build \
             --configurationPath=build-system/Make/minimal-unsigned-config.json \
             --configuration=release_arm64 \
             --buildNumber=10000 \
-            --disableProvisioningProfiles \
             --outputBuildArtifactsPath=./build-output
 
-      - name: Check build output
+      - name: Check & package output
         run: |
-          echo "Build completed, checking output..."
-          ls -la build-output/ || echo "build-output directory not found"
-          ls -la build-output/*.ipa || echo "IPA not found"
+          echo "Checking build output..."
+          ls -la build-output/ || mkdir -p build-output
+          
+          if [ -f "build-output/Telegram.ipa" ]; then
+            echo "✅ IPA found!"
+            ls -lh build-output/Telegram.ipa
+          else
+            echo "❌ IPA not found, listing bazel-bin:"
+            find bazel-bin -name "*.ipa" -o -name "Telegram.ipa" || true
+            exit 1
+          fi
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
@@ -125,10 +134,18 @@ jobs:
           name: Vartagram-unsigned-${{ github.sha }}
           path: build-output/Telegram.ipa
           retention-days: 30
-          if-no-files-found: ignore
 
-      - name: Upload DSYMs if available
+      - name: Upload DSYMs (if any)
         if: always()
+        run: |
+          if [ -f "build-output/Telegram.DSYMs.zip" ]; then
+            echo "Uploading DSYMs..."
+            actions/upload-artifact@v4
+            with:
+              name: Vartagram-DSYMs-${{ github.sha }}
+              path: build-output/Telegram.DSYMs.zip
+              retention-days: 30
+          fi
         uses: actions/upload-artifact@v4
         with:
           name: Vartagram-DSYMs-${{ github.sha }}
@@ -136,7 +153,9 @@ jobs:
           retention-days: 30
           if-no-files-found: ignore
 
-      - name: Success
+      - name: Success message
+        if: success()
         run: |
-          echo "✅ Готово! Unsigned Telegram.ipa в Artifacts (если есть)."
-          echo "📱 Скачай из Actions -> Artifacts -> Vartagram-unsigned-<SHA>"
+          echo "🎉 Build SUCCESS!"
+          echo "📱 Unsigned IPA ready in Artifacts: Vartagram-unsigned-${{ github.sha }}"
+          echo "💾 Download and sign with: codesign -f -s \"iPhone Developer\" Telegram.ipa"
