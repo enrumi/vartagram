@@ -16,7 +16,7 @@ jobs:
         with:
           submodules: recursive
 
-      # Чистим диск (macos-14 жрёт место)
+      # Чистим диск (macos-14 жрёт место как сука)
       - name: Free disk space
         run: |
           sudo rm -rf /Applications/Xcode_15.app || true
@@ -27,39 +27,33 @@ jobs:
       - name: Disable PEP 668
         run: |
           rm -f $(python3 -c 'import sysconfig, pathlib; print(pathlib.Path(sysconfig.get_path("stdlib")) / "EXTERNALLY-MANAGED")') || true
-          echo "PEP 668 удалён"
+          echo "PEP 668 удалён, pip свободен"
 
-      # Обновляем pip и ставим реальные deps (manual, без requirements.txt)
+      # Обновляем pip и ставим реальные deps (manual, без requirements.txt — только protobuf и т.д. для MTProto/Make.py)
       - name: Install Python deps
         run: |
           python3 -m pip install --upgrade pip setuptools wheel --break-system-packages
           python3 -m pip install protobuf requests colorama pyyaml ninja --break-system-packages
           echo "Deps готовы: protobuf, requests, colorama, pyyaml, ninja"
 
-      # Ставим Node.js + npm (через официальный action, без хуйни)
-      - name: Setup Node.js (для возможных инструментов, но не используем npm)
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      # Ставим Bazelisk бинарником (без npm, 100% стабильно, как в официальном гайде Bazel)
+      # Bazelisk бинарником (без npm, curl с GitHub releases — 100% стабильно)
       - name: Install Bazelisk binary
         run: |
-          curl -L -o /usr/local/bin/bazel https://github.com/bazelbuild/bazelisk/releases/download/v1.19.0/bazelisk-darwin-arm64
-          chmod +x /usr/local/bin/bazel
+          curl -LO https://github.com/bazelbuild/bazelisk/releases/download/v1.19.0/bazelisk-darwin-arm64
+          chmod +x bazelisk-darwin-arm64
+          sudo mv bazelisk-darwin-arm64 /usr/local/bin/bazel
           bazel version
-          echo "Bazelisk установлен"
+          echo "Bazelisk установлен (v1.19.0)"
 
-      # Генерируем Xcode проект
-      - name: Generate Xcode project
+      # Генерируем Xcode проект (реальные аргументы из Make.py: --xcodeManagedCodesigning + --disableProvisioningProfiles для unsigned)
+      - name: Generate Xcode project (unsigned mode)
         run: |
           python3 build-system/Make/Make.py generateProject \
             --configurationPath=build-system/template_minimal_development_configuration.json \
-            --disableSwiftlint \
-            --disableCodesigning \
-            --xcodeManagedCodesigning
+            --xcodeManagedCodesigning \
+            --disableProvisioningProfiles
 
-      # Билдим unsigned app
+      # Билдим unsigned app (без подписи, для iphoneos)
       - name: Build Vartagram unsigned
         run: |
           xcodebuild -project Vartagram.xcodeproj \
@@ -73,7 +67,7 @@ jobs:
                      PROVISIONING_PROFILE="" \
                      -quiet
 
-      # Пакуем .ipa
+      # Пакуем .ipa из билда (стандартный Payload для unsigned)
       - name: Package unsigned IPA
         run: |
           mkdir -p Payload
@@ -82,7 +76,7 @@ jobs:
           echo "IPA готов:"
           ls -lh Vartagram-unsigned.ipa
 
-      # Выкладываем артефакт
+      # Выкладываем артефакт (держим 30 дней)
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
@@ -91,4 +85,4 @@ jobs:
           retention-days: 30
 
       - name: Success
-        run: echo "Готово! Unsigned Vartagram.ipa в Artifacts. Ставь на iPhone через Sideloadly/TrollStore/Esign."
+        run: echo "Готово! Unsigned Vartagram.ipa в Artifacts. Ставь на iPhone через Sideloadly/TrollStore/Esign/Scarlet."
