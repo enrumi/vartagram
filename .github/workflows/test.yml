@@ -175,7 +175,8 @@ jobs:
       - name: Generate Xcode project
         run: |
           python3 build-system/Make/Make.py generateProject \
-            --configurationPath=build-system/Make/minimal-unsigned-config.json
+            --configurationPath=build-system/Make/minimal-unsigned-config.json \
+            --codesigningInformationPath=build-system/fake-codesigning
 
       - name: Check generated project
         run: |
