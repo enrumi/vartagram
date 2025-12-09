@@ -8,23 +8,22 @@ import tempfile
 def create_dummy_mobileprovision(name, team_id, bundle_id, output_path, cert_path, key_path):
     """Create a minimal valid .mobileprovision file"""
     
-    # Construct application identifier
-    if name == 'Telegram':
-        app_id = f'{team_id}.{bundle_id}'
-    else:
-        extension_suffixes = {
-            'Intents': '.SiriIntents',
-            'NotificationContent': '.NotificationContent',
-            'NotificationService': '.NotificationService',
-            'Share': '.Share',
-            'Widget': '.Widget',
-            'BroadcastUpload': '.BroadcastUpload',
-            'ShareExtension': '.Share',
-            'IntentsExtension': '.SiriIntents',
-            'BroadcastUploadExtension': '.BroadcastUpload'
-        }
-        suffix = extension_suffixes.get(name, '')
-        app_id = f'{team_id}.{bundle_id}{suffix}'
+    # Map output name to bundle suffix
+    # Based on profile_name_mapping in BuildConfiguration.py
+    name_to_suffix = {
+        'Telegram': '',
+        'Share': '.Share',
+        'NotificationContent': '.NotificationContent',
+        'NotificationService': '.NotificationService',
+        'Widget': '.Widget',
+        'Intents': '.SiriIntents',
+        'BroadcastUpload': '.BroadcastUpload',
+        'WatchApp': '.watchkitapp',
+        'WatchExtension': '.watchkitapp.watchkitextension'
+    }
+    
+    suffix = name_to_suffix.get(name, '')
+    app_id = f'{team_id}.{bundle_id}{suffix}'
     
     # Create minimal provisioning profile plist
     profile_dict = {
@@ -124,16 +123,15 @@ if __name__ == '__main__':
     try:
         create_self_signed_cert(cert_path, key_path)
         
+        # These names must match the values in profile_name_mapping in BuildConfiguration.py
         profiles = [
             'Telegram',
             'Share', 
-            'ShareExtension',
             'NotificationContent',
             'NotificationService',
             'Widget',
-            'IntentsExtension',
-            'BroadcastUpload',
-            'BroadcastUploadExtension'
+            'Intents',
+            'BroadcastUpload'
         ]
         
         success_count = 0
