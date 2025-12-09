@@ -101,6 +101,12 @@ jobs:
               print("⚠️ Telegram/BUILD not found")
           EOF
 
+      - name: Create empty codesigning path
+        run: |
+          mkdir -p build-system/empty-codesigning/profiles
+          mkdir -p build-system/empty-codesigning/certs
+          echo "✅ Empty codesigning structure created"
+
       - name: Clean build artifacts
         run: |
           rm -rf build/ bazel-* ~/Library/Developer/Xcode/DerivedData/ build-input/
@@ -109,6 +115,7 @@ jobs:
         run: |
           python3 build-system/Make/Make.py build \
             --configurationPath=build-system/Make/minimal-unsigned-config.json \
+            --codesigningInformationPath=build-system/empty-codesigning \
             --configuration=release_arm64 \
             --buildNumber=10000 \
             --outputBuildArtifactsPath=./build-output
@@ -122,8 +129,9 @@ jobs:
             echo "✅ IPA found!"
             ls -lh build-output/Telegram.ipa
           else
-            echo "❌ IPA not found, listing bazel-bin:"
-            find bazel-bin -name "*.ipa" -o -name "Telegram.ipa" || true
+            echo "❌ IPA not found, searching bazel-bin:"
+            find bazel-bin -name "*.ipa" -o -name "Telegram.ipa" 2>/dev/null || true
+            ls -la bazel-bin/Telegram/ 2>/dev/null || true
             exit 1
           fi
 
@@ -148,4 +156,4 @@ jobs:
         run: |
           echo "🎉 Build SUCCESS!"
           echo "📱 Unsigned IPA ready in Artifacts: Vartagram-unsigned-${{ github.sha }}"
-          echo "💾 Download and sign with: codesign -f -s \"iPhone Developer\" Telegram.ipa"
+          echo "💾 Download from Actions -> Artifacts"
