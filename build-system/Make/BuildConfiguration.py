@@ -199,7 +199,19 @@ def copy_profiles_from_directory(source_path, destination_path, team_id, bundle_
             profile_dict = plistlib.loads(profile_data)
             profile_name = profile_dict['Entitlements']['application-identifier']
 
-            if profile_name.startswith(team_id + '.' + bundle_id):
+            # Handle empty team_id for unsigned builds
+            if team_id == "":
+                # For unsigned builds, match any team_id with the bundle_id
+                parts = profile_name.split('.')
+                if len(parts) >= 3:
+                    potential_bundle = '.'.join(parts[1:])
+                    if potential_bundle.startswith(bundle_id):
+                        profile_base_name = potential_bundle[len(bundle_id):]
+                        if profile_base_name in profile_name_mapping:
+                            shutil.copyfile(file_path, destination_path + '/' + profile_name_mapping[profile_base_name] + '.mobileprovision')
+                        else:
+                            print('Warning: skipping provisioning profile at {} with bundle_id {} (base_name {})'.format(file_path, profile_name, profile_base_name))
+            elif profile_name.startswith(team_id + '.' + bundle_id):
                 profile_base_name = profile_name[len(team_id + '.' + bundle_id):]
                 if profile_base_name in profile_name_mapping:
                     shutil.copyfile(file_path, destination_path + '/' + profile_name_mapping[profile_base_name] + '.mobileprovision')
@@ -227,13 +239,23 @@ def resolve_aps_environment_from_directory(source_path, team_id, bundle_id):
             profile_dict = plistlib.loads(profile_data)
             profile_name = profile_dict['Entitlements']['application-identifier']
 
-            if profile_name.startswith(team_id + '.' + bundle_id):
+            # Handle empty team_id for unsigned builds
+            profile_base_name = None
+            if team_id == "":
+                # For unsigned builds, match any team_id with the bundle_id
+                parts = profile_name.split('.')
+                if len(parts) >= 3:
+                    potential_bundle = '.'.join(parts[1:])
+                    if potential_bundle.startswith(bundle_id):
+                        profile_base_name = potential_bundle[len(bundle_id):]
+            elif profile_name.startswith(team_id + '.' + bundle_id):
                 profile_base_name = profile_name[len(team_id + '.' + bundle_id):]
-                if profile_base_name == '':
-                    if 'aps-environment' not in profile_dict['Entitlements']:
-                        print('Provisioning profile at {} does not include an aps-environment entitlement'.format(file_path))
-                        sys.exit(1)
-                    return profile_dict['Entitlements']['aps-environment']
+            
+            if profile_base_name is not None and profile_base_name == '':
+                if 'aps-environment' not in profile_dict['Entitlements']:
+                    print('Provisioning profile at {} does not include an aps-environment entitlement'.format(file_path))
+                    sys.exit(1)
+                return profile_dict['Entitlements']['aps-environment']
     return None
 
 
