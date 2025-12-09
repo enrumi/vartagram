@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-15  # ИСПРАВЛЕНО: macos-15 поддерживает Xcode 16.4
     timeout-minutes: 120
 
     steps:
@@ -16,25 +16,25 @@ jobs:
         with:
           submodules: recursive
 
-      # Чистим диск (macos-14 жрёт место как сука)
+      # Чистим диск (macos-15 тоже жрёт место)
       - name: Free disk space
         run: |
           sudo rm -rf /Applications/Xcode_15.app || true
           sudo rm -rf /opt/homebrew || true
           df -h
 
-      # ГЛАВНЫЙ ФИКС: Устанавливаем Xcode 16.2 (решает ошибку "invalid developer directory" + Make.py видит 16.2)
-      - name: Set Xcode 16.2 (required for Make.py)
+      # ГЛАВНЫЙ ФИКС: Устанавливаем Xcode 16.4 (требуется Make.py)
+      - name: Set Xcode 16.4 (required for Make.py)
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: '16.2'  # Стабильная версия в macos-14, без beta
+          xcode-version: '16.4'  # ИСПРАВЛЕНО: 16.4 вместо 16.2
 
       # Проверяем версию (для логов)
       - name: Verify Xcode version
         run: |
           xcode-select -p
-          xcodebuild -version  # Должен быть Xcode 16.2
-          echo "Xcode 16.2 установлен и выбран"
+          xcodebuild -version  # Должен быть Xcode 16.4
+          echo "Xcode 16.4 установлен и выбран"
 
       # Убираем PEP 668 (фикс 2025)
       - name: Disable PEP 668
@@ -42,14 +42,14 @@ jobs:
           rm -f $(python3 -c 'import sysconfig, pathlib; print(pathlib.Path(sysconfig.get_path("stdlib")) / "EXTERNALLY-MANAGED")') || true
           echo "PEP 668 удалён, pip свободен"
 
-      # Обновляем pip и ставим реальные deps (manual, без requirements.txt — только protobuf и т.д. для MTProto/Make.py)
+      # Обновляем pip и ставим реальные deps
       - name: Install Python deps
         run: |
           python3 -m pip install --upgrade pip setuptools wheel --break-system-packages
           python3 -m pip install protobuf requests colorama pyyaml ninja --break-system-packages
           echo "Deps готовы: protobuf, requests, colorama, pyyaml, ninja"
 
-      # Bazelisk бинарником (без npm, curl с GitHub releases — 100% стабильно)
+      # Bazelisk бинарником (без npm, curl с GitHub releases)
       - name: Install Bazelisk binary
         run: |
           curl -LO https://github.com/bazelbuild/bazelisk/releases/download/v1.19.0/bazelisk-darwin-arm64
@@ -58,7 +58,7 @@ jobs:
           bazel version
           echo "Bazelisk установлен (v1.19.0)"
 
-      # Генерируем Xcode проект (реальные аргументы из Make.py: --xcodeManagedCodesigning + --disableProvisioningProfiles для unsigned)
+      # Генерируем Xcode проект (unsigned mode)
       - name: Generate Xcode project (unsigned mode)
         run: |
           python3 build-system/Make/Make.py generateProject \
@@ -80,7 +80,7 @@ jobs:
                      PROVISIONING_PROFILE="" \
                      -quiet
 
-      # Пакуем .ipa из билда (стандартный Payload для unsigned)
+      # Пакуем .ipa из билда
       - name: Package unsigned IPA
         run: |
           mkdir -p Payload
