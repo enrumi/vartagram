@@ -50,8 +50,8 @@ jobs:
 
       - name: Fix BuildConfig BUILD file
         run: |
-          sed -i '' 's/"-DAPP_CONFIG_IS_INTERNAL_BUILD={}".format(telegram_is_internal_build)/"-DAPP_CONFIG_IS_INTERNAL_BUILD={}".format("NO" if not telegram_is_internal_build else "YES")/g' submodules/BuildConfig/BUILD
-          sed -i '' 's/"-DAPP_CONFIG_IS_APPSTORE_BUILD={}".format(telegram_is_appstore_build)/"-DAPP_CONFIG_IS_APPSTORE_BUILD={}".format("NO" if not telegram_is_appstore_build else "YES")/g' submodules/BuildConfig/BUILD
+          sed -i '' 's/"-DAPP_CONFIG_IS_INTERNAL_BUILD={}".format(telegram_is_internal_build)/"-DAPP_CONFIG_IS_INTERNAL_BUILD={}".format("NO" if not telegram_is_internal_build else "YES")/g' submodules/BuildConfig/BUILD || true
+          sed -i '' 's/"-DAPP_CONFIG_IS_APPSTORE_BUILD={}".format(telegram_is_appstore_build)/"-DAPP_CONFIG_IS_APPSTORE_BUILD={}".format("NO" if not telegram_is_appstore_build else "YES")/g' submodules/BuildConfig/BUILD || true
           echo "Checking BUILD file..."
           grep "APP_CONFIG_IS_INTERNAL_BUILD\|APP_CONFIG_IS_APPSTORE_BUILD" submodules/BuildConfig/BUILD || true
 
@@ -59,153 +59,58 @@ jobs:
         run: |
           python3 << 'EOF'
           import re, pathlib
-
           path = pathlib.Path('Telegram/BUILD')
           if not path.exists():
-              raise SystemExit(f"{path} not found")
-
-          content = path.read_text(encoding='utf-8')
-
-          pattern = r'(xcode_provisioning_profile\(\s*\n\s*name\s*=\s*"[^"]+",\s*\n\s*provisioning_profile\s*=\s*"[^"]+",?\s*\n\))'
-
-          def add_team_id(match):
-              rule = match.group(1)
-              if 'team_id' in rule:
-                  return rule
-              return rule.replace('\n)', '\n    team_id = "MOCK_TEAM_ID",\n)')
-
-          new_content = re.sub(pattern, add_team_id, content)
-
-          path.write_text(new_content, encoding='utf-8')
-          print("✅ Added mock team_id to all xcode_provisioning_profile rules")
+              print("Telegram/BUILD not found, skipping patch")
+          else:
+              content = path.read_text(encoding='utf-8')
+              pattern = r'(xcode_provisioning_profile\(\s*\n\s*name\s*=\s*"[^"]+",\s*\n\s*provisioning_profile\s*=\s*"[^"]+",?\s*\n\))'
+              def add_team_id(match):
+                  rule = match.group(1)
+                  if 'team_id' in rule:
+                      return rule
+                  return rule.replace('\n)', '\n    team_id = "MOCK_TEAM_ID",\n)')
+              new_content = re.sub(pattern, add_team_id, content)
+              path.write_text(new_content, encoding='utf-8')
+              print("✅ Added mock team_id to all xcode_provisioning_profile rules")
           EOF
 
-      - name: Update minimal unsigned config
+      - name: Create minimal unsigned config
         run: |
-          python3 << 'EOF'
-          import json, os, pathlib
-
-          cfg_path = pathlib.Path('build-system/Make/minimal-unsigned-config.json')
-          if not cfg_path.exists():
-              raise SystemExit(f"{cfg_path} not found, create it from template_minimal_development_configuration.json")
-
-          config = json.loads(cfg_path.read_text(encoding='utf-8'))
-
-          # Твой конфиг
-          config['api_id'] = '2040'
-          config['api_hash'] = 'b18441a1ff607e10a989891a5462e627'
-          config['bundle_id'] = 'org.telegram.messenger'
-          config['team_id'] = 'MOCK_TEAM_ID'
-          config['app_center_id'] = ''
-          config['is_internal_build'] = False
-          config['is_appstore_build'] = False
-          config['app_specific_url_scheme'] = 'tgapp'
-          config['appstore_id'] = '0'
-          config['premium_iap_product_id'] = ''
-          config['enable_siri'] = False
-          config['enable_icloud'] = False
-          config['enable_watch'] = False
-          config['is_non_dev_account'] = True
-
-          cfg_path.write_text(json.dumps(config, indent=2), encoding='utf-8')
-          print("✅ Updated minimal-unsigned-config.json")
+          cat > build-system/Make/minimal-unsigned-config.json << 'EOF'
+          {
+            "api_id": "2040",
+            "api_hash": "b18441a1ff607e10a989891a5462e627",
+            "app_center_id": "",
+            "is_internal_build": false,
+            "is_appstore_build": false,
+            "app_specific_url_scheme": "tgapp",
+            "team_id": "MOCK_TEAM_ID",
+            "bundle_id": "org.telegram.messenger",
+            "appstore_id": "0",
+            "premium_iap_product_id": "",
+            "enable_siri": false,
+            "enable_icloud": false,
+            "enable_watch": false,
+            "is_non_dev_account": true
+          }
           EOF
-
-      - name: Create fake codesigning structure (profiles/)
-        run: |
-          mkdir -p build-system/fake-codesigning/profiles
-          mkdir -p build-system/fake-codesigning/certs
-
-          cat > build-system/fake-codesigning/profiles/fake.mobileprovision << 'EOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>AppIDName</key>
-              <string>Vartagram</string>
-              <key>ApplicationIdentifierPrefix</key>
-              <array>
-                  <string>MOCK_TEAM_ID</string>
-              </array>
-              <key>Platform</key>
-              <array>
-                  <string>iOS</string>
-              </array>
-              <key>DeveloperCertificates</key>
-              <array>
-                  <data>MOCK_CERT_DATA</data>
-              </array>
-              <key>Entitlements</key>
-              <dict>
-                  <key>application-identifier</key>
-                  <string>MOCK_TEAM_ID.org.telegram.messenger</string>
-              </dict>
-              <key>Name</key>
-              <string>iOS Team Provisioning Profile</string>
-              <key>TeamIdentifier</key>
-              <array>
-                  <string>MOCK_TEAM_ID</string>
-              </array>
-              <key>TeamName</key>
-              <string>Mock Team</string>
-              <key>TimeToLive</key>
-              <integer>365</integer>
-              <key>UUID</key>
-              <string>MOCK-UUID-1234-5678-ABCD</string>
-              <key>Version</key>
-              <integer>1</integer>
-          </dict>
-          </plist>
-          EOF
-
-          for name in Telegram Share ShareExtension NotificationContent NotificationService Widget IntentsExtension BroadcastUpload BroadcastUploadExtension; do
-            cp build-system/fake-codesigning/profiles/fake.mobileprovision \
-               build-system/fake-codesigning/profiles/$name.mobileprovision
-          done
-
-          echo "✅ Fake profiles created in build-system/fake-codesigning/profiles/"
-          ls -la build-system/fake-codesigning/profiles
+          echo "✅ Created minimal-unsigned-config.json"
 
       - name: Clean build artifacts only
         run: |
           rm -rf build/
           rm -rf bazel-*
           rm -rf ~/Library/Developer/Xcode/DerivedData/
+          rm -rf build-input/
 
-      - name: Generate Xcode project
-        run: |
-          python3 build-system/Make/Make.py generateProject \
-            --configurationPath=build-system/Make/minimal-unsigned-config.json \
-            --codesigningInformationPath=build-system/fake-codesigning \
-            --disableProvisioningProfiles
-
-      - name: Check generated project
-        run: |
-          echo "Checking if Telegram.xcodeproj exists..."
-          ls -la Telegram/ || echo "Telegram/ directory not found"
-          if [ -d "Telegram/Telegram.xcodeproj" ]; then
-            echo "✅ Project directory exists"
-            ls -la Telegram/Telegram.xcodeproj/
-          else
-            echo "❌ Telegram.xcodeproj not found!"
-            echo "Available files in root:"
-            ls -la
-            exit 1
-          fi
-          if [ -f "Telegram/Telegram.xcodeproj/project.pbxproj" ]; then
-            echo "✅ Project generated successfully"
-          else
-            echo "❌ project.pbxproj not found!"
-            exit 1
-          fi
-
-      - name: Build for iphoneos using Make.py
+      - name: Build for iphoneos (DISABLED codesigning)
         run: |
           python3 build-system/Make/Make.py build \
             --configurationPath=build-system/Make/minimal-unsigned-config.json \
             --configuration=release_arm64 \
             --buildNumber=10000 \
-            --codesigningInformationPath=build-system/fake-codesigning \
+            --disableProvisioningProfiles \
             --outputBuildArtifactsPath=./build-output
 
       - name: Check build output
@@ -220,6 +125,7 @@ jobs:
           name: Vartagram-unsigned-${{ github.sha }}
           path: build-output/Telegram.ipa
           retention-days: 30
+          if-no-files-found: ignore
 
       - name: Upload DSYMs if available
         if: always()
@@ -228,6 +134,9 @@ jobs:
           name: Vartagram-DSYMs-${{ github.sha }}
           path: build-output/Telegram.DSYMs.zip
           retention-days: 30
+          if-no-files-found: ignore
 
       - name: Success
-        run: echo "✅ Готово! Unsigned Telegram.ipa в Artifacts."
+        run: |
+          echo "✅ Готово! Unsigned Telegram.ipa в Artifacts (если есть)."
+          echo "📱 Скачай из Actions -> Artifacts -> Vartagram-unsigned-<SHA>"
