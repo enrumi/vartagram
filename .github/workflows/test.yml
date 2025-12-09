@@ -57,49 +57,47 @@ jobs:
           grep "APP_CONFIG_IS_INTERNAL_BUILD\|APP_CONFIG_IS_APPSTORE_BUILD" submodules/BuildConfig/BUILD
 
       - name: Patch BUILD file for unsigned build
-        run: |
-          python3 << 'EOF'
-          import re
-          
-          # Читаем BUILD файл
-          with open('Telegram/BUILD', 'r') as f:
-              content = f.read()
-          
-          # Паттерн для поиска xcode_provisioning_profile без team_id
-          pattern = r'(xcode_provisioning_profile\(\s*\n\s*name\s*=\s*"[^"]+",\s*\n\s*provisioning_profile\s*=\s*"[^"]+",?\s*\n\))'
-          
-          def add_team_id(match):
-              rule = match.group(1)
-              # Вставляем team_id перед закрывающей скобкой
-              return rule.replace('\n)', '\n    team_id = "MOCK_TEAM_ID",\n)')
-          
-          content = re.sub(pattern, add_team_id, content)
-          
-          # Сохраняем
-          with open('Telegram/BUILD', 'w') as f:
-              f.write(content)
-          
-          print("✅ Added mock team_id to all xcode_provisioning_profile rules")
-          EOF
+        run: python3 << 'EOF'
+import re
+
+# Читаем BUILD файл
+with open('Telegram/BUILD', 'r') as f:
+    content = f.read()
+
+# Паттерн для поиска xcode_provisioning_profile без team_id
+pattern = r'(xcode_provisioning_profile\(\s*\n\s*name\s*=\s*"[^"]+",\s*\n\s*provisioning_profile\s*=\s*"[^"]+",?\s*\n\))'
+
+def add_team_id(match):
+    rule = match.group(1)
+    # Вставляем team_id перед закрывающей скобкой
+    return rule.replace('\n)', '\n    team_id = "MOCK_TEAM_ID",\n)')
+
+content = re.sub(pattern, add_team_id, content)
+
+# Сохраняем
+with open('Telegram/BUILD', 'w') as f:
+    f.write(content)
+
+print("✅ Added mock team_id to all xcode_provisioning_profile rules")
+EOF
 
       - name: Update config with mock team_id
-        run: |
-          python3 << 'EOF'
-          import json
-          
-          with open('build-system/Make/minimal-unsigned-config.json', 'r') as f:
-              config = json.load(f)
-          
-          config['team_id'] = 'MOCK_TEAM_ID'
-          
-          with open('build-system/Make/minimal-unsigned-config.json', 'w') as f:
-              json.dump(config, f, indent=2)
-          
-          print("✅ Updated config with mock team_id")
-          EOF
+        run: python3 << 'EOF'
+import json
 
-          - name: Create fake codesigning structure
-          run: |
+with open('build-system/Make/minimal-unsigned-config.json', 'r') as f:
+    config = json.load(f)
+
+config['team_id'] = 'MOCK_TEAM_ID'
+
+with open('build-system/Make/minimal-unsigned-config.json', 'w') as f:
+    json.dump(config, f, indent=2)
+
+print("✅ Updated config with mock team_id")
+EOF
+
+      - name: Create fake codesigning structure
+        run: |
           mkdir -p build-system/fake-codesigning/provisioning
           
           # Создаём fake mobileprovision файл
