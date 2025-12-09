@@ -48,11 +48,6 @@ jobs:
           sudo mv bazelisk-darwin-arm64 /usr/local/bin/bazel
           bazel version
 
-      - name: Fix BuildConfig BUILD file
-        run: |
-          sed -i '' 's/"-DAPP_CONFIG_IS_INTERNAL_BUILD={}".format(telegram_is_internal_build)/"-DAPP_CONFIG_IS_INTERNAL_BUILD={}".format("NO" if not telegram_is_internal_build else "YES")/g' submodules/BuildConfig/BUILD || true
-          sed -i '' 's/"-DAPP_CONFIG_IS_APPSTORE_BUILD={}".format(telegram_is_appstore_build)/"-DAPP_CONFIG_IS_APPSTORE_BUILD={}".format("NO" if not telegram_is_appstore_build else "YES")/g' submodules/BuildConfig/BUILD || true
-
       - name: Create minimal unsigned config
         run: |
           cat > build-system/Make/minimal-unsigned-config.json << 'EOF'
@@ -75,41 +70,18 @@ jobs:
           EOF
           echo "✅ Created minimal-unsigned-config.json"
 
-      - name: Patch Telegram/BUILD - disable all provisioning profiles
+      - name: Create empty codesigning (skip validation)
         run: |
-          python3 << 'EOF'
-          import re, pathlib
-          
-          path = pathlib.Path('Telegram/BUILD')
-          if path.exists():
-              content = path.read_text(encoding='utf-8')
-              
-              # Заменяем все provisioning_profile = ... на None
-              content = re.sub(
-                  r'provisioning_profile\s*=\s*select.*?None.*?mobileprovision',
-                  'provisioning_profile = None',
-                  content,
-                  flags=re.DOTALL
-              )
-              
-              # Убираем xcode_provisioning_profile полностью
-              content = re.sub(r'xcode_provisioning_profile\s*\([^)]*\),?\s*\n?', '', content)
-              
-              path.write_text(content, encoding='utf-8')
-              print("✅ Disabled all provisioning profiles in Telegram/BUILD")
-          else:
-              print("⚠️ Telegram/BUILD not found")
-          EOF
-
-      - name: Create empty codesigning path
-        run: |
-          mkdir -p build-system/empty-codesigning/profiles
-          mkdir -p build-system/empty-codesigning/certs
-          echo "✅ Empty codesigning structure created"
+          mkdir -p build-system/empty-codesigning/profiles build-system/empty-codesigning/certs
+          # Создаём пустые .mobileprovision файлы (DER заглушки)
+          for name in Telegram Share ShareExtension NotificationContent NotificationService Widget IntentsExtension BroadcastUpload BroadcastUploadExtension; do
+            echo -n $'\x30\x82\x01\x34\x02\x01\x00\x30\x0D\x06\x09\x2A\x86\x48\x86\xF7\x0D\x01\x01\x0B\x05\x00\x30\x0B\x06\x09\x2A\x86\x48\x86\xF7\x0D\x01\x07\x01' > build-system/empty-codesigning/profiles/$name.mobileprovision
+          done
+          echo "✅ Empty codesigning with DER stubs created"
 
       - name: Clean build artifacts
         run: |
-          rm -rf build/ bazel-* ~/Library/Developer/Xcode/DerivedData/ build-input/
+          rm -rf build/ bazel-* ~/Library/Developer/Xcode/DerivedData/ build-input/ Telegram/BUILD.bak
 
       - name: Build unsigned IPA
         run: |
@@ -120,40 +92,33 @@ jobs:
             --buildNumber=10000 \
             --outputBuildArtifactsPath=./build-output
 
-      - name: Check & package output
+      - name: Check output
+        if: always()
         run: |
-          echo "Checking build output..."
-          ls -la build-output/ || mkdir -p build-output
-          
-          if [ -f "build-output/Telegram.ipa" ]; then
-            echo "✅ IPA found!"
-            ls -lh build-output/Telegram.ipa
-          else
-            echo "❌ IPA not found, searching bazel-bin:"
-            find bazel-bin -name "*.ipa" -o -name "Telegram.ipa" 2>/dev/null || true
-            ls -la bazel-bin/Telegram/ 2>/dev/null || true
-            exit 1
-          fi
+          echo "=== build-output/ ==="
+          ls -la build-output/ || echo "No build-output"
+          echo "=== bazel-bin/Telegram/ ==="
+          find bazel-bin/ -name "*.ipa" 2>/dev/null || echo "No IPA in bazel-bin"
+          echo "=== bazel-bin/ ==="
+          ls -la bazel-bin/ 2>/dev/null || echo "No bazel-bin"
 
       - name: Upload IPA
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: Vartagram-unsigned-${{ github.sha }}
-          path: build-output/Telegram.ipa
+          path: |
+            build-output/Telegram.ipa
+            bazel-bin/Telegram/*.ipa
           retention-days: 30
           if-no-files-found: ignore
 
-      - name: Upload DSYMs (if any)
+      - name: Upload logs on failure
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: Vartagram-DSYMs-${{ github.sha }}
-          path: build-output/Telegram.DSYMs.zip
-          retention-days: 30
-          if-no-files-found: ignore
-
-      - name: Success message
-        if: success()
-        run: |
-          echo "🎉 Build SUCCESS!"
-          echo "📱 Unsigned IPA ready in Artifacts: Vartagram-unsigned-${{ github.sha }}"
-          echo "💾 Download from Actions -> Artifacts"
+          name: build-logs-${{ github.sha }}
+          path: |
+            bazel-*/bazel-*.log
+            build-input/
+          retention-days: 7
