@@ -544,19 +544,14 @@ func initializedNetwork(accountId: AccountRecordId, arguments: NetworkInitializa
                 seedAddressList = [
                     1: ["192.168.1.109"],
 
-                    
                     2: ["192.168.1.109"],
 
-                    
                     3: ["192.168.1.109"],
 
-                    
                     4: ["192.168.1.109"],
 
-                    
                     5: ["192.168.1.109"],
-
-                    
+ 
                 ]
             }
             
