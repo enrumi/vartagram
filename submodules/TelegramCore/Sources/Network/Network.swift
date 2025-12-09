@@ -621,10 +621,9 @@ func initializedNetwork(accountId: AccountRecordId, arguments: NetworkInitializa
 
                         return MTBlockDisposable(block: {
                             disposable.dispose()
-                    })
+                        })
                     })
                 })
-            }
             
             /*#if DEBUG
             context.beginExplicitBackupAddressDiscovery()

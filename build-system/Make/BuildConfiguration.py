@@ -201,16 +201,13 @@ def copy_profiles_from_directory(source_path, destination_path, team_id, bundle_
 
             # Handle empty team_id for unsigned builds
             if team_id == "":
-                # For unsigned builds, match any team_id with the bundle_id
-                parts = profile_name.split('.')
-                if len(parts) >= 3:
-                    potential_bundle = '.'.join(parts[1:])
-                    if potential_bundle.startswith(bundle_id):
-                        profile_base_name = potential_bundle[len(bundle_id):]
-                        if profile_base_name in profile_name_mapping:
-                            shutil.copyfile(file_path, destination_path + '/' + profile_name_mapping[profile_base_name] + '.mobileprovision')
-                        else:
-                            print('Warning: skipping provisioning profile at {} with bundle_id {} (base_name {})'.format(file_path, profile_name, profile_base_name))
+                # For unsigned builds, profile_name is just bundle_id or bundle_id.extension
+                if profile_name.startswith(bundle_id):
+                    profile_base_name = profile_name[len(bundle_id):]
+                    if profile_base_name in profile_name_mapping:
+                        shutil.copyfile(file_path, destination_path + '/' + profile_name_mapping[profile_base_name] + '.mobileprovision')
+                    else:
+                        print('Warning: skipping provisioning profile at {} with bundle_id {} (base_name {})'.format(file_path, profile_name, profile_base_name))
             elif profile_name.startswith(team_id + '.' + bundle_id):
                 profile_base_name = profile_name[len(team_id + '.' + bundle_id):]
                 if profile_base_name in profile_name_mapping:
@@ -242,12 +239,9 @@ def resolve_aps_environment_from_directory(source_path, team_id, bundle_id):
             # Handle empty team_id for unsigned builds
             profile_base_name = None
             if team_id == "":
-                # For unsigned builds, match any team_id with the bundle_id
-                parts = profile_name.split('.')
-                if len(parts) >= 3:
-                    potential_bundle = '.'.join(parts[1:])
-                    if potential_bundle.startswith(bundle_id):
-                        profile_base_name = potential_bundle[len(bundle_id):]
+                # For unsigned builds, profile_name is just bundle_id or bundle_id.extension
+                if profile_name.startswith(bundle_id):
+                    profile_base_name = profile_name[len(bundle_id):]
             elif profile_name.startswith(team_id + '.' + bundle_id):
                 profile_base_name = profile_name[len(team_id + '.' + bundle_id):]
             
