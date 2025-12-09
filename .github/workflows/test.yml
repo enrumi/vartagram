@@ -56,28 +56,34 @@ jobs:
           echo "Checking BUILD file..."
           grep "APP_CONFIG_IS_INTERNAL_BUILD\|APP_CONFIG_IS_APPSTORE_BUILD" submodules/BuildConfig/BUILD
 
-      - name: Clean all build artifacts
+      - name: Clean build artifacts only
         run: |
           rm -rf build/
-          rm -rf Telegram/
           rm -rf bazel-*
           rm -rf ~/Library/Developer/Xcode/DerivedData/
 
-      - name: Generate Xcode project for DEVICE
+      - name: Generate Xcode project
         run: |
           python3 build-system/Make/Make.py generateProject \
             --configurationPath=build-system/Make/minimal-unsigned-config.json \
             --xcodeManagedCodesigning \
             --disableProvisioningProfiles
 
-      - name: Check generated SDK
+      - name: Check generated project
         run: |
+          echo "Checking if Telegram.xcodeproj exists..."
+          ls -la Telegram/
+          
           if [ -f "Telegram/Telegram.xcodeproj/project.pbxproj" ]; then
+            echo "✅ Project generated successfully"
             echo "Checking target SDK..."
-            grep -i "SDKROOT\|iphonesimulator\|iphoneos" Telegram/Telegram.xcodeproj/project.pbxproj | head -20
+            grep "SDKROOT" Telegram/Telegram.xcodeproj/project.pbxproj | head -10
+          else
+            echo "❌ Project not generated!"
+            exit 1
           fi
 
-      - name: Build for iphoneos (not simulator)
+      - name: Build for iphoneos
         run: |
           set -o pipefail
           xcodebuild -project Telegram/Telegram.xcodeproj \
@@ -112,22 +118,19 @@ jobs:
         run: |
           echo "Looking for Telegram.app..."
           find build -name "Telegram.app" -type d || true
-          
-          APP_PATH=$(find build/Build/Products -name "Telegram.app" -type d | grep -v "iphonesimulator" | head -1)
-          echo "Found app at: $APP_PATH"
-          ls -la "$APP_PATH" || echo "App not found!"
 
       - name: Package unsigned IPA
         run: |
           APP_PATH=$(find build/Build/Products -name "Telegram.app" -type d | grep "Release-iphoneos" | head -1)
           
           if [ -z "$APP_PATH" ]; then
-            echo "❌ Telegram.app not found!"
+            echo "❌ Telegram.app not found in Release-iphoneos!"
             echo "Available paths:"
             find build -name "*.app" -type d
             exit 1
           fi
           
+          echo "✅ Found app at: $APP_PATH"
           mkdir -p Payload
           cp -r "$APP_PATH" Payload/
           zip -r9 Vartagram-unsigned.ipa Payload/
@@ -150,5 +153,6 @@ jobs:
 
       - name: Success
         run: echo "✅ Готово! Unsigned Vartagram.ipa в Artifacts."
+
 
   
