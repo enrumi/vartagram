@@ -1,0 +1,100 @@
+﻿name: Dev Build (Unsigned/7-day)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, fix_build ]
+
+env:
+  BAZEL_USER_ROOT: "/private/var/tmp/_bazel_containerhost"
+
+jobs:
+  build:
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: 'recursive'
+          fetch-depth: '0'
+
+      - name: Set active Xcode path
+        run: |
+          XCODE_VERSION=$(cat versions.json | python3 -c 'import json,sys;obj=json.load(sys.stdin);print(obj[\"xcode\"]);')
+          sudo xcode-select -s /Applications/Xcode_$XCODE_VERSION.app/Contents/Developer
+
+      - name: Create canonical source directory
+        run: |
+          set -x
+          sudo mkdir -p /Users/Shared
+          cp -R $GITHUB_WORKSPACE /Users/Shared/
+          mv /Users/Shared/$(basename $GITHUB_WORKSPACE) /Users/Shared/telegram-ios
+
+      - name: Bazel cache
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.BAZEL_USER_ROOT }}
+          key: ${{ runner.os }}-bazel-dev-cache
+
+      - name: Build the App (Development/Unsigned)
+        env:
+          API_ID: ${{ secrets.API_ID }}
+          API_HASH: ${{ secrets.API_HASH }}
+        run: |
+          set -x
+
+          SOURCE_DIR=/Users/Shared/telegram-ios
+          cd $SOURCE_DIR
+
+          BUILD_NUMBER_OFFSET="$(cat build_number_offset)"
+          export APP_VERSION=$(cat versions.json | python3 -c 'import json,sys;obj=json.load(sys.stdin);print(obj[\"app\"]);')
+          export COMMIT_COUNT=$(git rev-list --count HEAD)
+          export COMMIT_COUNT="$((COMMIT_COUNT+BUILD_NUMBER_OFFSET))"
+          export BUILD_NUMBER="$COMMIT_COUNT"
+          echo "BUILD_NUMBER=$(echo $BUILD_NUMBER)" >> $GITHUB_ENV
+          echo "APP_VERSION=$(echo $APP_VERSION)" >> $GITHUB_ENV
+
+          # Use example configuration with dummy profiles
+          rm -rf $HOME/telegram-configuration
+          mkdir -p $HOME/telegram-configuration
+          
+          # Create minimal config
+          cat > $HOME/telegram-configuration/dev-config.json << EOF
+{
+  "bundle_id": "org.cpartisans.vartagram.dev",
+  "api_id": "${API_ID:-18112237}",
+  "api_hash": "${API_HASH:-b5906401be1e1200312415faaaf4a526}",
+  "team_id": "",
+  "app_center_id": "0",
+  "is_internal_build": "true",
+  "is_appstore_build": "false",
+  "appstore_id": "",
+  "app_specific_url_scheme": "tgdev",
+  "premium_iap_product_id": "",
+  "enable_siri": false,
+  "enable_icloud": false,
+  "enable_watch": false,
+  "is_non_dev_account": true
+}
+EOF
+
+          # Copy example provisioning profiles (dummy for development)
+          cp -R build-system/example-configuration/provisioning $HOME/telegram-configuration/
+
+          # Build for simulator (no code signing needed)
+          python3 -u build-system/Make/Make.py \
+            --bazelUserRoot="$BAZEL_USER_ROOT" \
+            build \
+            --configurationPath="$HOME/telegram-configuration/dev-config.json" \
+            --codesigningInformationPath="$HOME/telegram-configuration/provisioning" \
+            --buildNumber=$BUILD_NUMBER \
+            --configuration=release_sim_arm64
+
+          echo "✅ Build completed successfully for simulator!"
+
+      - name: Upload Simulator Build
+        uses: actions/upload-artifact@v3
+        with:
+          name: Vartagram-Simulator-Build
+          path: /Users/Shared/telegram-ios/bazel-bin/Telegram/Telegram.app
+          retention-days: 7
