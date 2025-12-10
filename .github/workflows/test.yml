@@ -95,12 +95,86 @@ jobs:
         run: |
           mkdir -p build-system/empty-codesigning/profiles build-system/empty-codesigning/certs
           
-          # Modify create_dummy_profiles.py to use existing cert instead of creating new one
-          cat > /tmp/create_profiles_with_cert.py << 'EOFPYTHON'
+          # Use Python to create profiles with the existing certificate
+          python3 << 'EOFPYTHON'
           import sys
           import os
-          sys.path.insert(0, 'build-system/Make')
-          from create_dummy_profiles import create_dummy_mobileprovision
+          import plistlib
+          import datetime
+          import subprocess
+          import tempfile
+          import re
+          import base64
+          
+          def create_dummy_mobileprovision(name, team_id, bundle_id, output_path, cert_path, key_path):
+              """Create a minimal valid .mobileprovision file"""
+              
+              name_to_suffix = {
+                  'Telegram': '',
+                  'Share': '.Share',
+                  'NotificationContent': '.NotificationContent',
+                  'NotificationService': '.NotificationService',
+                  'Widget': '.Widget',
+                  'Intents': '.SiriIntents',
+                  'BroadcastUpload': '.BroadcastUpload',
+              }
+              
+              suffix = name_to_suffix.get(name, '')
+              app_id = f'{team_id}.{bundle_id}{suffix}'
+              keychain_team = team_id
+              
+              profile_dict = {
+                  'AppIDName': f'Vartagram {name}',
+                  'ApplicationIdentifierPrefix': [team_id],
+                  'CreationDate': datetime.datetime(2024, 1, 1, 0, 0, 0),
+                  'Platform': ['iOS'],
+                  'IsXcodeManaged': False,
+                  'DeveloperCertificates': [],
+                  'Entitlements': {
+                      'application-identifier': app_id,
+                      'keychain-access-groups': [keychain_team],
+                      'com.apple.security.application-groups': [f'group.{bundle_id}'],
+                      'get-task-allow': True,
+                      'aps-environment': 'development'
+                  },
+                  'ExpirationDate': datetime.datetime(2099, 12, 31, 23, 59, 59),
+                  'Name': f'Vartagram {name} Profile',
+                  'ProvisionedDevices': [],
+                  'TeamIdentifier': [team_id],
+                  'TeamName': 'Vartagram Team',
+                  'TimeToLive': 365,
+                  'UUID': f'00000000-0000-0000-0000-{name.lower():0>12s}'[:36],
+                  'Version': 1
+              }
+              
+              # Read the certificate
+              with open(cert_path, 'rb') as f:
+                  cert_pem = f.read()
+                  cert_b64 = re.search(b'-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----', cert_pem, re.DOTALL)
+                  if cert_b64:
+                      cert_data = base64.b64decode(cert_b64.group(1))
+                      profile_dict['DeveloperCertificates'] = [cert_data]
+              
+              plist_data = plistlib.dumps(profile_dict, fmt=plistlib.FMT_XML)
+              
+              temp_plist = os.path.join(tempfile.gettempdir(), 'temp_profile.plist')
+              with open(temp_plist, 'wb') as f:
+                  f.write(plist_data)
+              
+              try:
+                  subprocess.run([
+                      'openssl', 'smime', '-sign',
+                      '-in', temp_plist,
+                      '-out', output_path,
+                      '-outform', 'der',
+                      '-signer', cert_path,
+                      '-inkey', key_path,
+                      '-nodetach'
+                  ], capture_output=True, check=True)
+                  print(f'Created: {output_path}')
+              finally:
+                  if os.path.exists(temp_plist):
+                      os.remove(temp_plist)
           
           team_id = "DUMMY"
           bundle_id = "org.telegram.messenger"
@@ -117,9 +191,6 @@ jobs:
           print(f'✅ Created {len(profiles)} profiles with matching certificate')
           EOFPYTHON
           
-          python3 /tmp/create_profiles_with_cert.py
-          
-          # Keep cert files for now (will be cleaned up after build)
           echo "✅ Valid dummy codesigning profiles created with matching certificate"
 
       - name: Clean build artifacts
