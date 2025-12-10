@@ -1844,7 +1844,7 @@ ios_application(
             ":ShareExtension",
             ":NotificationContentExtension",
             ":NotificationServiceExtension" + notificationServiceExtensionVersion,
-            ":IntentsExtension",
+            #":IntentsExtension",  # Temporarily disabled for Sideloadly builds
             ":WidgetExtension",
             ":BroadcastUploadExtension",
         ],
