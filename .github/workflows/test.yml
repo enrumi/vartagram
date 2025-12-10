@@ -58,7 +58,7 @@ jobs:
             "is_internal_build": false,
             "is_appstore_build": false,
             "app_specific_url_scheme": "tgapp",
-            "team_id": "",
+            "team_id": "DUMMY",
             "bundle_id": "org.telegram.messenger",
             "appstore_id": "0",
             "premium_iap_product_id": "",
@@ -73,7 +73,7 @@ jobs:
       - name: Create valid dummy codesigning profiles
         run: |
           mkdir -p build-system/empty-codesigning/profiles build-system/empty-codesigning/certs
-          python3 build-system/Make/create_dummy_profiles.py "" "org.telegram.messenger" "build-system/empty-codesigning/profiles"
+          python3 build-system/Make/create_dummy_profiles.py "DUMMY" "org.telegram.messenger" "build-system/empty-codesigning/profiles"
           echo "?: Valid dummy codesigning profiles created"
 
       - name: Clean build artifacts

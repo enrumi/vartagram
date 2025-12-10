@@ -199,10 +199,9 @@ def copy_profiles_from_directory(source_path, destination_path, team_id, bundle_
             profile_dict = plistlib.loads(profile_data)
             profile_name = profile_dict['Entitlements']['application-identifier']
 
-            # Handle empty team_id for unsigned builds
-            if team_id == "":
-                # For unsigned builds, profile_name has format DUMMY.bundle_id or DUMMY.bundle_id.extension
-                # Strip DUMMY. prefix
+            # Handle DUMMY team_id for unsigned builds
+            if team_id == "DUMMY":
+                # For unsigned builds with DUMMY team_id, strip it from profile_name
                 if profile_name.startswith('DUMMY.'):
                     profile_name_without_dummy = profile_name[6:]  # Remove "DUMMY."
                     if profile_name_without_dummy.startswith(bundle_id):
@@ -239,11 +238,10 @@ def resolve_aps_environment_from_directory(source_path, team_id, bundle_id):
             profile_dict = plistlib.loads(profile_data)
             profile_name = profile_dict['Entitlements']['application-identifier']
 
-            # Handle empty team_id for unsigned builds
+            # Handle DUMMY team_id for unsigned builds
             profile_base_name = None
-            if team_id == "":
-                # For unsigned builds, profile_name has format DUMMY.bundle_id or DUMMY.bundle_id.extension
-                # Strip DUMMY. prefix
+            if team_id == "DUMMY":
+                # For unsigned builds with DUMMY team_id, strip it from profile_name
                 if profile_name.startswith('DUMMY.'):
                     profile_name_without_dummy = profile_name[6:]  # Remove "DUMMY."
                     if profile_name_without_dummy.startswith(bundle_id):
