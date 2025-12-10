@@ -29,9 +29,11 @@ def create_dummy_mobileprovision(name, team_id, bundle_id, output_path, cert_pat
     # so we need to add a dummy team_id even when team_id is empty
     if team_id:
         app_id = f'{team_id}.{bundle_id}{suffix}'
+        keychain_team = team_id
     else:
         # Add dummy team_id that will be stripped by rules_apple
         app_id = f'DUMMY.{bundle_id}{suffix}'
+        keychain_team = 'DUMMY'
     
     # Create minimal provisioning profile plist
     profile_dict = {
@@ -43,7 +45,7 @@ def create_dummy_mobileprovision(name, team_id, bundle_id, output_path, cert_pat
         'DeveloperCertificates': [],
         'Entitlements': {
             'application-identifier': app_id,
-            'keychain-access-groups': [f'{team_id}.*'],
+            'keychain-access-groups': [f'{keychain_team}.*'],
             'get-task-allow': True,
             'aps-environment': 'development'
         },
