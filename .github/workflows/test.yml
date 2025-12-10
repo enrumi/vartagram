@@ -70,15 +70,9 @@ jobs:
           EOF
           echo "✅ Created minimal-unsigned-config.json"
 
-      - name: Create valid dummy codesigning profiles
+      - name: Create dummy certificate and import to keychain
         run: |
-          mkdir -p build-system/empty-codesigning/profiles build-system/empty-codesigning/certs
-          python3 build-system/Make/create_dummy_profiles.py "DUMMY" "org.telegram.messenger" "build-system/empty-codesigning/profiles"
-          echo "?: Valid dummy codesigning profiles created"
-
-      - name: Create and import dummy certificate to keychain
-        run: |
-          # Create a temporary self-signed certificate
+          # Create a self-signed certificate for codesigning
           openssl genrsa -out /tmp/dummy_key.pem 2048
           openssl req -new -x509 -key /tmp/dummy_key.pem -out /tmp/dummy_cert.pem -days 365 -subj "/CN=Dummy Codesigning Certificate"
           
@@ -95,10 +89,38 @@ jobs:
           security import /tmp/dummy_cert.p12 -k build.keychain -P dummy -T /usr/bin/codesign -T /usr/bin/security
           security set-key-partition-list -S apple-tool:,apple: -s -k dummy build.keychain
           
-          # Clean up temp files
-          rm -f /tmp/dummy_key.pem /tmp/dummy_cert.pem /tmp/dummy_cert.p12
-          
           echo "✅ Dummy certificate imported to keychain"
+
+      - name: Create valid dummy codesigning profiles using the same certificate
+        run: |
+          mkdir -p build-system/empty-codesigning/profiles build-system/empty-codesigning/certs
+          
+          # Modify create_dummy_profiles.py to use existing cert instead of creating new one
+          cat > /tmp/create_profiles_with_cert.py << 'EOFPYTHON'
+          import sys
+          import os
+          sys.path.insert(0, 'build-system/Make')
+          from create_dummy_profiles import create_dummy_mobileprovision
+          
+          team_id = "DUMMY"
+          bundle_id = "org.telegram.messenger"
+          output_dir = "build-system/empty-codesigning/profiles"
+          cert_path = "/tmp/dummy_cert.pem"
+          key_path = "/tmp/dummy_key.pem"
+          
+          profiles = ['Telegram', 'Share', 'NotificationContent', 'NotificationService', 'Widget', 'Intents', 'BroadcastUpload']
+          
+          for profile_name in profiles:
+              output_path = os.path.join(output_dir, f'{profile_name}.mobileprovision')
+              create_dummy_mobileprovision(profile_name, team_id, bundle_id, output_path, cert_path, key_path)
+          
+          print(f'✅ Created {len(profiles)} profiles with matching certificate')
+          EOFPYTHON
+          
+          python3 /tmp/create_profiles_with_cert.py
+          
+          # Keep cert files for now (will be cleaned up after build)
+          echo "✅ Valid dummy codesigning profiles created with matching certificate"
 
       - name: Clean build artifacts
         run: |
