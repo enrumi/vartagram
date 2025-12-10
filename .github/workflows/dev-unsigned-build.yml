@@ -69,8 +69,11 @@ jobs:
             sed -i '' "s/\"api_hash\": \"[^\"]*\"/\"api_hash\": \"$API_HASH\"/g" $HOME/telegram-configuration/dev-config.json
           fi
 
-          # Copy example provisioning profiles (dummy - will be re-signed by Sideloadly)
-          cp -R build-system/example-configuration/provisioning $HOME/telegram-configuration/
+          # Create fresh dummy provisioning profiles (will be re-signed by Sideloadly)
+          mkdir -p $HOME/telegram-configuration/provisioning/profiles
+          mkdir -p $HOME/telegram-configuration/provisioning/certs
+          python3 build-system/Make/create_dummy_profiles.py "DUMMY" "org.telegram.messenger" "$HOME/telegram-configuration/provisioning/profiles"
+          echo "✅ Generated fresh dummy codesigning profiles"
 
           # Build for REAL DEVICE (arm64)
           echo "🔨 Building for iOS device (arm64)..."
