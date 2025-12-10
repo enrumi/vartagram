@@ -25,10 +25,13 @@ def create_dummy_mobileprovision(name, team_id, bundle_id, output_path, cert_pat
     
     suffix = name_to_suffix.get(name, '')
     # Handle empty team_id for unsigned builds
+    # Note: rules_apple always strips the first segment before the first dot,
+    # so we need to add a dummy team_id even when team_id is empty
     if team_id:
         app_id = f'{team_id}.{bundle_id}{suffix}'
     else:
-        app_id = f'{bundle_id}{suffix}'
+        # Add dummy team_id that will be stripped by rules_apple
+        app_id = f'DUMMY.{bundle_id}{suffix}'
     
     # Create minimal provisioning profile plist
     profile_dict = {
