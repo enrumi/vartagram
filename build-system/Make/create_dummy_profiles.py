@@ -35,7 +35,10 @@ def create_dummy_mobileprovision(name, team_id, bundle_id, output_path, cert_pat
         'CreationDate': datetime.datetime(2024, 1, 1, 0, 0, 0),
         'Platform': ['iOS'],
         'IsXcodeManaged': False,
-        'DeveloperCertificates': [],
+        'DeveloperCertificates': [
+            # Dummy certificate data (base64 encoded minimal cert structure)
+            b'MIICeDCCAWCgAwIBAgIBATANBgkqhkiG9w0BAQsFADAAMB4XDTIwMDEwMTAwMDAwMFoXDTMwMTIzMTIzNTk1OVowADCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAMn'
+        ],
         'Entitlements': {
             'application-identifier': app_id,
             'keychain-access-groups': [keychain_team],
