@@ -202,10 +202,9 @@ jobs:
           python3 build-system/Make/Make.py build \
             --configurationPath=build-system/Make/minimal-unsigned-config.json \
             --codesigningInformationPath=build-system/empty-codesigning \
-            --configuration=release_sim_arm64 \
+            --configuration=release_arm64 \
             --buildNumber=10000 \
-            --outputBuildArtifactsPath=./build-output \
-            --disableProvisioningProfiles
+            --outputBuildArtifactsPath=./build-output
 
       - name: Check output
         if: always()
