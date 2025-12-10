@@ -1230,47 +1230,48 @@ ios_extension(
     ]
 )
 
-plist_fragment(
-    name = "IntentsInfoPlist",
-    extension = "plist",
-    template = 
-    """
-    <key>CFBundleDevelopmentRegion</key>
-    <string>en</string>
-    <key>CFBundleIdentifier</key>
-    <string>{telegram_bundle_id}.SiriIntents</string>
-    <key>CFBundleName</key>
-    <string>Vartagram</string>
-    <key>CFBundlePackageType</key>
-    <string>XPC!</string>
-    <key>NSExtension</key>
-    <dict>
-        <key>NSExtensionAttributes</key>
-        <dict>
-            <key>IntentsRestrictedWhileLocked</key>
-            <array/>
-            <key>IntentsRestrictedWhileProtectedDataUnavailable</key>
-            <array/>
-            <key>IntentsSupported</key>
-            <array>
-                <string>INSendMessageIntent</string>
-                <string>INStartAudioCallIntent</string>
-                <string>INSearchForMessagesIntent</string>
-                <string>INSetMessageAttributeIntent</string>
-                <string>INSearchCallHistoryIntent</string>
-                <string>SelectFriendsIntent</string>
-                <string>SelectAvatarFriendsIntent</string>
-            </array>
-        </dict>
-        <key>NSExtensionPointIdentifier</key>
-        <string>com.apple.intents-service</string>
-        <key>NSExtensionPrincipalClass</key>
-        <string>IntentHandler</string>
-    </dict>
-    """.format(
-        telegram_bundle_id = telegram_bundle_id,
-    )
-)
+# Temporarily disabled for IntentsExtension
+# plist_fragment(
+#     name = "IntentsInfoPlist",
+#     extension = "plist",
+#     template = 
+#     """
+#     <key>CFBundleDevelopmentRegion</key>
+#     <string>en</string>
+#     <key>CFBundleIdentifier</key>
+#     <string>{telegram_bundle_id}.SiriIntents</string>
+#     <key>CFBundleName</key>
+#     <string>Vartagram</string>
+#     <key>CFBundlePackageType</key>
+#     <string>XPC!</string>
+#     <key>NSExtension</key>
+#     <dict>
+#         <key>NSExtensionAttributes</key>
+#         <dict>
+#             <key>IntentsRestrictedWhileLocked</key>
+#             <array/>
+#             <key>IntentsRestrictedWhileProtectedDataUnavailable</key>
+#             <array/>
+#             <key>IntentsSupported</key>
+#             <array>
+#                 <string>INSendMessageIntent</string>
+#                 <string>INStartAudioCallIntent</string>
+#                 <string>INSearchForMessagesIntent</string>
+#                 <string>INSetMessageAttributeIntent</string>
+#                 <string>INSearchCallHistoryIntent</string>
+#                 <string>SelectFriendsIntent</string>
+#                 <string>SelectAvatarFriendsIntent</string>
+#             </array>
+#         </dict>
+#         <key>NSExtensionPointIdentifier</key>
+#         <string>com.apple.intents-service</string>
+#         <key>NSExtensionPrincipalClass</key>
+#         <string>IntentHandler</string>
+#     </dict>
+#     """.format(
+#         telegram_bundle_id = telegram_bundle_id,
+#     )
+# )
 
 swift_intent_library(
     name = "GeneratedSources",
@@ -1279,38 +1280,39 @@ swift_intent_library(
     visibility = ["//visibility:public"],
 )
 
-filegroup(
-    name = "IntentsAssets",
-    srcs = glob(["SiriIntents/IntentsImages.xcassets/**"]),
-    visibility = ["//visibility:public"],
-)
-
-swift_library(
-    name = "IntentsExtensionLib",
-    module_name = "IntentsExtensionLib",
-    srcs = glob([
-        "SiriIntents/**/*.swift",
-    ]),
-    copts = [
-        "-warnings-as-errors",
-    ],
-    data = glob([
-        "SiriIntents/*.lproj/Intents.intentdefinition"
-    ]) + [
-        ":IntentsAssets"
-    ],
-    deps = [
-        "//submodules/SSignalKit/SwiftSignalKit:SwiftSignalKit",
-        "//submodules/Postbox:Postbox",
-        "//submodules/TelegramApi:TelegramApi",
-        "//submodules/TelegramCore:TelegramCore",
-        "//submodules/BuildConfig:BuildConfig",
-        "//submodules/OpenSSLEncryptionProvider:OpenSSLEncryptionProvider",
-        "//submodules/AppLockState:AppLockState",
-        "//Telegram:GeneratedSources",
-        "//submodules/WidgetItems:WidgetItems",
-    ],
-)
+# Temporarily disabled for IntentsExtension
+# filegroup(
+#     name = "IntentsAssets",
+#     srcs = glob(["SiriIntents/IntentsImages.xcassets/**"]),
+#     visibility = ["//visibility:public"],
+# )
+# 
+# swift_library(
+#     name = "IntentsExtensionLib",
+#     module_name = "IntentsExtensionLib",
+#     srcs = glob([
+#         "SiriIntents/**/*.swift",
+#     ]),
+#     copts = [
+#         "-warnings-as-errors",
+#     ],
+#     data = glob([
+#         "SiriIntents/*.lproj/Intents.intentdefinition"
+#     ]) + [
+#         ":IntentsAssets"
+#     ],
+#     deps = [
+#         "//submodules/SSignalKit/SwiftSignalKit:SwiftSignalKit",
+#         "//submodules/Postbox:Postbox",
+#         "//submodules/TelegramApi:TelegramApi",
+#         "//submodules/TelegramCore:TelegramCore",
+#         "//submodules/BuildConfig:BuildConfig",
+#         "//submodules/OpenSSLEncryptionProvider:OpenSSLEncryptionProvider",
+#         "//submodules/AppLockState:AppLockState",
+#         "//Telegram:GeneratedSources",
+#         "//submodules/WidgetItems:WidgetItems",
+#     ],
+# )
 
 '''genrule(
     name = "SetMinOsVersionIntentsExtension",
@@ -1331,37 +1333,38 @@ swift_library(
     ]
 )'''
 
-ios_extension(
-    name = "IntentsExtension",
-    bundle_id = "{telegram_bundle_id}.SiriIntents".format(
-        telegram_bundle_id = telegram_bundle_id,
-    ),
-    families = [
-        "iphone",
-        "ipad",
-    ],
-    infoplists = [
-        ":IntentsInfoPlist",
-        ":VersionInfoPlist",
-        ":RequiredDeviceCapabilitiesPlist",
-        ":BuildNumberInfoPlist",
-        ":AppNameInfoPlist",
-        ":PTVersionInfoPlist",
-    ],
-    minimum_os_version = minimum_os_version, # maintain the same minimum OS version across extensions
-    #ipa_post_processor = ":SetMinOsVersionIntentsExtension",
-    provisioning_profile = select({
-        ":disableProvisioningProfilesSetting": None,
-        "//conditions:default": ":IntentsExtension_xcode_profile" if telegram_use_xcode_managed_codesigning else "@build_configuration//provisioning:Intents.mobileprovision",
-    }),
-    entitlements = ":ExtensionEntitlements.entitlements" if telegram_use_xcode_managed_codesigning else None,
-    deps = [":IntentsExtensionLib"],
-    frameworks = [
-        ":SwiftSignalKitFramework",
-        ":PostboxFramework",
-        ":TelegramCoreFramework",
-    ],
-)
+# Temporarily disabled IntentsExtension
+# ios_extension(
+#     name = "IntentsExtension",
+#     bundle_id = "{telegram_bundle_id}.SiriIntents".format(
+#         telegram_bundle_id = telegram_bundle_id,
+#     ),
+#     families = [
+#         "iphone",
+#         "ipad",
+#     ],
+#     infoplists = [
+#         ":IntentsInfoPlist",
+#         ":VersionInfoPlist",
+#         ":RequiredDeviceCapabilitiesPlist",
+#         ":BuildNumberInfoPlist",
+#         ":AppNameInfoPlist",
+#         ":PTVersionInfoPlist",
+#     ],
+#     minimum_os_version = minimum_os_version, # maintain the same minimum OS version across extensions
+#     #ipa_post_processor = ":SetMinOsVersionIntentsExtension",
+#     provisioning_profile = select({
+#         ":disableProvisioningProfilesSetting": None,
+#         "//conditions:default": ":IntentsExtension_xcode_profile" if telegram_use_xcode_managed_codesigning else "@build_configuration//provisioning:Intents.mobileprovision",
+#     }),
+#     entitlements = ":ExtensionEntitlements.entitlements" if telegram_use_xcode_managed_codesigning else None,
+#     deps = [":IntentsExtensionLib"],
+#     frameworks = [
+#         ":SwiftSignalKitFramework",
+#         ":PostboxFramework",
+#         ":TelegramCoreFramework",
+#     ],
+# )
 
 plist_fragment(
     name = "BroadcastUploadInfoPlist",
@@ -1560,17 +1563,18 @@ xcode_provisioning_profile(
    provisioning_profile = ":WidgetExtension_local_profile",
 )
 
-local_provisioning_profile(
-    name = "IntentsExtension_local_profile",
-    profile_name = "iOS Team Provisioning Profile: {}.SiriIntents".format(telegram_bundle_id),
-    team_id = telegram_team_id,
-)
-
-xcode_provisioning_profile(
-   name = "IntentsExtension_xcode_profile",
-   managed_by_xcode = True,
-   provisioning_profile = ":IntentsExtension_local_profile",
-)
+# Temporarily disabled for IntentsExtension
+# local_provisioning_profile(
+#     name = "IntentsExtension_local_profile",
+#     profile_name = "iOS Team Provisioning Profile: {}.SiriIntents".format(telegram_bundle_id),
+#     team_id = telegram_team_id,
+# )
+# 
+# xcode_provisioning_profile(
+#    name = "IntentsExtension_xcode_profile",
+#    managed_by_xcode = True,
+#    provisioning_profile = ":IntentsExtension_local_profile",
+# )
 
 local_provisioning_profile(
     name = "BroadcastUploadExtension_local_profile",
