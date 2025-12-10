@@ -1,16 +1,16 @@
 {
-	"bundle_id": "org.cpartisans.ptelegram",
+	"bundle_id": "org.telegram.messenger",
 	"api_id": "18112237",
 	"api_hash": "b5906401be1e1200312415faaaf4a526",
-	"team_id": "WKR7833M22",
+	"team_id": "DUMMY",
 	"app_center_id": "0",
 	"is_internal_build": "true",
-	"is_appstore_build": "true",
+	"is_appstore_build": "false",
 	"appstore_id": "6463028542",
 	"app_specific_url_scheme": "tg",
 	"premium_iap_product_id": "",
-	"enable_siri": true,
-	"enable_icloud": true,
+	"enable_siri": false,
+	"enable_icloud": false,
     "enable_watch": false,
-    "is_non_dev_account": false
+    "is_non_dev_account": true
 }
