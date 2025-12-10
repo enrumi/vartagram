@@ -70,11 +70,35 @@ jobs:
           EOF
           echo "✅ Created minimal-unsigned-config.json"
 
-      - name: Create dummy certificate and import to keychain
+      - name: Create dummy certificate with code signing extensions and import to keychain
         run: |
-          # Create a self-signed certificate for codesigning
+          # Create config file for certificate with code signing extension
+          cat > /tmp/cert.conf << 'EOF'
+          [ req ]
+          default_bits = 2048
+          distinguished_name = req_distinguished_name
+          req_extensions = v3_req
+          x509_extensions = v3_ca
+          
+          [ req_distinguished_name ]
+          
+          [ v3_req ]
+          basicConstraints = CA:FALSE
+          keyUsage = critical,digitalSignature
+          extendedKeyUsage = critical,codeSigning
+          
+          [ v3_ca ]
+          basicConstraints = critical,CA:FALSE
+          keyUsage = critical,digitalSignature
+          extendedKeyUsage = critical,codeSigning
+          subjectKeyIdentifier = hash
+          EOF
+          
+          # Generate key and certificate with proper extensions
           openssl genrsa -out /tmp/dummy_key.pem 2048
-          openssl req -new -x509 -key /tmp/dummy_key.pem -out /tmp/dummy_cert.pem -days 365 -subj "/CN=Dummy Codesigning Certificate"
+          openssl req -new -x509 -key /tmp/dummy_key.pem -out /tmp/dummy_cert.pem -days 365 \
+            -subj "/CN=Apple Development: Dummy User (DUMMY)/OU=DUMMY/O=Dummy Organization" \
+            -config /tmp/cert.conf -extensions v3_ca
           
           # Convert to P12 format for keychain import
           openssl pkcs12 -export -out /tmp/dummy_cert.p12 -inkey /tmp/dummy_key.pem -in /tmp/dummy_cert.pem -passout pass:dummy
@@ -89,7 +113,10 @@ jobs:
           security import /tmp/dummy_cert.p12 -k build.keychain -P dummy -T /usr/bin/codesign -T /usr/bin/security
           security set-key-partition-list -S apple-tool:,apple: -s -k dummy build.keychain
           
-          echo "✅ Dummy certificate imported to keychain"
+          # Verify it's there
+          security find-identity -v -p codesigning build.keychain
+          
+          echo "✅ Dummy code signing certificate imported to keychain"
 
       - name: Create valid dummy codesigning profiles using the same certificate
         run: |
