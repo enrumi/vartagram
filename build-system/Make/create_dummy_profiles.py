@@ -45,7 +45,7 @@ def create_dummy_mobileprovision(name, team_id, bundle_id, output_path, cert_pat
         'DeveloperCertificates': [],
         'Entitlements': {
             'application-identifier': app_id,
-            'keychain-access-groups': [f'{keychain_team}.*'],
+            'keychain-access-groups': [keychain_team],
             'get-task-allow': True,
             'aps-environment': 'development'
         },
