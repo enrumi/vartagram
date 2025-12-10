@@ -1,4 +1,4 @@
-﻿name: Dev Build (Unsigned/7-day)
+name: Dev Build (Unsigned/7-day)
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ jobs:
     runs-on: macos-15
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: 'recursive'
           fetch-depth: '0'
@@ -31,7 +31,7 @@ jobs:
           mv /Users/Shared/$(basename $GITHUB_WORKSPACE) /Users/Shared/telegram-ios
 
       - name: Bazel cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ${{ env.BAZEL_USER_ROOT }}
           key: ${{ runner.os }}-bazel-dev-cache
@@ -81,7 +81,7 @@ jobs:
             --buildNumber=$BUILD_NUMBER \
             --configuration=release_sim_arm64
 
-          echo "✅ Build completed successfully!"
+          echo "? Build completed successfully!"
 
           # Collect artifacts
           OUTPUT_PATH="build/artifacts"
@@ -98,11 +98,11 @@ jobs:
             cp -R Telegram.app Payload/
             zip -r Vartagram-Dev-${BUILD_NUMBER}.ipa Payload
             rm -rf Payload
-            echo "✅ IPA created: Vartagram-Dev-${BUILD_NUMBER}.ipa"
+            echo "? IPA created: Vartagram-Dev-${BUILD_NUMBER}.ipa"
           fi
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: Vartagram-Dev-Build-${{ env.BUILD_NUMBER }}
           path: /Users/Shared/telegram-ios/build/artifacts/
@@ -115,22 +115,22 @@ jobs:
           tag_name: dev-build-${{ env.BUILD_NUMBER }}
           name: Vartagram Dev Build ${{ env.APP_VERSION }} (${{ env.BUILD_NUMBER }})
           body: |
-            🚀 **Vartagram Development Build**
+            ?? **Vartagram Development Build**
             
             **Version:** ${{ env.APP_VERSION }}
             **Build Number:** ${{ env.BUILD_NUMBER }}
             **Configuration:** Simulator (Unsigned)
             
-            ⚠️ **Important:**
+            ?? **Important:**
             - This is a SIMULATOR build only
             - Does NOT work on real devices
             - Requires Xcode and iOS Simulator on Mac
             
-            📦 **Files:**
+            ?? **Files:**
             - `Vartagram-Dev-*.ipa` - IPA for simulator
             - `Telegram.app` - Raw .app bundle
             
-            🔧 **Installation:**
+            ?? **Installation:**
             1. Unzip the IPA
             2. Drag Telegram.app to iOS Simulator
             3. Or use: `xcrun simctl install booted Telegram.app`
