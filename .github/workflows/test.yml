@@ -204,7 +204,8 @@ jobs:
             --codesigningInformationPath=build-system/empty-codesigning \
             --configuration=release_arm64 \
             --buildNumber=10000 \
-            --outputBuildArtifactsPath=./build-output
+            --outputBuildArtifactsPath=./build-output \
+            --disableProvisioningProfiles
 
       - name: Check output
         if: always()
