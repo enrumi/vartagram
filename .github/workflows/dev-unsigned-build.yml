@@ -1,4 +1,4 @@
-name: Dev Build (Unsigned/7-day)
+﻿name: Dev Build for Sideloadly
 
 on:
   workflow_dispatch:
@@ -34,9 +34,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.BAZEL_USER_ROOT }}
-          key: ${{ runner.os }}-bazel-dev-cache
+          key: ${{ runner.os }}-bazel-device-cache
 
-      - name: Build the App (Development/Unsigned)
+      - name: Build IPA for Real Device (Sideloadly)
         env:
           API_ID: ${{ secrets.API_ID }}
           API_HASH: ${{ secrets.API_HASH }}
@@ -69,75 +69,118 @@ jobs:
             sed -i '' "s/\"api_hash\": \"[^\"]*\"/\"api_hash\": \"$API_HASH\"/g" $HOME/telegram-configuration/dev-config.json
           fi
 
-          # Copy example provisioning profiles (dummy for development)
+          # Copy example provisioning profiles (dummy - will be re-signed by Sideloadly)
           cp -R build-system/example-configuration/provisioning $HOME/telegram-configuration/
 
-          # Build for simulator (no code signing needed)
+          # Build for REAL DEVICE (arm64)
+          echo "🔨 Building for iOS device (arm64)..."
           python3 -u build-system/Make/Make.py \
             --bazelUserRoot="$BAZEL_USER_ROOT" \
             build \
             --configurationPath="$HOME/telegram-configuration/dev-config.json" \
             --codesigningInformationPath="$HOME/telegram-configuration/provisioning" \
             --buildNumber=$BUILD_NUMBER \
-            --configuration=release_sim_arm64
+            --configuration=release_arm64
 
-          echo "? Build completed successfully!"
+          echo "✅ Build completed successfully!"
 
           # Collect artifacts
           OUTPUT_PATH="build/artifacts"
           rm -rf "$OUTPUT_PATH"
           mkdir -p "$OUTPUT_PATH"
           
-          # Find and copy the .app
-          find bazel-bin/Telegram -name "Telegram.app" -type d -exec cp -R {} $OUTPUT_PATH/ \;
-          
-          # Create IPA (zip the .app)
-          cd $OUTPUT_PATH
-          if [ -d "Telegram.app" ]; then
-            mkdir -p Payload
-            cp -R Telegram.app Payload/
-            zip -r Vartagram-Dev-${BUILD_NUMBER}.ipa Payload
-            rm -rf Payload
-            echo "? IPA created: Vartagram-Dev-${BUILD_NUMBER}.ipa"
+          # Find and copy the IPA
+          echo "📦 Collecting IPA..."
+          if [ -f "bazel-bin/Telegram/Telegram.ipa" ]; then
+            cp "bazel-bin/Telegram/Telegram.ipa" "$OUTPUT_PATH/Vartagram-Sideloadly-${BUILD_NUMBER}.ipa"
+            echo "✅ IPA ready: Vartagram-Sideloadly-${BUILD_NUMBER}.ipa"
+            ls -lh "$OUTPUT_PATH/"
+          else
+            echo "❌ IPA not found in expected location"
+            echo "Searching for IPA files..."
+            find bazel-bin -name "*.ipa" -type f
           fi
 
-      - name: Upload Artifacts
+      - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Vartagram-Dev-Build-${{ env.BUILD_NUMBER }}
-          path: /Users/Shared/telegram-ios/build/artifacts/
-          retention-days: 7
+          name: Vartagram-Sideloadly-${{ env.BUILD_NUMBER }}
+          path: /Users/Shared/telegram-ios/build/artifacts/*.ipa
+          retention-days: 30
 
-      - name: Create GitHub Release
+      - name: Create GitHub Release with IPA
         if: github.ref == 'refs/heads/master'
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: dev-build-${{ env.BUILD_NUMBER }}
-          name: Vartagram Dev Build ${{ env.APP_VERSION }} (${{ env.BUILD_NUMBER }})
+          tag_name: sideloadly-build-${{ env.BUILD_NUMBER }}
+          name: 📱 Vartagram for Sideloadly v${{ env.APP_VERSION }} (Build ${{ env.BUILD_NUMBER }})
           body: |
-            ?? **Vartagram Development Build**
+            # 📱 Vartagram for Real iPhone/iPad
             
-            **Version:** ${{ env.APP_VERSION }}
-            **Build Number:** ${{ env.BUILD_NUMBER }}
-            **Configuration:** Simulator (Unsigned)
+            **Version:** ${{ env.APP_VERSION }}  
+            **Build Number:** ${{ env.BUILD_NUMBER }}  
+            **Target:** iOS Device (arm64)
             
-            ?? **Important:**
-            - This is a SIMULATOR build only
-            - Does NOT work on real devices
-            - Requires Xcode and iOS Simulator on Mac
+            ---
             
-            ?? **Files:**
-            - `Vartagram-Dev-*.ipa` - IPA for simulator
-            - `Telegram.app` - Raw .app bundle
+            ## ⚠️ Important Notes
             
-            ?? **Installation:**
-            1. Unzip the IPA
-            2. Drag Telegram.app to iOS Simulator
-            3. Or use: `xcrun simctl install booted Telegram.app`
+            - ✅ Works on **REAL iPhone/iPad** devices
+            - ✅ Use with **Sideloadly** or **AltStore**
+            - ⚠️ Requires **free Apple ID** to sign
+            - ⏱️ Valid for **7 days** (re-sign after expiry)
+            - ❌ Does NOT work in Simulator
+            
+            ---
+            
+            ## 🔧 How to Install with Sideloadly
+            
+            ### 1️⃣ Download & Install Sideloadly
+            - **Windows/Mac:** https://sideloadly.io/
+            
+            ### 2️⃣ Download IPA
+            - Download `Vartagram-Sideloadly-*.ipa` from this release
+            
+            ### 3️⃣ Install on iPhone
+            1. Connect iPhone to computer via USB
+            2. Open Sideloadly
+            3. Drag the IPA file into Sideloadly
+            4. Enter your Apple ID (free account OK)
+            5. Click "Start" and wait
+            
+            ### 4️⃣ Trust Certificate on iPhone
+            1. Go to **Settings → General → VPN & Device Management**
+            2. Tap your Apple ID
+            3. Tap "Trust"
+            
+            ### 5️⃣ Done! 🎉
+            Open Vartagram on your iPhone!
+            
+            ---
+            
+            ## 🔄 Re-signing After 7 Days
+            
+            Apps signed with free Apple ID expire after 7 days. To continue using:
+            1. Re-run Sideloadly with the same IPA
+            2. Or use **AltStore** with automatic refresh
+            
+            ---
+            
+            ## 📦 Files in This Release
+            
+            - `Vartagram-Sideloadly-${{ env.BUILD_NUMBER }}.ipa` - IPA for real devices
+            
+            ---
+            
+            ## ❓ Need Help?
+            
+            - Sideloadly not working? Check USB connection and Apple ID
+            - Certificate not trusted? Go to iPhone Settings
+            - Still issues? Open an issue on GitHub
+            
           draft: false
           prerelease: true
           files: |
-            /Users/Shared/telegram-ios/build/artifacts/Vartagram-Dev-${{ env.BUILD_NUMBER }}.ipa
-            /Users/Shared/telegram-ios/build/artifacts/Telegram.app
+            /Users/Shared/telegram-ios/build/artifacts/Vartagram-Sideloadly-${{ env.BUILD_NUMBER }}.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
