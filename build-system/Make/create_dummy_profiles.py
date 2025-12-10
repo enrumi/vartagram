@@ -35,10 +35,7 @@ def create_dummy_mobileprovision(name, team_id, bundle_id, output_path, cert_pat
         'CreationDate': datetime.datetime(2024, 1, 1, 0, 0, 0),
         'Platform': ['iOS'],
         'IsXcodeManaged': False,
-        'DeveloperCertificates': [
-            # Dummy certificate data (base64 encoded minimal cert structure)
-            b'MIICeDCCAWCgAwIBAgIBATANBgkqhkiG9w0BAQsFADAAMB4XDTIwMDEwMTAwMDAwMFoXDTMwMTIzMTIzNTk1OVowADCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAMn'
-        ],
+        'DeveloperCertificates': [],
         'Entitlements': {
             'application-identifier': app_id,
             'keychain-access-groups': [keychain_team],
@@ -55,6 +52,22 @@ def create_dummy_mobileprovision(name, team_id, bundle_id, output_path, cert_pat
         'UUID': f'00000000-0000-0000-0000-{name.lower():0>12s}'[:36],
         'Version': 1
     }
+    
+    # Read the certificate and add to profile
+    cert_data = None
+    if os.path.exists(cert_path):
+        with open(cert_path, 'rb') as f:
+            cert_pem = f.read()
+            # Extract DER data from PEM
+            import re
+            cert_b64 = re.search(b'-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----', cert_pem, re.DOTALL)
+            if cert_b64:
+                import base64
+                cert_data = base64.b64decode(cert_b64.group(1))
+    
+    # Update DeveloperCertificates
+    if cert_data:
+        profile_dict['DeveloperCertificates'] = [cert_data]
     
     # Serialize to plist
     plist_data = plistlib.dumps(profile_dict, fmt=plistlib.FMT_XML)
