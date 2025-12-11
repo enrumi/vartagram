@@ -22,10 +22,9 @@ jobs:
           path: |
             ~/.cache/bazel
             /private/var/tmp/_bazel_runner
-          key: ${{ runner.os }}-bazel-arm64-${{ hashFiles('MODULE.bazel', 'WORKSPACE') }}
+          key: ${{ runner.os }}-bazel-arm64-v2-${{ hashFiles('MODULE.bazel', 'WORKSPACE') }}
           restore-keys: |
-            ${{ runner.os }}-bazel-arm64-
-            ${{ runner.os }}-bazel-
+            ${{ runner.os }}-bazel-arm64-v2-
 
       - name: Free disk space
         run: |
@@ -103,6 +102,12 @@ jobs:
       - name: Clean build artifacts
         run: |
           rm -rf build/ bazel-* ~/Library/Developer/Xcode/DerivedData/ build-input/ Telegram/BUILD.bak
+          
+          # Clean any corrupted Bazel download
+          if [ -f build-input/bazel-8.3.1-darwin-arm64 ]; then
+            echo "Removing existing Bazel binary to force fresh download"
+            rm -f build-input/bazel-8.3.1-darwin-arm64
+          fi
 
       - name: Build IPA for device with fake codesigning
         run: |
