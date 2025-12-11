@@ -68,17 +68,17 @@ jobs:
             "is_internal_build": false,
             "is_appstore_build": false,
             "app_specific_url_scheme": "tgapp",
-            "team_id": "DUMMY",
-            "bundle_id": "org.telegram.messenger",
+            "team_id": "C67CF9S4VU",
+            "bundle_id": "ph.telegra.Telegraph",
             "appstore_id": "0",
             "premium_iap_product_id": "",
             "enable_siri": false,
             "enable_icloud": false,
             "enable_watch": false,
-            "is_non_dev_account": true
+            "is_non_dev_account": false
           }
           EOF
-          echo "✅ Created minimal-unsigned-config.json"
+          echo "✅ Created minimal-unsigned-config.json with matching bundle_id and team_id"
 
       - name: Setup fake codesigning
         run: |
