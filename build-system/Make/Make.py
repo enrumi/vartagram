@@ -93,7 +93,14 @@ class BazelCommandLine:
 
             # https://docs.bazel.build/versions/master/command-line-reference.html
             # Set the number of parallel jobs per module to saturate the available CPU resources.
+            # NOTE: These flags are commented out as they cause issues with simulator builds
             #'--swiftcopt=-j{}'.format(os.cpu_count() - 1),
+            #'--@build_bazel_rules_swift//swift:copt="-j{}"'.format(os.cpu_count() - 1),
+            #'--@build_bazel_rules_swift//swift:copt="-whole-module-optimization"',
+        ]
+        
+        self.common_debug_args_device_only = [
+            # These flags only work for device builds, not simulator
             '--@build_bazel_rules_swift//swift:copt="-j{}"'.format(os.cpu_count() - 1),
             '--@build_bazel_rules_swift//swift:copt="-whole-module-optimization"',
         ]
@@ -168,7 +175,7 @@ class BazelCommandLine:
 
                 # Always build universal Watch binaries.
                 '--watchos_cpus=arm64_32'
-            ] + self.common_debug_args
+            ] + self.common_debug_args + self.common_debug_args_device_only
         elif configuration == 'debug_sim_arm64':
             self.configuration_args = [
                 # bazel debug build configuration
