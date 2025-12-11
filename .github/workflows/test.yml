@@ -111,12 +111,21 @@ jobs:
 
       - name: Build IPA for device with fake codesigning
         run: |
+          echo "=== Checking fake-codesigning structure before build ==="
+          ls -la build-system/fake-codesigning/
+          echo "=== Checking profiles directory ==="
+          ls -la build-system/fake-codesigning/profiles/ || echo "No profiles directory!"
+          
           python3 build-system/Make/Make.py build \
             --configurationPath=build-system/Make/minimal-unsigned-config.json \
             --codesigningInformationPath=build-system/fake-codesigning \
             --configuration=release_arm64 \
             --buildNumber=10000 \
-            --outputBuildArtifactsPath=./build-output
+            --outputBuildArtifactsPath=./build-output 2>&1 | tee build.log || {
+            echo "=== Build failed, checking configuration-repository ==="
+            ls -la build-input/configuration-repository/provisioning/ 2>/dev/null || echo "No provisioning dir"
+            exit 1
+          }
           
           echo "✅ Built device IPA with fake codesigning - ready for Sideloadly/AltStore"
 
