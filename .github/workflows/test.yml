@@ -16,6 +16,17 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Cache Bazel
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/bazel
+            /private/var/tmp/_bazel_runner
+          key: ${{ runner.os }}-bazel-arm64-${{ hashFiles('MODULE.bazel', 'WORKSPACE') }}
+          restore-keys: |
+            ${{ runner.os }}-bazel-arm64-
+            ${{ runner.os }}-bazel-
+
       - name: Free disk space
         run: |
           sudo rm -rf /Applications/Xcode_15.app || true
