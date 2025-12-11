@@ -224,14 +224,17 @@ jobs:
         run: |
           rm -rf build/ bazel-* ~/Library/Developer/Xcode/DerivedData/ build-input/ Telegram/BUILD.bak
 
-      - name: Build unsigned IPA
+      - name: Build unsigned IPA (simulator build for re-signing)
         run: |
           python3 build-system/Make/Make.py build \
             --configurationPath=build-system/Make/minimal-unsigned-config.json \
             --codesigningInformationPath=build-system/empty-codesigning \
-            --configuration=release_arm64 \
+            --configuration=release_sim_arm64 \
             --buildNumber=10000 \
-            --outputBuildArtifactsPath=./build-output
+            --outputBuildArtifactsPath=./build-output \
+            --disableProvisioningProfiles
+          
+          echo "✅ Built simulator IPA - can be re-signed for device using Sideloadly/AltStore"
 
       - name: Check output
         if: always()
