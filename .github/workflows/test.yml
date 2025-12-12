@@ -92,10 +92,27 @@ jobs:
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
           security set-keychain-settings -t 3600 -u build.keychain
 
-          # 2. Generate self-signed certificate with EXACT CN format
+          # 2. Create OpenSSL config with Code Signing extension
+          cat > /tmp/cert.conf << 'EOF'
+          [ req ]
+          default_bits = 2048
+          distinguished_name = req_distinguished_name
+          x509_extensions = v3_ca
+          
+          [ req_distinguished_name ]
+          
+          [ v3_ca ]
+          basicConstraints = critical,CA:FALSE
+          keyUsage = critical,digitalSignature
+          extendedKeyUsage = critical,codeSigning
+          subjectKeyIdentifier = hash
+          EOF
+          
+          # Generate self-signed certificate WITH code signing extension
           openssl req -x509 -newkey rsa:2048 -keyout /tmp/key.pem -out /tmp/cert.pem \
             -days 365 -nodes \
-            -subj "/C=US/ST=State/L=City/O=Fake Org/CN=Apple Development: Fake (C67CF9S4VU)"
+            -subj "/C=US/ST=State/L=City/O=Fake Org/CN=Apple Development: Fake (C67CF9S4VU)" \
+            -config /tmp/cert.conf -extensions v3_ca
 
           # 3. Export to P12 with matching name
           openssl pkcs12 -export -in /tmp/cert.pem -inkey /tmp/key.pem \
