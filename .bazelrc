@@ -7,7 +7,6 @@ build --crosstool_top=@local_config_apple_cc//:toolchain
 build --host_crosstool_top=@local_config_apple_cc//:toolchain
 
 #build --swiftcopt=-whole-module-optimization
-build --swiftcopt=-incremental
 
 build --per_file_copt=".*\\.m$","@-fno-objc-msgsend-selector-stubs"
 build --per_file_copt=".*\\.mm$","@-fno-objc-msgsend-selector-stubs"
@@ -15,11 +14,11 @@ build --per_file_copt=".*\\.mm$","@-fno-objc-msgsend-selector-stubs"
 build --features=debug_prefix_map_pwd_is_dot
 build --features=swift.debug_prefix_map
 build --features=swift.enable_vfsoverlays
-build --features=swift.use_global_module_cache
+build --features=-swift.cacheable_swiftmodules
 
 build --strategy=Genrule=standalone
 build --spawn_strategy=standalone
 
 build --strategy=SwiftCompile=standalone
-#build --define RULES_SWIFT_BUILD_DUMMY_WORKER=1
+build --define RULES_SWIFT_BUILD_DUMMY_WORKER=1
 
