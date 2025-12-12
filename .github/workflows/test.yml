@@ -129,17 +129,16 @@ jobs:
             rm -f build-input/bazel-8.3.1-darwin-arm64
           fi
 
-      - name: Build IPA for device with disableProvisioningProfiles
+      - name: Build IPA with fake codesigning (cert + profiles generated together)
         run: |
           python3 build-system/Make/Make.py build \
             --configurationPath=build-system/Make/minimal-unsigned-config.json \
             --codesigningInformationPath=build-system/fake-codesigning \
             --configuration=release_arm64 \
             --buildNumber=10000 \
-            --outputBuildArtifactsPath=./build-output \
-            --disableProvisioningProfiles
+            --outputBuildArtifactsPath=./build-output
           
-          echo "✅ Built device IPA without provisioning profiles - ready for Sideloadly/AltStore"
+          echo "✅ Built device IPA with linked cert+profiles - ready for Sideloadly/AltStore"
 
       - name: Check output
         if: always()
