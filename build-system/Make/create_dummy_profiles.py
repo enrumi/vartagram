@@ -42,7 +42,8 @@ def create_dummy_mobileprovision(name, team_id, bundle_id, output_path, cert_pat
             'com.apple.security.application-groups': [f'group.{bundle_id}'],
             'get-task-allow': True,
             'aps-environment': 'development',
-            'com.apple.developer.applesignin': ['Default']
+            'com.apple.developer.applesignin': ['Default'],
+            'com.apple.developer.carplay-messaging': True
         },
         'ExpirationDate': datetime.datetime(2099, 12, 31, 23, 59, 59),
         'Name': f'Vartagram {name} Profile',
