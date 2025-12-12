@@ -80,47 +80,75 @@ jobs:
           EOF
           echo "✅ Created minimal-unsigned-config.json with matching bundle_id and team_id"
 
-      - name: Setup Fake Signing Identity (PROPER WAY!)
+      - name: Setup Fake Signing Identity (PROPER WAY - WITH FINGERPRINT MATCH!)
         run: |
-          # 1. Create new keychain
-          security create-keychain -p "" build.keychain
+          KEYCHAIN_PASSWORD="temp123"
+          CERT_PASSWORD="cert123"
+          
+          # 1. Create keychain with password
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
           security list-keychains -s build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "" build.keychain
+          security default-keychain -d user -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
           security set-keychain-settings -t 3600 -u build.keychain
 
-          # 2. Generate self-signed certificate
-          # IMPORTANT: Name must match what we specify in Bazel
-          openssl req -x509 -newkey rsa:2048 -keyout /tmp/key.pem -out /tmp/cert.pem -days 365 -nodes \
-            -subj "/CN=Apple Development: Fake (C67CF9S4VU)"
+          # 2. Generate self-signed certificate with EXACT CN format
+          openssl req -x509 -newkey rsa:2048 -keyout /tmp/key.pem -out /tmp/cert.pem \
+            -days 365 -nodes \
+            -subj "/C=US/ST=State/L=City/O=Fake Org/CN=Apple Development: Fake (C67CF9S4VU)"
 
-          # 3. Package as P12 and import to Keychain
-          openssl pkcs12 -export -out /tmp/certificate.p12 -inkey /tmp/key.pem -in /tmp/cert.pem -password pass:12345
-          security import /tmp/certificate.p12 -k build.keychain -P 12345 -T /usr/bin/codesign -T /usr/bin/security
-          security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
+          # 3. Export to P12 with matching name
+          openssl pkcs12 -export -in /tmp/cert.pem -inkey /tmp/key.pem \
+            -out /tmp/certificate.p12 \
+            -name "Apple Development: Fake (C67CF9S4VU)" \
+            -passout pass:"$CERT_PASSWORD"
 
-          # 4. Verify Identity is visible
+          # 4. Import to keychain WITH CRITICAL FLAGS
+          security import /tmp/certificate.p12 -k build.keychain \
+            -P "$CERT_PASSWORD" \
+            -T /usr/bin/codesign
+
+          # 5. CRITICAL: Set partition list for codesign access to private key
+          security set-key-partition-list -S apple-tool:,apple: -s \
+            -k "$KEYCHAIN_PASSWORD" \
+            -D "Apple Development: Fake (C67CF9S4VU)" \
+            -t private build.keychain
+
+          # 6. Verify identity is accessible
+          echo "=== Identity in keychain ==="
           security find-identity -v -p codesigning build.keychain
           
-          echo "✅ Created and imported fake signing identity"
+          # 7. Extract DER from THE SAME P12 for mobileprovision
+          # This ensures SHA-1 fingerprint match!
+          openssl pkcs12 -in /tmp/certificate.p12 -clcerts -nokeys \
+            -passin pass:"$CERT_PASSWORD" | \
+            openssl x509 -outform DER -out /tmp/cert.der
           
-          # 5. Generate provisioning profiles linked to THIS certificate
-          # First, remove old profiles
+          echo "✅ Created signing identity with matching fingerprint"
+          
+          # 8. Generate provisioning profiles with DER from P12
           rm -rf build-system/fake-codesigning/profiles
           mkdir -p build-system/fake-codesigning/profiles
           
           PROFILES=("Telegram" "Share" "NotificationContent" "NotificationService" "Widget" "Intents" "BroadcastUpload")
           for profile in "${PROFILES[@]}"; do
             python3 build-system/Make/generate_fake_profile.py \
-              /tmp/cert.pem \
+              /tmp/cert.der \
+              /tmp/key.pem \
               "C67CF9S4VU" \
               "ph.telegra.Telegraph" \
               "build-system/fake-codesigning/profiles/${profile}.mobileprovision" \
               "$profile"
           done
           
-          echo "✅ Generated 7 provisioning profiles linked to fake identity"
-          ls -la build-system/fake-codesigning/profiles/
+          echo "✅ Generated profiles with EXACT cert from keychain"
+          
+          # 9. Verify SHA-1 fingerprints match
+          KEYCHAIN_SHA1=$(security find-certificate -c "Apple Development: Fake" -p build.keychain | openssl x509 -noout -fingerprint -sha1 | cut -d'=' -f2)
+          PROFILE_SHA1=$(openssl x509 -inform DER -in /tmp/cert.der -noout -fingerprint -sha1 | cut -d'=' -f2)
+          echo "Keychain SHA-1: $KEYCHAIN_SHA1"
+          echo "Profile SHA-1:  $PROFILE_SHA1"
+          [ "$KEYCHAIN_SHA1" = "$PROFILE_SHA1" ] && echo "✅ Fingerprints MATCH!" || echo "❌ Fingerprints MISMATCH!"
 
       - name: Clean build artifacts
         run: |

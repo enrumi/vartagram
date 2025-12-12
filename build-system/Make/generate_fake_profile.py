@@ -4,15 +4,16 @@ import sys
 import base64
 from datetime import datetime, timedelta
 
-if len(sys.argv) < 6:
-    print("Usage: python3 generate_fake_profile.py cert_path team_id bundle_id output_path profile_name")
+if len(sys.argv) < 7:
+    print("Usage: python3 generate_fake_profile.py cert_der_path key_path team_id bundle_id output_path profile_name")
     sys.exit(1)
 
-cert_path = sys.argv[1]
-team_id = sys.argv[2]
-bundle_id = sys.argv[3]
-output_path = sys.argv[4]
-profile_name = sys.argv[5]
+cert_der_path = sys.argv[1]
+key_path = sys.argv[2]
+team_id = sys.argv[3]
+bundle_id = sys.argv[4]
+output_path = sys.argv[5]
+profile_name = sys.argv[6]
 
 # Map profile names to bundle ID suffixes
 name_to_suffix = {
@@ -28,13 +29,9 @@ name_to_suffix = {
 suffix = name_to_suffix.get(profile_name, '')
 app_id = f'{team_id}.{bundle_id}{suffix}'
 
-# Read certificate and convert to DER format
-with open(cert_path, "rb") as f:
-    cert_data = f.read()
-    # Remove PEM headers
-    lines = cert_data.decode('utf-8').strip().split('\n')
-    base64_str = "".join([l for l in lines if "---" not in l])
-    der_data = base64.b64decode(base64_str)
+# Read certificate DER data directly
+with open(cert_der_path, "rb") as f:
+    der_data = f.read()
 
 profile_content = {
     "AppIDName": f"Fake {profile_name}",
@@ -76,11 +73,20 @@ plistlib.dump(profile_content, temp_plist)
 temp_plist.close()
 
 # Sign the plist with openssl smime to create mobileprovision
-# We need to extract the private key from the cert path
-# Since we only have cert.pem, we'll need the key too
-# Assuming key is at /tmp/key.pem (same location as in workflow)
+# key_path is now passed as argument
 
-key_path = cert_path.replace('cert.pem', 'key.pem')
+# Convert DER back to PEM for signing
+temp_cert_pem = tempfile.NamedTemporaryFile(mode='wb', suffix='.pem', delete=False)
+temp_cert_pem_path = temp_cert_pem.name
+
+# Convert DER to PEM
+subprocess.run([
+    'openssl', 'x509',
+    '-inform', 'DER',
+    '-in', cert_der_path,
+    '-out', temp_cert_pem_path
+], check=True, capture_output=True)
+temp_cert_pem.close()
 
 try:
     subprocess.run([
@@ -88,7 +94,7 @@ try:
         '-in', temp_plist_path,
         '-out', output_path,
         '-outform', 'der',
-        '-signer', cert_path,
+        '-signer', temp_cert_pem_path,
         '-inkey', key_path,
         '-nodetach'
     ], check=True, capture_output=True)
@@ -96,3 +102,5 @@ try:
     print(f"Created {output_path}")
 finally:
     os.unlink(temp_plist_path)
+    if os.path.exists(temp_cert_pem_path):
+        os.unlink(temp_cert_pem_path)
