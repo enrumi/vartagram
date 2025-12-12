@@ -62,7 +62,34 @@ profile_content = {
     "Version": 1
 }
 
-with open(output_path, "wb") as f:
-    plistlib.dump(profile_content, f)
+# Write plist to temp file
+import tempfile
+import subprocess
+import os
 
-print(f"Created {output_path}")
+temp_plist = tempfile.NamedTemporaryFile(mode='wb', suffix='.plist', delete=False)
+temp_plist_path = temp_plist.name
+plistlib.dump(profile_content, temp_plist)
+temp_plist.close()
+
+# Sign the plist with openssl smime to create mobileprovision
+# We need to extract the private key from the cert path
+# Since we only have cert.pem, we'll need the key too
+# Assuming key is at /tmp/key.pem (same location as in workflow)
+
+key_path = cert_path.replace('cert.pem', 'key.pem')
+
+try:
+    subprocess.run([
+        'openssl', 'smime', '-sign',
+        '-in', temp_plist_path,
+        '-out', output_path,
+        '-outform', 'der',
+        '-signer', cert_path,
+        '-inkey', key_path,
+        '-nodetach'
+    ], check=True, capture_output=True)
+    
+    print(f"Created {output_path}")
+finally:
+    os.unlink(temp_plist_path)
