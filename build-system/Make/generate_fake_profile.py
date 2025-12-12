@@ -41,6 +41,7 @@ profile_content = {
     "ApplicationIdentifierPrefix": [team_id],
     "CreationDate": datetime.now(),
     "Platform": ["iOS"],
+    "IsXcodeManaged": False,
     "DeveloperCertificates": [der_data],
     "Entitlements": {
         "application-identifier": app_id,
@@ -55,9 +56,11 @@ profile_content = {
     },
     "ExpirationDate": datetime.now() + timedelta(days=365),
     "Name": f"Fake {profile_name} Profile",
+    "ProvisionedDevices": [],
     "ProvisionsAllDevices": True,
     "TeamIdentifier": [team_id],
     "TeamName": "Fake Team",
+    "TimeToLive": 365,
     "UUID": str(uuid.uuid4()),
     "Version": 1
 }
