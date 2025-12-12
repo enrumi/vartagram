@@ -177,16 +177,36 @@ jobs:
             rm -f build-input/bazel-8.3.1-darwin-arm64
           fi
 
-      - name: Build IPA with fake codesigning (cert + profiles generated together)
+      - name: Generate Xcode project
         run: |
-          python3 build-system/Make/Make.py build \
+          python3 build-system/Make/Make.py generateProject \
             --configurationPath=build-system/Make/minimal-unsigned-config.json \
-            --codesigningInformationPath=build-system/fake-codesigning \
-            --configuration=release_arm64 \
-            --buildNumber=10000 \
-            --outputBuildArtifactsPath=./build-output
+            --disableProvisioningProfiles
           
-          echo "✅ Built device IPA with linked cert+profiles - ready for Sideloadly/AltStore"
+          echo "✅ Generated Xcode project"
+
+      - name: Build unsigned IPA with xcodebuild (bypasses codesigning requirements)
+        run: |
+          # Build archive without code signing
+          xcodebuild archive \
+            -project build-input/gen/project/Telegram.xcodeproj \
+            -scheme Telegram \
+            -sdk iphoneos \
+            -archivePath build-output/Telegram.xcarchive \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            -allowProvisioningUpdates
+          
+          # Extract IPA from archive
+          mkdir -p build-output/Payload
+          cp -r build-output/Telegram.xcarchive/Products/Applications/Telegram.app build-output/Payload/
+          cd build-output
+          zip -r Telegram.ipa Payload/
+          cd ..
+          
+          echo "✅ Built unsigned device IPA - ready for Sideloadly/AltStore"
 
       - name: Check output
         if: always()
