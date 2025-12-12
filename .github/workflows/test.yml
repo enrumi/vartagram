@@ -105,6 +105,8 @@ jobs:
           echo "✅ Created and imported fake signing identity"
           
           # 5. Generate provisioning profiles linked to THIS certificate
+          # First, remove old profiles
+          rm -rf build-system/fake-codesigning/profiles
           mkdir -p build-system/fake-codesigning/profiles
           
           PROFILES=("Telegram" "Share" "NotificationContent" "NotificationService" "Widget" "Intents" "BroadcastUpload")
@@ -118,6 +120,7 @@ jobs:
           done
           
           echo "✅ Generated 7 provisioning profiles linked to fake identity"
+          ls -la build-system/fake-codesigning/profiles/
 
       - name: Clean build artifacts
         run: |
