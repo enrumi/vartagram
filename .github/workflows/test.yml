@@ -191,21 +191,31 @@ jobs:
           echo "=== Looking for Xcode project ==="
           find . -name "Telegram.xcodeproj" -type d
           
-          # Build archive without code signing (use correct path)
-          xcodebuild archive \
+          # Build without code signing (use 'build' instead of 'archive')
+          xcodebuild build \
             -project Telegram/Telegram.xcodeproj \
             -scheme Telegram \
             -sdk iphoneos \
-            -archivePath build-output/Telegram.xcarchive \
+            -configuration Release \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             DEVELOPMENT_TEAM="" \
             -allowProvisioningUpdates
           
-          # Extract IPA from archive
+          # Find the built .app
+          APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "Telegram.app" -type d | head -1)
+          
+          if [ -z "$APP_PATH" ]; then
+            echo "Looking in build directory..."
+            APP_PATH=$(find build -name "Telegram.app" -type d | head -1)
+          fi
+          
+          echo "Found app at: $APP_PATH"
+          
+          # Extract IPA from built app
           mkdir -p build-output/Payload
-          cp -r build-output/Telegram.xcarchive/Products/Applications/Telegram.app build-output/Payload/
+          cp -r "$APP_PATH" build-output/Payload/
           cd build-output
           zip -r Telegram.ipa Payload/
           cd ..
