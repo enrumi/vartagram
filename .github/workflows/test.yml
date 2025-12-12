@@ -187,9 +187,13 @@ jobs:
 
       - name: Build unsigned IPA with xcodebuild (bypasses codesigning requirements)
         run: |
-          # Build archive without code signing
+          # Find the actual Xcode project location
+          echo "=== Looking for Xcode project ==="
+          find . -name "Telegram.xcodeproj" -type d
+          
+          # Build archive without code signing (use correct path)
           xcodebuild archive \
-            -project build-input/gen/project/Telegram.xcodeproj \
+            -project Telegram/Telegram.xcodeproj \
             -scheme Telegram \
             -sdk iphoneos \
             -archivePath build-output/Telegram.xcarchive \
