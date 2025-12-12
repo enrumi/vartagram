@@ -309,11 +309,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Vartagram-unsigned-${{ github.sha }}
-          path: |
-            build-output/Telegram.ipa
-            bazel-bin/Telegram/*.ipa
+          path: build-output/Telegram-unsigned.ipa
           retention-days: 30
-          if-no-files-found: ignore
+          if-no-files-found: error
 
       - name: Upload logs on failure
         if: failure()
