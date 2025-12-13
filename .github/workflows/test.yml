@@ -228,39 +228,48 @@ jobs:
           
           echo "✅ Simulator build completed"
 
-      - name: Build unsigned IPA for device
+      - name: Build for iOS Device and create IPA
         run: |
           echo "=== Building for iOS Device ==="
           
-          # Build for actual device
-          xcodebuild archive \
+          # Build directly for device
+          xcodebuild build \
             -project Telegram/Telegram.xcodeproj \
             -scheme Telegram \
+            -sdk iphoneos \
             -configuration Release \
-            -archivePath build-output/Telegram.xcarchive \
+            -derivedDataPath ./build-derived \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             DEVELOPMENT_TEAM="" \
+            ONLY_ACTIVE_ARCH=NO \
             -allowProvisioningUpdates || {
-              echo "⚠️ Archive completed with warnings"
+              echo "⚠️ Build completed with warnings"
             }
           
-          # Find the built .app in archive
-          echo "=== Searching for Telegram.app in archive ==="
-          if [ -d "build-output/Telegram.xcarchive/Products/Applications/Telegram.app" ]; then
-            APP_PATH="build-output/Telegram.xcarchive/Products/Applications/Telegram.app"
-          else
+          # Find the built .app for device (iphoneos, not simulator)
+          echo "=== Searching for device Telegram.app ==="
+          
+          # First check our build-derived folder
+          APP_PATH=$(find ./build-derived -name "Telegram.app" -type d -path "*/Release-iphoneos/*" | head -1)
+          
+          # If not found, check DerivedData
+          if [ -z "$APP_PATH" ]; then
             echo "Looking in DerivedData..."
             APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "Telegram.app" -type d -path "*/Release-iphoneos/*" | grep -v iphonesimulator | head -1)
           fi
           
+          # Last resort - any iphoneos build
+          if [ -z "$APP_PATH" ]; then
+            echo "Looking for any iphoneos build..."
+            APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "Telegram.app" -type d | grep iphoneos | grep -v iphonesimulator | head -1)
+          fi
+          
           if [ -z "$APP_PATH" ]; then
             echo "❌ No device Telegram.app found!"
-            echo "=== Archive structure ==="
-            find build-output/Telegram.xcarchive -type d -name "*.app" 2>/dev/null || echo "No archive"
-            echo "=== DerivedData apps ==="
-            find ~/Library/Developer/Xcode/DerivedData -name "*.app" -type d | grep -v simulator
+            echo "=== All .app locations ==="
+            find ./build-derived ~/Library/Developer/Xcode/DerivedData -name "Telegram.app" -type d 2>/dev/null || echo "None found"
             exit 1
           fi
           
@@ -268,8 +277,20 @@ jobs:
           
           # Verify it's a device build
           echo "=== Checking architectures ==="
-          file "$APP_PATH/Telegram" || echo "Binary not found"
-          lipo -info "$APP_PATH/Telegram" 2>/dev/null || echo "Not a fat binary"
+          if [ -f "$APP_PATH/Telegram" ]; then
+            file "$APP_PATH/Telegram"
+            lipo -info "$APP_PATH/Telegram" 2>/dev/null || echo "Not a fat binary"
+            ARCH_INFO=$(lipo -info "$APP_PATH/Telegram" 2>/dev/null || echo "unknown")
+            if echo "$ARCH_INFO" | grep -q "arm64"; then
+              echo "✅ Correct architecture: arm64 (device)"
+            else
+              echo "⚠️ WARNING: Unexpected architecture: $ARCH_INFO"
+            fi
+          else
+            echo "❌ Binary not found at $APP_PATH/Telegram"
+            ls -la "$APP_PATH/"
+            exit 1
+          fi
           
           # Create IPA
           mkdir -p build-output/Payload
@@ -286,10 +307,11 @@ jobs:
           
           # Check binary size
           BINARY_SIZE=$(stat -f%z "build-output/Payload/Telegram.app/Telegram" 2>/dev/null || echo "0")
-          echo "Binary size: $BINARY_SIZE bytes"
+          echo "Binary size: $BINARY_SIZE bytes ($(($BINARY_SIZE / 1024 / 1024)) MB)"
           
           if [ "$BINARY_SIZE" -lt 1000000 ]; then
-            echo "⚠️ WARNING: Binary seems too small (< 1MB), might be empty!"
+            echo "❌ ERROR: Binary too small (< 1MB), probably empty!"
+            exit 1
           fi
           
           echo "✅ Built unsigned IPA ready for Sideloadly!"
