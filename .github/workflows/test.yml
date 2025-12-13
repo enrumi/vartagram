@@ -237,6 +237,7 @@ jobs:
           echo "Using original build: $ORIGINAL_BUILD"
           
           # Build with Bazel directly for iOS arm64
+          # Disable extensions and provisioning profiles for unsigned build
           bazel build \
             --cpu=ios_arm64 \
             --ios_minimum_os=13.0 \
@@ -246,6 +247,8 @@ jobs:
             --define=originalVersion=$ORIGINAL_VERSION \
             --define=originalBuild=$ORIGINAL_BUILD \
             --define=RULES_SWIFT_BUILD_DUMMY_WORKER=1 \
+            --//Telegram:disableExtensions=True \
+            --//Telegram:disableProvisioningProfiles=True \
             //Telegram:Telegram || {
               echo "⚠️ Bazel build failed!"
               exit 1
