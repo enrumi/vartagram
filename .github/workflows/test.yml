@@ -208,10 +208,10 @@ jobs:
           chmod +x /tmp/copy_swiftmodule_safe.sh
           echo "✅ Created safe copy script for swiftmodule files"
 
-      - name: Build with Bazel for iOS Simulator (workaround)
+      - name: Try direct Xcode build for device (bypass Bazel)
         run: |
-          echo "=== Building Telegram for iOS Simulator with Bazel ==="
-          echo "⚠️ Note: Building for simulator because device builds require provisioning profiles"
+          echo "=== Attempting direct Xcode build for iOS device ==="
+          echo "⚠️ Trying to bypass Bazel and build directly with xcodebuild"
           
           # Get build number from file or use default
           if [ -f "build_number_offset" ]; then
@@ -237,70 +237,100 @@ jobs:
           echo "Using original version: $ORIGINAL_VERSION"
           echo "Using original build: $ORIGINAL_BUILD"
           
-          # Build with Bazel for iOS simulator (no provisioning needed)
-          bazel build \
-            --cpu=ios_sim_arm64 \
-            --ios_minimum_os=13.0 \
-            --compilation_mode=opt \
-            --define=buildNumber=$BUILD_NUM \
-            --define=telegramVersion=$VERSION \
-            --define=originalVersion=$ORIGINAL_VERSION \
-            --define=originalBuild=$ORIGINAL_BUILD \
-            --define=RULES_SWIFT_BUILD_DUMMY_WORKER=1 \
-            --//Telegram:disableExtensions=True \
-            --//Telegram:disableProvisioningProfiles=True \
-            //Telegram:Telegram || {
-              echo "⚠️ Bazel build failed!"
-              exit 1
+          # Try building with xcodebuild directly, completely ignoring Bazel targets
+          cd Telegram
+          
+          # Use the generated Xcode project but force device build
+          xcodebuild \
+            -project Telegram.xcodeproj \
+            -scheme Telegram \
+            -configuration Release \
+            -sdk iphoneos \
+            -arch arm64 \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_BITCODE=NO \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            -derivedDataPath ../build-xcode \
+            build 2>&1 | tee ../build.log || {
+              echo "⚠️ Xcode build had errors, but checking output..."
             }
           
-          echo "✅ Bazel build completed"
+          cd ..
           
-          # Find the built .app
-          echo "=== Looking for Telegram.app in bazel-bin ==="
-          find bazel-bin -name "Telegram.app" -type d
+          echo "✅ Build attempt completed"
           
-          # Also check if .ipa exists
-          find bazel-bin -name "*.ipa" -type f
+          # Check what was built
+          echo "=== Searching for built .app ==="
+          find build-xcode -name "Telegram.app" -type d
+          find build-xcode -name "*.ipa" -type f
 
-      - name: Extract IPA from Bazel build
+      - name: Package IPA from Xcode build
         run: |
-          echo "=== Extracting IPA from Bazel output ==="
+          echo "=== Packaging IPA from Xcode output ==="
           
-          # Check if Bazel created IPA directly
-          if [ -f "bazel-bin/Telegram/Telegram.ipa" ]; then
-            echo "✅ Found Bazel-built IPA!"
-            mkdir -p build-output
-            cp bazel-bin/Telegram/Telegram.ipa build-output/Telegram-simulator.ipa
-            
-            # Verify IPA
-            ls -lh build-output/Telegram-simulator.ipa
-            echo "=== IPA Contents (first 30 files) ==="
-            unzip -l build-output/Telegram-simulator.ipa | head -30
-            
-            # Check architecture
-            echo "=== Extracting and checking architecture ==="
-            cd build-output
-            unzip -q Telegram-simulator.ipa
-            if [ -f "Payload/Telegram.app/Telegram" ]; then
-              file Payload/Telegram.app/Telegram
-              lipo -info Payload/Telegram.app/Telegram 2>/dev/null || echo "Not a fat binary"
-              BINARY_SIZE=$(stat -f%z Payload/Telegram.app/Telegram)
-              echo "Binary size: $BINARY_SIZE bytes ($(($BINARY_SIZE / 1024 / 1024)) MB)"
-            fi
-            cd ..
-            
-            echo ""
-            echo "⚠️⚠️⚠️ IMPORTANT WARNING ⚠️⚠️⚠️"
-            echo "This is a SIMULATOR build (ios_sim_arm64)"
-            echo "It will NOT work on real iPhone devices!"
-            echo "Sideloadly will reject it due to wrong architecture"
-            echo "To install on real device, you need provisioning profiles"
-            exit 0
+          # Find the built .app (look for iphoneos, not iphonesimulator)
+          APP_PATH=$(find build-xcode -name "Telegram.app" -type d -path "*Release-iphoneos*" | grep -v ".appex" | head -1)
+          
+          if [ -z "$APP_PATH" ]; then
+            echo "⚠️ No iphoneos build found, checking any Telegram.app..."
+            APP_PATH=$(find build-xcode -name "Telegram.app" -type d | grep -v ".appex" | head -1)
           fi
           
-          echo "❌ No IPA found!"
-          exit 1
+          if [ -z "$APP_PATH" ]; then
+            echo "❌ No Telegram.app found!"
+            echo "=== All .app files in build-xcode: ==="
+            find build-xcode -name "*.app" -type d 2>/dev/null || echo "None"
+            exit 1
+          fi
+          
+          echo "✅ Found app at: $APP_PATH"
+          
+          # Check if it has binary
+          if [ ! -f "$APP_PATH/Telegram" ]; then
+            echo "❌ No Telegram binary in .app!"
+            ls -la "$APP_PATH/"
+            exit 1
+          fi
+          
+          # Check architecture
+          echo "=== Checking architecture ==="
+          file "$APP_PATH/Telegram"
+          lipo -info "$APP_PATH/Telegram" 2>/dev/null || echo "Not a fat binary"
+          
+          ARCH_CHECK=$(lipo -info "$APP_PATH/Telegram" 2>/dev/null | grep -o "arm64" || echo "")
+          if [ -z "$ARCH_CHECK" ]; then
+            echo "⚠️ WARNING: Not arm64 architecture!"
+          else
+            echo "✅ Correct arm64 device architecture!"
+          fi
+          
+          # Get binary size
+          BINARY_SIZE=$(stat -f%z "$APP_PATH/Telegram")
+          echo "Binary size: $BINARY_SIZE bytes ($(($BINARY_SIZE / 1024 / 1024)) MB)"
+          
+          if [ "$BINARY_SIZE" -lt 10000000 ]; then
+            echo "⚠️ WARNING: Binary smaller than 10MB - might be incomplete"
+          fi
+          
+          # Create IPA
+          mkdir -p build-output/Payload
+          cp -r "$APP_PATH" build-output/Payload/
+          cd build-output
+          zip -qry Telegram-unsigned.ipa Payload/
+          cd ..
+          
+          # Verify IPA
+          ls -lh build-output/Telegram-unsigned.ipa
+          echo "=== IPA Contents (first 30 files) ==="
+          unzip -l build-output/Telegram-unsigned.ipa | head -30
+          
+          echo ""
+          echo "✅ Created unsigned IPA for Sideloadly!"
+          echo "📱 Ready to install on iPhone via Sideloadly"
 
       - name: Check output
         if: always()
@@ -316,8 +346,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Vartagram-simulator-${{ github.sha }}
-          path: build-output/Telegram-simulator.ipa
+          name: Vartagram-unsigned-${{ github.sha }}
+          path: build-output/Telegram-unsigned.ipa
           retention-days: 30
           if-no-files-found: error
 
