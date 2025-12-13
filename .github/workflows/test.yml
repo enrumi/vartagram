@@ -208,9 +208,10 @@ jobs:
           chmod +x /tmp/copy_swiftmodule_safe.sh
           echo "✅ Created safe copy script for swiftmodule files"
 
-      - name: Build with Bazel for iOS device
+      - name: Build with Bazel for iOS Simulator (workaround)
         run: |
-          echo "=== Building Telegram for iOS device with Bazel ==="
+          echo "=== Building Telegram for iOS Simulator with Bazel ==="
+          echo "⚠️ Note: Building for simulator because device builds require provisioning profiles"
           
           # Get build number from file or use default
           if [ -f "build_number_offset" ]; then
@@ -236,10 +237,9 @@ jobs:
           echo "Using original version: $ORIGINAL_VERSION"
           echo "Using original build: $ORIGINAL_BUILD"
           
-          # Build with Bazel directly for iOS arm64
-          # Disable extensions and provisioning profiles for unsigned build
+          # Build with Bazel for iOS simulator (no provisioning needed)
           bazel build \
-            --cpu=ios_arm64 \
+            --cpu=ios_sim_arm64 \
             --ios_minimum_os=13.0 \
             --compilation_mode=opt \
             --define=buildNumber=$BUILD_NUM \
@@ -269,21 +269,6 @@ jobs:
           
           # Find Bazel output
           echo "=== Searching for Bazel-built Telegram.app ==="
-          
-          # Check if Bazel already created an IPA
-          IPA_PATH=$(find bazel-bin -name "Telegram.ipa" -type f | head -1)
-          
-          if [ -n "$IPA_PATH" ]; then
-            echo "✅ Found pre-built IPA: $IPA_PATH"
-            mkdir -p build-output
-            cp "$IPA_PATH" build-output/Telegram-unsigned.ipa
-            
-            # Verify and exit
-            ls -lh build-output/Telegram-unsigned.ipa
-            unzip -l build-output/Telegram-unsigned.ipa | head -30
-            echo "✅ Using Bazel-built IPA!"
-            exit 0
-          fi
           
           # Find .app in bazel-bin
           APP_PATH=$(find bazel-bin -name "Telegram.app" -type d | grep -v "\.runfiles" | head -1)
