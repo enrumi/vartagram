@@ -208,28 +208,19 @@ jobs:
           chmod +x /tmp/copy_swiftmodule_safe.sh
           echo "✅ Created safe copy script for swiftmodule files"
 
-      - name: Build directly with Bazel for iOS device
+      - name: Build with Bazel for iOS device
         run: |
           echo "=== Building Telegram for iOS device with Bazel ==="
           
-          cd Telegram
-          
-          # Try to build directly with Bazel for arm64 device
+          # Build with Bazel directly for iOS arm64
           bazel build \
-            --config=release_device \
-            --ios_multi_cpus=arm64 \
+            --cpu=ios_arm64 \
+            --ios_minimum_os=13.0 \
             --compilation_mode=opt \
+            --define=RULES_SWIFT_BUILD_DUMMY_WORKER=1 \
             //Telegram:Telegram || {
-              echo "⚠️ Direct Bazel build failed, trying alternative..."
-              
-              # Try with explicit configuration
-              bazel build \
-                --apple_platform_type=ios \
-                --cpu=ios_arm64 \
-                --ios_minimum_os=13.0 \
-                //Telegram:Telegram || {
-                  echo "⚠️ Bazel build failed, falling back to Xcode..."
-                }
+              echo "⚠️ Bazel build failed!"
+              exit 1
             }
           
           echo "✅ Bazel build completed"
@@ -237,44 +228,34 @@ jobs:
           # Find the built .app
           echo "=== Looking for Telegram.app in bazel-bin ==="
           find bazel-bin -name "Telegram.app" -type d
+          
+          # Also check if .ipa exists
+          find bazel-bin -name "*.ipa" -type f
 
-      - name: Build for iOS Device and create IPA
+      - name: Create IPA from Bazel build
         run: |
-          echo "=== Building for iOS Device ==="
+          echo "=== Creating IPA from Bazel output ==="
           
-          # Build directly for device
-          xcodebuild build \
-            -project Telegram/Telegram.xcodeproj \
-            -scheme Telegram \
-            -sdk iphoneos \
-            -configuration Release \
-            -derivedDataPath ./build-derived \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            DEVELOPMENT_TEAM="" \
-            ONLY_ACTIVE_ARCH=NO \
-            -allowProvisioningUpdates || {
-              echo "⚠️ Build completed with warnings"
-            }
+          # Find Bazel output
+          echo "=== Searching for Bazel-built Telegram.app ==="
           
-          # Find the built .app for device (iphoneos, not simulator)
-          echo "=== Searching for device Telegram.app ==="
+          # Check if Bazel already created an IPA
+          IPA_PATH=$(find bazel-bin -name "Telegram.ipa" -type f | head -1)
           
-          # First check our build-derived folder
-          APP_PATH=$(find ./build-derived -name "Telegram.app" -type d -path "*/Release-iphoneos/*" | head -1)
-          
-          # If not found, check DerivedData
-          if [ -z "$APP_PATH" ]; then
-            echo "Looking in DerivedData..."
-            APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "Telegram.app" -type d -path "*/Release-iphoneos/*" | grep -v iphonesimulator | head -1)
+          if [ -n "$IPA_PATH" ]; then
+            echo "✅ Found pre-built IPA: $IPA_PATH"
+            mkdir -p build-output
+            cp "$IPA_PATH" build-output/Telegram-unsigned.ipa
+            
+            # Verify and exit
+            ls -lh build-output/Telegram-unsigned.ipa
+            unzip -l build-output/Telegram-unsigned.ipa | head -30
+            echo "✅ Using Bazel-built IPA!"
+            exit 0
           fi
           
-          # Last resort - any iphoneos build
-          if [ -z "$APP_PATH" ]; then
-            echo "Looking for any iphoneos build..."
-            APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "Telegram.app" -type d | grep iphoneos | grep -v iphonesimulator | head -1)
-          fi
+          # Find .app in bazel-bin
+          APP_PATH=$(find bazel-bin -name "Telegram.app" -type d | grep -v "\.runfiles" | head -1)
           
           if [ -z "$APP_PATH" ]; then
             echo "❌ No device Telegram.app found!"
