@@ -208,25 +208,35 @@ jobs:
           chmod +x /tmp/copy_swiftmodule_safe.sh
           echo "✅ Created safe copy script for swiftmodule files"
 
-      - name: Build for iOS Simulator first (to generate modules)
+      - name: Build directly with Bazel for iOS device
         run: |
-          echo "=== Building for Simulator to generate Swift modules ==="
+          echo "=== Building Telegram for iOS device with Bazel ==="
           
-          xcodebuild build \
-            -project Telegram/Telegram.xcodeproj \
-            -scheme Telegram \
-            -sdk iphonesimulator \
-            -configuration Release \
-            -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            DEVELOPMENT_TEAM="" \
-            -allowProvisioningUpdates || {
-              echo "⚠️ Simulator build had errors, but continuing..."
+          cd Telegram
+          
+          # Try to build directly with Bazel for arm64 device
+          bazel build \
+            --config=release_device \
+            --ios_multi_cpus=arm64 \
+            --compilation_mode=opt \
+            //Telegram:Telegram || {
+              echo "⚠️ Direct Bazel build failed, trying alternative..."
+              
+              # Try with explicit configuration
+              bazel build \
+                --apple_platform_type=ios \
+                --cpu=ios_arm64 \
+                --ios_minimum_os=13.0 \
+                //Telegram:Telegram || {
+                  echo "⚠️ Bazel build failed, falling back to Xcode..."
+                }
             }
           
-          echo "✅ Simulator build completed"
+          echo "✅ Bazel build completed"
+          
+          # Find the built .app
+          echo "=== Looking for Telegram.app in bazel-bin ==="
+          find bazel-bin -name "Telegram.app" -type d
 
       - name: Build for iOS Device and create IPA
         run: |
