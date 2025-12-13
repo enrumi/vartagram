@@ -219,7 +219,15 @@ jobs:
             BUILD_NUM="1000"
           fi
           
+          # Get version from versions.json
+          if [ -f "versions.json" ]; then
+            VERSION=$(python3 -c "import json; print(json.load(open('versions.json'))['app'])")
+          else
+            VERSION="10.14.5"
+          fi
+          
           echo "Using build number: $BUILD_NUM"
+          echo "Using Telegram version: $VERSION"
           
           # Build with Bazel directly for iOS arm64
           bazel build \
@@ -227,6 +235,7 @@ jobs:
             --ios_minimum_os=13.0 \
             --compilation_mode=opt \
             --define=buildNumber=$BUILD_NUM \
+            --define=telegramVersion=$VERSION \
             --define=RULES_SWIFT_BUILD_DUMMY_WORKER=1 \
             //Telegram:Telegram || {
               echo "⚠️ Bazel build failed!"
