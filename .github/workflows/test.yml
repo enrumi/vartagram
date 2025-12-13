@@ -263,65 +263,44 @@ jobs:
           # Also check if .ipa exists
           find bazel-bin -name "*.ipa" -type f
 
-      - name: Create IPA from Bazel build
+      - name: Extract IPA from Bazel build
         run: |
-          echo "=== Creating IPA from Bazel output ==="
+          echo "=== Extracting IPA from Bazel output ==="
           
-          # Find Bazel output
-          echo "=== Searching for Bazel-built Telegram.app ==="
-          
-          # Find .app in bazel-bin
-          APP_PATH=$(find bazel-bin -name "Telegram.app" -type d | grep -v "\.runfiles" | head -1)
-          
-          if [ -z "$APP_PATH" ]; then
-            echo "❌ No device Telegram.app found!"
-            echo "=== All .app locations ==="
-            find ./build-derived ~/Library/Developer/Xcode/DerivedData -name "Telegram.app" -type d 2>/dev/null || echo "None found"
-            exit 1
-          fi
-          
-          echo "✅ Found app at: $APP_PATH"
-          
-          # Verify it's a device build
-          echo "=== Checking architectures ==="
-          if [ -f "$APP_PATH/Telegram" ]; then
-            file "$APP_PATH/Telegram"
-            lipo -info "$APP_PATH/Telegram" 2>/dev/null || echo "Not a fat binary"
-            ARCH_INFO=$(lipo -info "$APP_PATH/Telegram" 2>/dev/null || echo "unknown")
-            if echo "$ARCH_INFO" | grep -q "arm64"; then
-              echo "✅ Correct architecture: arm64 (device)"
-            else
-              echo "⚠️ WARNING: Unexpected architecture: $ARCH_INFO"
+          # Check if Bazel created IPA directly
+          if [ -f "bazel-bin/Telegram/Telegram.ipa" ]; then
+            echo "✅ Found Bazel-built IPA!"
+            mkdir -p build-output
+            cp bazel-bin/Telegram/Telegram.ipa build-output/Telegram-simulator.ipa
+            
+            # Verify IPA
+            ls -lh build-output/Telegram-simulator.ipa
+            echo "=== IPA Contents (first 30 files) ==="
+            unzip -l build-output/Telegram-simulator.ipa | head -30
+            
+            # Check architecture
+            echo "=== Extracting and checking architecture ==="
+            cd build-output
+            unzip -q Telegram-simulator.ipa
+            if [ -f "Payload/Telegram.app/Telegram" ]; then
+              file Payload/Telegram.app/Telegram
+              lipo -info Payload/Telegram.app/Telegram 2>/dev/null || echo "Not a fat binary"
+              BINARY_SIZE=$(stat -f%z Payload/Telegram.app/Telegram)
+              echo "Binary size: $BINARY_SIZE bytes ($(($BINARY_SIZE / 1024 / 1024)) MB)"
             fi
-          else
-            echo "❌ Binary not found at $APP_PATH/Telegram"
-            ls -la "$APP_PATH/"
-            exit 1
+            cd ..
+            
+            echo ""
+            echo "⚠️⚠️⚠️ IMPORTANT WARNING ⚠️⚠️⚠️"
+            echo "This is a SIMULATOR build (ios_sim_arm64)"
+            echo "It will NOT work on real iPhone devices!"
+            echo "Sideloadly will reject it due to wrong architecture"
+            echo "To install on real device, you need provisioning profiles"
+            exit 0
           fi
           
-          # Create IPA
-          mkdir -p build-output/Payload
-          cp -r "$APP_PATH" build-output/Payload/
-          cd build-output
-          zip -qr Telegram-unsigned.ipa Payload/
-          cd ..
-          
-          # Verify IPA
-          echo "=== IPA Details ==="
-          ls -lh build-output/Telegram-unsigned.ipa
-          echo "=== IPA Contents (first 30 files) ==="
-          unzip -l build-output/Telegram-unsigned.ipa | head -30
-          
-          # Check binary size
-          BINARY_SIZE=$(stat -f%z "build-output/Payload/Telegram.app/Telegram" 2>/dev/null || echo "0")
-          echo "Binary size: $BINARY_SIZE bytes ($(($BINARY_SIZE / 1024 / 1024)) MB)"
-          
-          if [ "$BINARY_SIZE" -lt 1000000 ]; then
-            echo "❌ ERROR: Binary too small (< 1MB), probably empty!"
-            exit 1
-          fi
-          
-          echo "✅ Built unsigned IPA ready for Sideloadly!"
+          echo "❌ No IPA found!"
+          exit 1
 
       - name: Check output
         if: always()
@@ -337,8 +316,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Vartagram-unsigned-${{ github.sha }}
-          path: build-output/Telegram-unsigned.ipa
+          name: Vartagram-simulator-${{ github.sha }}
+          path: build-output/Telegram-simulator.ipa
           retention-days: 30
           if-no-files-found: error
 
