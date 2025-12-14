@@ -225,6 +225,27 @@ jobs:
           chmod +x /tmp/copy_swiftmodule_safe.sh
           echo "✅ Created safe copy script for swiftmodule files"
 
+
+      - name: Final force of ios_arm64 architecture
+        run: |
+          echo "=== Final patch: Force ios_arm64 in all Bazel scripts ==="
+          
+          # Patch all bazel_build_settings.py files
+          find build-input -name 'bazel_build_settings.py' -type f | while read file; do
+            echo "Patching: $file"
+            sed -i '' 's/ios_sim_arm64/ios_arm64/g' "$file"
+            sed -i '' "s/'--cpu=ios_sim_arm64'/'--cpu=ios_arm64'/g" "$file"
+            echo "? Patched $file"
+          done
+          
+          # Also patch in build-xcode if exists
+          find build-xcode -name 'bazel_build_settings.py' -type f 2>/dev/null | while read file; do
+            echo "Patching: $file"
+            sed -i '' 's/ios_sim_arm64/ios_arm64/g' "$file"
+            sed -i '' "s/'--cpu=ios_sim_arm64'/'--cpu=ios_arm64'/g" "$file"
+            echo "? Patched $file"
+          done || true
+
       - name: Try direct Xcode build for device (bypass Bazel)
         run: |
           echo "=== Attempting direct Xcode build for iOS device ==="
