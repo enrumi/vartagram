@@ -182,6 +182,23 @@ jobs:
           python3 build-system/Make/Make.py generateProject \
             --configurationPath=build-system/Make/minimal-unsigned-config.json \
             --disableProvisioningProfiles
+      - name: Force device architecture in Bazel scripts
+        run: |
+          echo "=== Patching Bazel build settings to force ios_arm64 ==="
+          
+          # After project generation, force ios_arm64 in bazel_build_settings.py
+          BAZEL_SCRIPT="build-input/gen/project/Telegram.xcodeproj/.tulsi/Scripts/bazel_build_settings.py"
+          
+          if [ -f "$BAZEL_SCRIPT" ]; then
+            # Replace any ios_sim_arm64 with ios_arm64
+            sed -i '' 's/ios_sim_arm64/ios_arm64/g' "$BAZEL_SCRIPT"
+            echo "? Forced ios_arm64 in bazel_build_settings.py"
+            
+            # Verify the change
+            grep -n "ios_arm64" "$BAZEL_SCRIPT" || echo "?? Pattern not found"
+          else
+            echo "?? Bazel script not found at $BAZEL_SCRIPT"
+          fi
           
           echo "✅ Generated Xcode project"
 
@@ -241,6 +258,9 @@ jobs:
           cd Telegram
           
           # Use the generated Xcode project but force device build
+          # Force platform name for device (not simulator)
+          export EFFECTIVE_PLATFORM_NAME="-iphoneos"
+          export PLATFORM_NAME="iphoneos"
           xcodebuild \
             -project Telegram.xcodeproj \
             -scheme Telegram \
@@ -254,6 +274,7 @@ jobs:
             ENABLE_BITCODE=NO \
             DEVELOPMENT_TEAM="" \
             PROVISIONING_PROFILE_SPECIFIER="" \
+            EFFECTIVE_PLATFORM_NAME="-iphoneos" \
             -derivedDataPath ../build-xcode \
             build 2>&1 | tee ../build.log || {
               echo "⚠️ Xcode build had errors, but checking output..."
