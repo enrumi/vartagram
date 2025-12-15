@@ -238,6 +238,7 @@ jobs:
             echo "? Patched $file"
           done
           
+          
           # Also patch in build-xcode if exists
           find build-xcode -name 'bazel_build_settings.py' -type f 2>/dev/null | while read file; do
             echo "Patching: $file"
@@ -245,6 +246,18 @@ jobs:
             sed -i '' "s/'--cpu=ios_sim_arm64'/'--cpu=ios_arm64'/g" "$file"
             echo "? Patched $file"
           done || true
+          
+          # CRITICAL: Also patch in Telegram/ directory where Xcode project is
+          find Telegram -name 'bazel_build_settings.py' -type f 2>/dev/null | while read file; do
+            echo "Patching: $file"
+            sed -i '' 's/ios_sim_arm64/ios_arm64/g' "$file"
+            sed -i '' "s/'--cpu=ios_sim_arm64'/'--cpu=ios_arm64'/g" "$file"
+            echo "? Patched $file"
+          done || true
+          
+          # Show all found bazel_build_settings.py files
+          echo "=== All bazel_build_settings.py files ==={{="
+          find . -name 'bazel_build_settings.py' -type f 2>/dev/null || true
 
       - name: Try direct Xcode build for device (bypass Bazel)
         run: |
@@ -277,6 +290,20 @@ jobs:
           
           # Try building with xcodebuild directly, completely ignoring Bazel targets
           cd Telegram
+          
+          # AGGRESSIVE PATCH: Patch ALL bazel scripts RIGHT BEFORE BUILD
+          echo "=== Patching Bazel scripts in Telegram.xcodeproj ==={{="
+          find . -name 'bazel_build_settings.py' -type f 2>/dev/null | while read file; do
+            echo "Pre-build patching: $file"
+            sed -i '' 's/ios_sim_arm64/ios_arm64/g' "$file"
+            sed -i '' "s/'--cpu=ios_sim_arm64'/'--cpu=ios_arm64'/g" "$file"
+            # Also verify the change
+            if grep -q 'ios_arm64' "$file"; then
+              echo "? Successfully patched to ios_arm64"
+            else
+              echo "?? Warning: ios_arm64 not found in $file"
+            fi
+          done || true
           
           # Use the generated Xcode project but force device build
           # Force platform name for device (not simulator)
