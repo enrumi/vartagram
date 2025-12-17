@@ -1,5 +1,9 @@
 build --action_env=ZERO_AR_DATE=1
 
+# Force iOS device architecture (not simulator)
+build --cpu=ios_arm64
+build --ios_minimum_os=13.0
+
 build --apple_platform_type=ios
 build --enable_platform_specific_config
 build --apple_crosstool_top=@local_config_apple_cc//:toolchain
