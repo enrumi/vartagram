@@ -310,29 +310,36 @@ jobs:
           export EFFECTIVE_PLATFORM_NAME="-iphoneos"
           export PLATFORM_NAME="iphoneos"
           
-          echo "=== Starting xcodebuild ==="
+          echo "=== About to run xcodebuild ==="
+          echo "Current directory: $(pwd)"
+          echo "Telegram.xcodeproj exists: $(ls -la Telegram.xcodeproj 2>&1 | head -1)"
+          
           set +e  # Don't exit immediately on error
           
-          xcodebuild \
+          # Try simpler xcodebuild command
+          echo "=== Starting xcodebuild build ==="
+          xcodebuild build \
             -project Telegram.xcodeproj \
             -scheme Telegram \
             -configuration Release \
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
-            -allowProvisioningUpdates \
-            ONLY_ACTIVE_ARCH=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            ENABLE_BITCODE=NO \
-            DEVELOPMENT_TEAM="" \
-            PROVISIONING_PROFILE_SPECIFIER="" \
-            EFFECTIVE_PLATFORM_NAME="-iphoneos" \
             -derivedDataPath ../build-xcode \
-            build 2>&1 | tee ../build.log
+            2>&1 | tee ../build.log
           
           XCODE_EXIT=$?
           echo "=== xcodebuild exited with code: $XCODE_EXIT ==="
+          
+          # Show build log size and last lines
+          if [ -f ../build.log ]; then
+            echo "=== Build log size: $(wc -l ../build.log | awk '{print $1}') lines ==="
+          else
+            echo "⚠️ No build.log file created!"
+          fi
+          
           set -e
           
           cd ..
