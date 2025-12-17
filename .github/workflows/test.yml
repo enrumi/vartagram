@@ -332,10 +332,19 @@ jobs:
           
           echo "✅ Build attempt completed"
           
+          # Show last 100 lines of build log to see errors
+          echo "=== Last 100 lines of build log ==="
+          tail -100 build.log || echo "No build log found"
+          
           # Check what was built
           echo "=== Searching for built .app ==="
           find build-xcode -name "Telegram.app" -type d
           find build-xcode -name "*.ipa" -type f
+          
+          # Show build products directory structure
+          echo "=== Build products directory ==="
+          ls -la build-xcode/Build/Products/ 2>/dev/null || echo "No Build/Products directory"
+          ls -la build-xcode/Build/Products/Release-iphoneos/ 2>/dev/null || echo "No Release-iphoneos directory"
 
       - name: Package IPA from Xcode build
         run: |
