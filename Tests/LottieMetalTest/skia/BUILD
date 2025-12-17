@@ -9,7 +9,10 @@ framework_imports = select({
     ]),
     "//build-system:ios_sim_arm64": glob([
         "simulator/libskia.framework/**"
-    ])
+    ]),
+    "//conditions:default": glob([
+        "device/libskia.framework/**"
+    ]),
 })
 
 apple_dynamic_framework_import(
