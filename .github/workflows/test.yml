@@ -309,12 +309,17 @@ jobs:
           # Force platform name for device (not simulator)
           export EFFECTIVE_PLATFORM_NAME="-iphoneos"
           export PLATFORM_NAME="iphoneos"
+          
+          echo "=== Starting xcodebuild ==="
+          set +e  # Don't exit immediately on error
+          
           xcodebuild \
             -project Telegram.xcodeproj \
             -scheme Telegram \
             -configuration Release \
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
+            -allowProvisioningUpdates \
             ONLY_ACTIVE_ARCH=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
@@ -324,9 +329,11 @@ jobs:
             PROVISIONING_PROFILE_SPECIFIER="" \
             EFFECTIVE_PLATFORM_NAME="-iphoneos" \
             -derivedDataPath ../build-xcode \
-            build 2>&1 | tee ../build.log || {
-              echo "⚠️ Xcode build had errors, but checking output..."
-            }
+            build 2>&1 | tee ../build.log
+          
+          XCODE_EXIT=$?
+          echo "=== xcodebuild exited with code: $XCODE_EXIT ==="
+          set -e
           
           cd ..
           
