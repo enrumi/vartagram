@@ -316,17 +316,21 @@ jobs:
           
           set +e  # Don't exit immediately on error
           
-          # Use archive instead of build - doesn't require destination
-          echo "=== Starting xcodebuild archive ==="
-          xcodebuild archive \
+          # Use build with explicit settings to force device build
+          echo "=== Starting xcodebuild for device (without destination) ==="
+          xcodebuild \
             -project Telegram.xcodeproj \
             -scheme Telegram \
             -configuration Release \
             -sdk iphoneos \
-            -archivePath ../build-xcode/Telegram.xcarchive \
+            -derivedDataPath ../build-xcode \
+            ARCHS="arm64" \
+            VALID_ARCHS="arm64" \
+            ONLY_ACTIVE_ARCH=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
+            ENABLE_BITCODE=NO \
             2>&1 | tee ../build.log
           
           XCODE_EXIT=$?
@@ -350,36 +354,32 @@ jobs:
           tail -100 build.log || echo "No build log found"
           
           # Check what was built
-          echo "=== Searching for built .app and .xcarchive ==="
-          find build-xcode -name "Telegram.app" -type d
-          find build-xcode -name "*.xcarchive" -type d
-          find build-xcode -name "*.ipa" -type f
+          echo "=== Searching for built .app ==="
+          find build-xcode -name "Telegram.app" -type d 2>/dev/null || echo "No .app found"
           
-          # Show xcarchive structure if it exists
-          if [ -d "build-xcode/Telegram.xcarchive" ]; then
-            echo "=== Telegram.xcarchive contents ==="
-            ls -la build-xcode/Telegram.xcarchive/
-            ls -la build-xcode/Telegram.xcarchive/Products/ 2>/dev/null || true
-            ls -la build-xcode/Telegram.xcarchive/Products/Applications/ 2>/dev/null || true
+          # Show Build/Products structure
+          echo "=== Build products structure ==="
+          ls -la build-xcode/Build/Products/ 2>/dev/null || echo "No Build/Products"
+          
+          # Look for Release-iphoneos directory
+          if [ -d "build-xcode/Build/Products/Release-iphoneos" ]; then
+            echo "=== Release-iphoneos contents ==="
+            ls -la build-xcode/Build/Products/Release-iphoneos/ | head -20
           else
-            echo "⚠️ No Telegram.xcarchive found"
+            echo "⚠️ No Release-iphoneos directory"
+            echo "Available directories in Build/Products:"
+            ls -la build-xcode/Build/Products/ 2>/dev/null || echo "None"
           fi
 
       - name: Package IPA from Xcode build
         run: |
-          echo "=== Packaging IPA from xcarchive ==="
+          echo "=== Packaging IPA from build output ==="
           
-          # Check if xcarchive was created
-          if [ -d "build-xcode/Telegram.xcarchive" ]; then
-            # .app should be in Products/Applications/ inside the xcarchive
-            APP_PATH="build-xcode/Telegram.xcarchive/Products/Applications/Telegram.app"
-            
-            if [ ! -d "$APP_PATH" ]; then
-              echo "⚠️ Expected .app not in standard location, searching..."
-              APP_PATH=$(find build-xcode/Telegram.xcarchive -name "Telegram.app" -type d | grep -v ".appex" | head -1)
-            fi
-          else
-            echo "⚠️ No xcarchive found, searching for .app elsewhere..."
+          # Look for .app in standard build location
+          APP_PATH=$(find build-xcode/Build/Products/Release-iphoneos -name "Telegram.app" -type d | grep -v ".appex" | head -1 2>/dev/null)
+          
+          if [ -z "$APP_PATH" ]; then
+            echo "⚠️ Not in Release-iphoneos, searching all build products..."
             APP_PATH=$(find build-xcode -name "Telegram.app" -type d | grep -v ".appex" | head -1)
           fi
           
