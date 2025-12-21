@@ -259,7 +259,7 @@ jobs:
           echo "=== All bazel_build_settings.py files ==={{="
           find . -name 'bazel_build_settings.py' -type f 2>/dev/null || true
 
-      - name: Try direct Xcode build for device (bypass Bazel)
+      - name: Build directly with Bazel for ios_arm64
         run: |
           echo "=== Attempting direct Xcode build for iOS device ==="
           echo "⚠️ Trying to bypass Bazel and build directly with xcodebuild"
@@ -288,64 +288,26 @@ jobs:
           echo "Using original version: $ORIGINAL_VERSION"
           echo "Using original build: $ORIGINAL_BUILD"
           
-          # Try building with xcodebuild directly, completely ignoring Bazel targets
-          cd Telegram
+          echo "=== Building with Bazel directly (bypassing Xcode) ==="
           
-          # AGGRESSIVE PATCH: Patch ALL bazel scripts RIGHT BEFORE BUILD
-          echo "=== Patching Bazel scripts in Telegram.xcodeproj ==={{="
-          find . -name 'bazel_build_settings.py' -type f 2>/dev/null | while read file; do
-            echo "Pre-build patching: $file"
-            sed -i '' 's/ios_sim_arm64/ios_arm64/g' "$file"
-            sed -i '' "s/'--cpu=ios_sim_arm64'/'--cpu=ios_arm64'/g" "$file"
-            # Also verify the change
-            if grep -q 'ios_arm64' "$file"; then
-              echo "? Successfully patched to ios_arm64"
-            else
-              echo "?? Warning: ios_arm64 not found in $file"
-            fi
-          done || true
+          set +e  # Don't exit on error
           
-          # Use the generated Xcode project but force device build
-          # Force platform name for device (not simulator)
-          export EFFECTIVE_PLATFORM_NAME="-iphoneos"
-          export PLATFORM_NAME="iphoneos"
+          # Build the Telegram.app target directly with Bazel
+          # This respects our .bazelrc which has --cpu=ios_arm64
+          bazelisk build \
+            --compilation_mode=opt \
+            --copt=-DNDEBUG \
+            //Telegram:Telegram \
+            2>&1 | tee build.log
           
-          echo "=== About to run xcodebuild ==="
-          echo "Current directory: $(pwd)"
-          echo "Telegram.xcodeproj exists: $(ls -la Telegram.xcodeproj 2>&1 | head -1)"
+          BAZEL_EXIT=$?
+          echo "=== Bazel build exited with code: $BAZEL_EXIT ==="
           
-          set +e  # Don't exit immediately on error
-          
-          # Use build with explicit settings to force device build
-          echo "=== Starting xcodebuild for device (without destination) ==="
-          xcodebuild \
-            -project Telegram.xcodeproj \
-            -scheme Telegram \
-            -configuration Release \
-            -sdk iphoneos \
-            -derivedDataPath ../build-xcode \
-            ARCHS="arm64" \
-            VALID_ARCHS="arm64" \
-            ONLY_ACTIVE_ARCH=NO \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            ENABLE_BITCODE=NO \
-            2>&1 | tee ../build.log
-          
-          XCODE_EXIT=$?
-          echo "=== xcodebuild exited with code: $XCODE_EXIT ==="
-          
-          # Show build log size and last lines
-          if [ -f ../build.log ]; then
-            echo "=== Build log size: $(wc -l ../build.log | awk '{print $1}') lines ==="
-          else
-            echo "⚠️ No build.log file created!"
+          if [ -f build.log ]; then
+            echo "=== Build log size: $(wc -l build.log | awk '{print $1}') lines ==="
           fi
           
           set -e
-          
-          cd ..
           
           echo "✅ Build attempt completed"
           
@@ -353,40 +315,31 @@ jobs:
           echo "=== Last 100 lines of build log ==="
           tail -100 build.log || echo "No build log found"
           
-          # Check what was built
-          echo "=== Searching for built .app ==="
-          find build-xcode -name "Telegram.app" -type d 2>/dev/null || echo "No .app found"
+          # Check what was built by Bazel
+          echo "=== Searching for built .app in bazel-bin ==="
+          find bazel-bin -name "Telegram.app" -type d 2>/dev/null || echo "No .app found in bazel-bin"
           
-          # Show Build/Products structure
-          echo "=== Build products structure ==="
-          ls -la build-xcode/Build/Products/ 2>/dev/null || echo "No Build/Products"
+          # Show bazel-bin structure
+          echo "=== bazel-bin/Telegram/ structure ==="
+          ls -la bazel-bin/Telegram/ 2>/dev/null || echo "No bazel-bin/Telegram"
           
-          # Look for Release-iphoneos directory
-          if [ -d "build-xcode/Build/Products/Release-iphoneos" ]; then
-            echo "=== Release-iphoneos contents ==="
-            ls -la build-xcode/Build/Products/Release-iphoneos/ | head -20
-          else
-            echo "⚠️ No Release-iphoneos directory"
-            echo "Available directories in Build/Products:"
-            ls -la build-xcode/Build/Products/ 2>/dev/null || echo "None"
-          fi
+          # Look for ios_arm64 directories
+          echo "=== Looking for ios_arm64 build output ==="
+          find bazel-bin -type d -name "*ios_arm64*" 2>/dev/null | head -10 || echo "No ios_arm64 directories"
 
-      - name: Package IPA from Xcode build
+      - name: Package IPA from Bazel build
         run: |
-          echo "=== Packaging IPA from build output ==="
+          echo "=== Packaging IPA from Bazel output ==="
           
-          # Look for .app in standard build location
-          APP_PATH=$(find build-xcode/Build/Products/Release-iphoneos -name "Telegram.app" -type d | grep -v ".appex" | head -1 2>/dev/null)
-          
-          if [ -z "$APP_PATH" ]; then
-            echo "⚠️ Not in Release-iphoneos, searching all build products..."
-            APP_PATH=$(find build-xcode -name "Telegram.app" -type d | grep -v ".appex" | head -1)
-          fi
+          # Look for .app in bazel-bin (Bazel output directory)
+          APP_PATH=$(find bazel-bin -name "Telegram.app" -type d | grep -v ".appex" | head -1)
           
           if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
-            echo "❌ No Telegram.app found!"
-            echo "=== All .app files in build-xcode: ==="
-            find build-xcode -name "*.app" -type d 2>/dev/null || echo "None"
+            echo "❌ No Telegram.app found in bazel-bin!"
+            echo "=== All .app files in bazel-bin: ==="
+            find bazel-bin -name "*.app" -type d 2>/dev/null || echo "None"
+            echo "=== All files in bazel-bin/Telegram: ==="
+            ls -laR bazel-bin/Telegram/ 2>/dev/null | head -50 || echo "No bazel-bin/Telegram"
             exit 1
           fi
           
