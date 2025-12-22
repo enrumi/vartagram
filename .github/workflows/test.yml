@@ -55,7 +55,9 @@ jobs:
         run: |
           curl -LO https://github.com/bazelbuild/bazelisk/releases/download/v1.19.0/bazelisk-darwin-arm64
           chmod +x bazelisk-darwin-arm64
+          sudo cp bazelisk-darwin-arm64 /usr/local/bin/bazelisk
           sudo mv bazelisk-darwin-arm64 /usr/local/bin/bazel
+          bazelisk version
           bazel version
 
       - name: Create minimal unsigned config
@@ -291,6 +293,7 @@ jobs:
           echo "=== Building with Bazel directly (bypassing Xcode) ==="
           
           set +e  # Don't exit on error
+          set -o pipefail
           
           # Build the Telegram.app target directly with Bazel
           # This respects our .bazelrc which has --cpu=ios_arm64
